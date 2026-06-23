@@ -2,701 +2,926 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🛡️ Anti-Scam Messenger</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Anti-Scam Messenger</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; }
-  .app { width: 100%; max-width: 480px; height: 95vh; background: #fff; border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3); position: relative; }
+  :root {
+    --primary: #3390ec;
+    --primary-dark: #2575c4;
+    --bg-main: #ffffff;
+    --bg-sidebar: #f4f4f5;
+    --bg-chat: #e5ddd5;
+    --text-primary: #000000;
+    --text-secondary: #707579;
+    --msg-in: #ffffff;
+    --msg-out: #eeffde;
+    --border: #dfe1e5;
+    --hover: #f0f2f5;
+    --danger: #e53935;
+    --success: #43a047;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { background: var(--bg-main); height: 100vh; overflow: hidden; }
   .hidden { display: none !important; }
 
-  .auth-screen { padding: 40px 30px; display: flex; flex-direction: column; justify-content: center; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-  .auth-screen h1 { font-size: 28px; margin-bottom: 10px; text-align: center; }
-  .auth-screen .subtitle { text-align: center; opacity: 0.9; margin-bottom: 30px; font-size: 14px; }
-  .auth-screen input { width: 100%; padding: 14px 18px; margin-bottom: 12px; border: none; border-radius: 12px; font-size: 16px; background: rgba(255,255,255,0.95); }
-  .auth-screen button { padding: 14px; border: none; border-radius: 12px; background: #ff6b6b; color: white; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px; transition: transform 0.2s; }
-  .auth-screen button:hover { transform: translateY(-2px); }
-  .auth-screen .switch-link { text-align: center; margin-top: 15px; font-size: 14px; cursor: pointer; text-decoration: underline; }
-  .logo { font-size: 60px; text-align: center; margin-bottom: 10px; }
+  /* AUTH */
+  .auth-container { position: fixed; inset: 0; background: var(--bg-main); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+  .auth-box { width: 100%; max-width: 360px; text-align: center; }
+  .auth-logo { font-size: 64px; margin-bottom: 16px; }
+  .auth-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+  .auth-subtitle { color: var(--text-secondary); margin-bottom: 32px; font-size: 14px; }
+  .auth-input { width: 100%; padding: 12px 16px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; outline: none; }
+  .auth-input:focus { border-color: var(--primary); }
+  .auth-button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .auth-button:hover { background: var(--primary-dark); }
+  .back-link { display: block; margin-top: 16px; color: var(--primary); cursor: pointer; font-size: 14px; text-decoration: underline; }
+  .status-message { margin-top: 12px; font-size: 13px; min-height: 20px; }
+  .status-message.error { color: var(--danger); }
+  .status-message.success { color: var(--success); }
 
-  .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-  .header h2 { font-size: 18px; }
-  .header .user-info { font-size: 12px; opacity: 0.85; }
-  .header button { background: rgba(255,255,255,0.2); border: none; color: white; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; margin-left: 5px; }
-
-  .chat-list { flex: 1; overflow-y: auto; background: #f5f7fb; }
-  .chat-item { padding: 15px 20px; background: white; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s; }
-  .chat-item:hover { background: #f0f4ff; }
-  .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; flex-shrink: 0; }
+  /* APP */
+  .app-container { display: flex; width: 100%; height: 100%; }
+  .sidebar { width: 320px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-header { padding: 12px 16px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .menu-button { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-secondary); padding: 8px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
+  .menu-button:hover { background: var(--hover); }
+  .search-input { flex: 1; padding: 8px 16px; border: none; background: #f0f2f5; border-radius: 20px; font-size: 14px; outline: none; }
+  .chat-list { flex: 1; overflow-y: auto; background: var(--bg-main); }
+  .chat-item { padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.15s; }
+  .chat-item:hover { background: var(--hover); }
+  .chat-item.active { background: #e3f2fd; }
+  .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; flex-shrink: 0; overflow: hidden; cursor: pointer; }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
   .chat-info { flex: 1; overflow: hidden; }
-  .chat-name { font-weight: 600; color: #333; }
-  .chat-preview { font-size: 13px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .empty-state { text-align: center; padding: 60px 20px; color: #888; }
-  .empty-state .icon { font-size: 60px; margin-bottom: 15px; }
+  .chat-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .chat-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-time { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+  .chat-preview { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .chat-screen { display: flex; flex-direction: column; height: 100%; }
-  .chat-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; display: flex; align-items: center; gap: 12px; }
-  .chat-header .back-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
-  .chat-header .contact-name { font-weight: 600; font-size: 16px; }
-  .chat-header .contact-status { font-size: 12px; opacity: 0.85; }
-  .messages { flex: 1; overflow-y: auto; padding: 15px; background: #e5ddd5; }
-  .message { max-width: 75%; padding: 8px 12px; border-radius: 12px; margin-bottom: 8px; word-wrap: break-word; font-size: 14px; }
-  .message.in { background: white; align-self: flex-start; border-bottom-left-radius: 4px; }
-  .message.out { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 4px; margin-left: auto; }
-  .message img { max-width: 100%; border-radius: 8px; cursor: pointer; display: block; margin-bottom: 4px; }
-  .message .time { font-size: 10px; color: #888; text-align: right; margin-top: 4px; }
-  .message .encrypted-tag { font-size: 9px; color: #4caf50; display: block; margin-top: 2px; }
-  .messages-container { display: flex; flex-direction: column; }
+  /* CHAT */
+  .chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-chat); position: relative; }
+  .chat-header { padding: 10px 16px; background: var(--bg-main); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); z-index: 10; cursor: pointer; }
+  .chat-header:hover { background: var(--hover); }
+  .back-button { display: none; background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-secondary); padding: 8px; }
+  .chat-header-info { flex: 1; }
+  .chat-header-name { font-weight: 600; font-size: 15px; color: var(--text-primary); }
+  .chat-header-status { font-size: 12px; color: var(--text-secondary); transition: color 0.2s; }
+  .chat-header-status.online { color: var(--primary); }
+  .chat-header-status.typing { color: var(--primary); font-style: italic; }
+  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 14px; background: rgba(0,0,0,0.03); }
+  .messages-container { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .message { max-width: 65%; padding: 8px 12px; border-radius: 12px; position: relative; word-wrap: break-word; font-size: 14px; line-height: 1.4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+  .message.in { background: var(--msg-in); align-self: flex-start; border-bottom-left-radius: 4px; }
+  .message.out { background: var(--msg-out); align-self: flex-end; border-bottom-right-radius: 4px; }
+  .message img { max-width: 100%; border-radius: 8px; margin-bottom: 4px; display: block; cursor: pointer; }
+  .message-time { font-size: 10px; color: var(--text-secondary); text-align: right; margin-top: 4px; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+  .encrypted-badge { color: var(--success); font-size: 9px; }
+  .input-area { padding: 10px 16px; background: var(--bg-main); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+  .attach-button { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); padding: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .attach-button:hover { background: var(--hover); color: var(--primary); }
+  .message-input { flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 20px; font-size: 14px; outline: none; }
+  .message-input:focus { border-color: var(--primary); }
+  .send-button { background: var(--primary); color: white; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+  .send-button:hover { background: var(--primary-dark); }
+  input[type="file"] { display: none; }
 
-  .input-area { padding: 10px; background: #f0f0f0; display: flex; gap: 8px; align-items: center; }
-  .input-area input[type="text"] { flex: 1; padding: 10px 14px; border: none; border-radius: 20px; font-size: 14px; outline: none; }
-  .input-area button { background: #667eea; color: white; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 18px; }
-  .input-area input[type="file"] { display: none; }
-  .file-label { background: #667eea; color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; }
+  /* PROFILE PANEL */
+  .profile-panel { position: absolute; left: 0; top: 0; bottom: 0; width: 320px; background: var(--bg-main); z-index: 500; box-shadow: 2px 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; transform: translateX(-100%); transition: transform 0.3s; }
+  .profile-panel.open { transform: translateX(0); }
+  .profile-header { padding: 20px; text-align: center; border-bottom: 1px solid var(--border); position: relative; }
+  .close-profile { position: absolute; right: 16px; top: 16px; background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); }
+  .profile-avatar-large { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; font-size: 36px; color: white; font-weight: bold; overflow: hidden; cursor: pointer; position: relative; }
+  .profile-avatar-large img { width: 100%; height: 100%; object-fit: cover; }
+  .profile-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .profile-phone { font-size: 13px; color: var(--text-secondary); }
+  .profile-body { padding: 16px; flex: 1; overflow-y: auto; }
+  .profile-section { margin-bottom: 24px; }
+  .profile-label { display: block; font-size: 12px; color: var(--primary); margin-bottom: 6px; font-weight: 600; }
+  .profile-input, .profile-textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; font-family: inherit; }
+  .profile-textarea { resize: vertical; min-height: 80px; }
+  .sessions-list { margin-top: 8px; }
+  .session-item { padding: 10px; background: var(--bg-sidebar); border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .session-info { flex: 1; }
+  .session-device { font-weight: 600; font-size: 13px; }
+  .session-time { font-size: 11px; color: var(--text-secondary); }
+  .session-delete { background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .save-button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; margin-top: 8px; }
+  .logout-button { margin: 16px; padding: 12px; background: #ffebee; color: var(--danger); border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; }
 
-  .modal { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
-  .modal-content { background: white; padding: 25px; border-radius: 15px; width: 90%; max-width: 360px; }
-  .modal-content h3 { margin-bottom: 15px; color: #333; }
-  .modal-content input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-  .modal-content button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
-  .modal-content .cancel-btn { background: #ccc; color: #333; margin-top: 8px; }
-  .status-msg { padding: 10px; text-align: center; font-size: 13px; color: #666; }
-  .status-msg.error { color: #e74c3c; }
-  .status-msg.success { color: #27ae60; }
+  /* МОДАЛКА ПРОФИЛЯ ПОЛЬЗОВАТЕЛЯ */
+  .user-profile-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 3000; display: flex; align-items: center; justify-content: center; }
+  .user-profile-content { background: var(--bg-main); border-radius: 16px; width: 90%; max-width: 360px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+  .user-profile-header { background: linear-gradient(135deg, #667eea, #764ba2); padding: 30px 20px; text-align: center; color: white; position: relative; }
+  .user-profile-close { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .user-profile-avatar { width: 100px; height: 100px; border-radius: 50%; background: rgba(255,255,255,0.3); margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: bold; overflow: hidden; border: 3px solid white; }
+  .user-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .user-profile-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .user-profile-phone { font-size: 14px; opacity: 0.9; }
+  .user-profile-status { margin-top: 8px; font-size: 13px; opacity: 0.85; }
+  .user-profile-status.online { color: #a8e6a3; font-weight: 600; }
+  .user-profile-body { padding: 20px; }
+  .user-profile-field { margin-bottom: 16px; }
+  .user-profile-field-label { font-size: 12px; color: var(--primary); font-weight: 600; margin-bottom: 6px; }
+  .user-profile-field-value { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
+  .user-profile-field-value.empty { color: var(--text-secondary); font-style: italic; }
 
-  .connection-status { position: absolute; top: 10px; right: 10px; padding: 4px 10px; border-radius: 12px; font-size: 11px; z-index: 50; }
-  .connection-status.online { background: #27ae60; color: white; }
-  .connection-status.offline { background: #e74c3c; color: white; }
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--bg-main); border-radius: 16px; width: 90%; max-width: 400px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+  .modal-title { margin-bottom: 16px; font-size: 18px; }
+  .modal-input { width: 100%; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; }
+  .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal-button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  .modal-button.primary { background: var(--primary); color: white; }
+  .modal-button.secondary { background: var(--hover); color: var(--text-primary); }
+
+  @media (max-width: 768px) {
+    .sidebar { width: 100%; position: absolute; inset: 0; z-index: 10; }
+    .chat-area { width: 100%; position: absolute; inset: 0; z-index: 20; transform: translateX(100%); transition: transform 0.3s; }
+    .chat-area.active { transform: translateX(0); }
+    .profile-panel { width: 100%; }
+    .message { max-width: 85%; }
+    .back-button { display: block; }
+  }
 </style>
 </head>
 <body>
 
-<div class="app">
-  <div id="connectionStatus" class="connection-status offline hidden">● offline</div>
-
-  <!-- Экран 1: Телефон -->
-  <div id="screen-phone" class="auth-screen">
-    <div class="logo">🛡️</div>
-    <h1>Anti-Scam Messenger</h1>
-    <p class="subtitle">Защищённый мессенджер со сквозным шифрованием</p>
-    <input type="tel" id="phoneInput" placeholder="Номер телефона (10 цифр, без +7)" maxlength="10">
-    <button onclick="requestOTP()">Получить код подтверждения</button>
-    <div id="phone-status" class="status-msg"></div>
-  </div>
-
-  <!-- Экран 2: OTP -->
-  <div id="screen-otp" class="auth-screen hidden">
-    <div class="logo">📱</div>
-    <h1>Подтверждение</h1>
-    <p class="subtitle">Введите 4-значный код из СМС</p>
-    <input type="text" id="otpInput" placeholder="Код из СМС" maxlength="4">
-    <button onclick="verifyOTP()">Подтвердить</button>
-    <div class="switch-link" onclick="backToPhone()">← Изменить номер</div>
-    <div id="otp-status" class="status-msg"></div>
-  </div>
-
-  <!-- Экран 3: Регистрация -->
-  <div id="screen-register" class="auth-screen hidden">
-    <div class="logo">✨</div>
-    <h1>Регистрация</h1>
-    <p class="subtitle">Придумайте имя и пароль</p>
-    <input type="text" id="regName" placeholder="Ваше имя">
-    <input type="password" id="regPassword" placeholder="Пароль (минимум 6 символов)">
-    <input type="password" id="regPassword2" placeholder="Повторите пароль">
-    <button onclick="register()">Создать аккаунт</button>
-    <div id="reg-status" class="status-msg"></div>
-  </div>
-
-  <!-- Экран 4: Список чатов -->
-  <div id="screen-chats" class="hidden" style="display:flex; flex-direction:column; height:100%;">
-    <div class="header">
-      <div>
-        <h2>🛡️ Anti-Scam</h2>
-        <div class="user-info" id="currentUserInfo">—</div>
-      </div>
-      <div>
-        <button onclick="openAddChatModal()">➕ Чат</button>
-        <button onclick="logout()">🚪</button>
-      </div>
+<!-- AUTH -->
+<div id="auth-screen" class="auth-container">
+  <div class="auth-box">
+    <div class="auth-logo">🛡️</div>
+    <h1 class="auth-title">Anti-Scam</h1>
+    <p class="auth-subtitle">Защищенный мессенджер</p>
+    <div id="step-phone">
+      <input type="tel" id="auth-phone" class="auth-input" placeholder="Номер телефона (10 цифр)" maxlength="10">
+      <button class="auth-button" onclick="sendOTP()">Получить код</button>
     </div>
-    <div class="chat-list" id="chatList">
-      <div class="empty-state">
-        <div class="icon">💬</div>
-        <p>У вас пока нет чатов</p>
-        <p style="font-size:13px; margin-top:8px;">Нажмите «➕ Чат», чтобы начать переписку</p>
+    <div id="step-otp" class="hidden">
+      <input type="text" id="auth-otp" class="auth-input" placeholder="Код из СМС (4 цифры)" maxlength="4">
+      <button class="auth-button" onclick="verifyOTP()">Подтвердить</button>
+      <span class="back-link" onclick="showAuthStep('step-phone')">← Изменить номер</span>
+    </div>
+    <div id="step-register" class="hidden">
+      <input type="text" id="reg-name" class="auth-input" placeholder="Ваше имя">
+      <input type="password" id="reg-password" class="auth-input" placeholder="Пароль (мин. 6 символов)">
+      <button class="auth-button" onclick="register()">Зарегистрироваться</button>
+    </div>
+    <div id="step-login" class="hidden">
+      <input type="password" id="login-password" class="auth-input" placeholder="Введите пароль">
+      <button class="auth-button" onclick="loginPassword()">Войти</button>
+      <span class="back-link" onclick="showAuthStep('step-phone')">← Другой номер</span>
+    </div>
+    <div id="auth-status" class="status-message"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app-container hidden" id="app">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <button class="menu-button" onclick="toggleProfile()">☰</button>
+      <input type="text" class="search-input" placeholder="Поиск" oninput="filterChats(this.value)">
+    </div>
+    <div class="chat-list" id="chat-list"></div>
+  </div>
+
+  <div class="chat-area" id="chat-area">
+    <div class="empty-state" id="empty-state">
+      <div style="text-align: center;">
+        <div style="font-size: 64px; margin-bottom: 16px;">💬</div>
+        <div style="font-size: 16px; margin-bottom: 8px;">Добро пожаловать в Anti-Scam!</div>
+        <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">Выберите чат или создайте новый</div>
+        <button class="auth-button" style="max-width: 200px;" onclick="openNewChatModal()">+ Новый чат</button>
       </div>
     </div>
-  </div>
 
-  <!-- Экран 5: Окно чата -->
-  <div id="screen-chat" class="chat-screen hidden">
-    <div class="chat-header">
-      <button class="back-btn" onclick="backToChats()">←</button>
-      <div class="avatar" id="chatAvatar">?</div>
-      <div>
-        <div class="contact-name" id="chatContactName">—</div>
-        <div class="contact-status" id="chatContactStatus">+7 ...</div>
+    <div id="active-chat" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
+      <div class="chat-header" onclick="openUserProfile()">
+        <button class="back-button" onclick="closeChat()">←</button>
+        <div class="avatar" id="chat-header-avatar">?</div>
+        <div class="chat-header-info">
+          <div class="chat-header-name" id="chat-header-name">—</div>
+          <div class="chat-header-status" id="chat-header-status">загрузка...</div>
+        </div>
+      </div>
+      <div class="messages-container" id="messages-container"></div>
+      <div class="input-area">
+        <label for="file-input" class="attach-button" title="Прикрепить файл"></label>
+        <input type="file" id="file-input" accept="image/*" onchange="sendImage(event)">
+        <input type="text" id="message-input" class="message-input" placeholder="Сообщение" onkeypress="if(event.key==='Enter')sendText()" oninput="onTyping()">
+        <button class="send-button" onclick="sendText()">➤</button>
       </div>
     </div>
-    <div class="messages" id="messagesContainer">
-      <div class="messages-container" id="messagesList"></div>
-    </div>
-    <div class="input-area">
-      <label for="fileInput" class="file-label" title="Отправить картинку">📎</label>
-      <input type="file" id="fileInput" accept="image/*" onchange="sendImage(event)">
-      <input type="text" id="messageInput" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')sendMessage()">
-      <button onclick="sendMessage()">➤</button>
-    </div>
   </div>
 
-  <!-- Модалка: Новый чат -->
-  <div id="modal-add-chat" class="modal hidden">
-    <div class="modal-content">
-      <h3>➕ Новый чат</h3>
-      <input type="tel" id="newChatPhone" placeholder="Номер телефона собеседника (10 цифр)" maxlength="10">
-      <button onclick="findUser()">Найти пользователя</button>
-      <button class="cancel-btn" onclick="closeModal('modal-add-chat')">Отмена</button>
-      <div id="find-status" class="status-msg"></div>
+  <!-- Мой профиль -->
+  <div class="profile-panel" id="profile-panel">
+    <div class="profile-header">
+      <button class="close-profile" onclick="toggleProfile()">✕</button>
+      <div class="profile-avatar-large" id="profile-avatar" onclick="document.getElementById('avatar-input').click()">
+        <span id="profile-avatar-text">?</span>
+        <img id="profile-avatar-img" class="hidden" alt="">
+      </div>
+      <input type="file" id="avatar-input" accept="image/*" onchange="uploadAvatar(event)">
+      <div class="profile-name" id="profile-name">—</div>
+      <div class="profile-phone" id="profile-phone">+7 —</div>
+    </div>
+    <div class="profile-body">
+      <div class="profile-section">
+        <label class="profile-label">Имя</label>
+        <input type="text" id="edit-name" class="profile-input">
+      </div>
+      <div class="profile-section">
+        <label class="profile-label">О себе</label>
+        <textarea id="edit-bio" class="profile-textarea" placeholder="Расскажите о себе..."></textarea>
+      </div>
+      <div class="profile-section">
+        <label class="profile-label">Устройства (сессии)</label>
+        <div class="sessions-list" id="sessions-list"></div>
+      </div>
+      <button class="save-button" onclick="saveProfile()">Сохранить</button>
+      <button class="logout-button" onclick="clearCacheAndLogout()" style="background:#fff3e0; color:#f57c00; margin-top:8px;">🗑 Очистить кэш и выйти</button>
+    </div>
+    <button class="logout-button" onclick="logout()">Выйти из аккаунта</button>
+  </div>
+</div>
+
+<!-- Модалка: Новый чат -->
+<div id="modal-new-chat" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 class="modal-title">Новый чат</h3>
+    <input type="tel" id="new-chat-phone" class="modal-input" placeholder="Номер телефона (10 цифр)" maxlength="10">
+    <div class="modal-buttons">
+      <button class="modal-button secondary" onclick="closeModal('modal-new-chat')">Отмена</button>
+      <button class="modal-button primary" onclick="createChat()">Создать</button>
+    </div>
+    <div id="new-chat-status" class="status-message"></div>
+  </div>
+</div>
+
+<!-- Модалка: Профиль пользователя -->
+<div id="modal-user-profile" class="user-profile-modal hidden">
+  <div class="user-profile-content">
+    <div class="user-profile-header">
+      <button class="user-profile-close" onclick="closeUserProfile()">✕</button>
+      <div class="user-profile-avatar" id="up-avatar">?</div>
+      <div class="user-profile-name" id="up-name">—</div>
+      <div class="user-profile-phone" id="up-phone">+7 —</div>
+      <div class="user-profile-status" id="up-status">загрузка...</div>
+    </div>
+    <div class="user-profile-body">
+      <div class="user-profile-field">
+        <div class="user-profile-field-label">О себе</div>
+        <div class="user-profile-field-value empty" id="up-bio">Пользователь не указал информацию о себе</div>
+      </div>
+      <div class="user-profile-field">
+        <div class="user-profile-field-label">Зарегистрирован</div>
+        <div class="user-profile-field-value" id="up-registered">—</div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
-// ==================== КОНФИГУРАЦИЯ ====================
-const SERVER_URL = 'https://antiscam-server.cloudpub.ru';
+const API_URL = 'https://antiscam-server.cloudpub.ru';
 const WS_URL = 'wss://antiscam-server.cloudpub.ru';
 
-// ==================== СОСТОЯНИЕ ====================
+// 🔥 ВАЖНО: localStorage хранит ТОЛЬКО данные для входа
+// Чаты, ключи и сообщения НЕ сохраняются — они всегда загружаются с сервера
+
 let state = {
   phone: null,
   token: null,
-  userName: null,
+  name: null,
+  deviceId: null,
+  chats: {},      // Только в памяти! Очищается при перезагрузке
+  keys: {},       // Только в памяти! Загружается с сервера при входе
   currentChat: null,
-  chats: {},         // {phone: {name, messages: [], chatKey: null}}
-  ws: null
+  ws: null,
+  typingTimeout: null,
+  presenceData: {}
 };
 
-// ==================== УТИЛИТЫ ====================
-function $(id) { return document.getElementById(id); }
-function showScreen(id) {
-  ['screen-phone', 'screen-otp', 'screen-register', 'screen-chats', 'screen-chat'].forEach(s => $(s).classList.add('hidden'));
-  $(id).classList.remove('hidden');
-}
-function setStatus(id, msg, type='') {
-  const el = $(id);
-  el.textContent = msg;
-  el.className = 'status-msg ' + type;
-}
+const $ = id => document.getElementById(id);
+const setStatus = (msg, type = '') => { const el = $('auth-status'); el.textContent = msg; el.className = 'status-message ' + type; };
 
-function saveSession() {
-  localStorage.setItem('antiscam_session', JSON.stringify({
-    phone: state.phone, token: state.token, userName: state.userName, chats: state.chats
+//  СОХРАНЯЕМ ТОЛЬКО АВТОРИЗАЦИЮ
+function saveAuth() {
+  localStorage.setItem('as_auth', JSON.stringify({
+    phone: state.phone,
+    token: state.token,
+    name: state.name,
+    deviceId: state.deviceId
   }));
 }
-function loadSession() {
-  const data = localStorage.getItem('antiscam_session');
+
+// 🔥 ЗАГРУЖАЕМ ТОЛЬКО АВТОРИЗАЦИЮ
+function loadAuth() {
+  const data = localStorage.getItem('as_auth');
   if (data) {
     try {
       const s = JSON.parse(data);
-      state.phone = s.phone; state.token = s.token; state.userName = s.userName; state.chats = s.chats || {};
+      state.phone = s.phone;
+      state.token = s.token;
+      state.name = s.name;
+      state.deviceId = s.deviceId;
       return !!s.token;
     } catch(e) {}
   }
   return false;
 }
 
-// ==================== ШИФРОВАНИЕ AES-256 ====================
-// Ключ чата хранится в localStorage для каждого контакта
-// При добавлении контакта генерируется случайный ключ и отправляется собеседнику через WS
-
-function getChatKey(contactPhone) {
-  if (!state.chats[contactPhone]) return null;
-  return state.chats[contactPhone].chatKey;
+// 🔥 АВТООЧИСТКА СТАРОГО МУСОРА ПРИ ЗАГРУЗКЕ
+function cleanOldCache() {
+  // Удаляем старые ключи, если они есть (от прошлых версий)
+  const oldKeys = localStorage.getItem('as_session');
+  if (oldKeys) {
+    try {
+      const parsed = JSON.parse(oldKeys);
+      // Если там есть chats или keys — это старый формат, удаляем
+      if (parsed.chats || parsed.keys) {
+        console.log('🗑 Найден старый кэш, очищаем...');
+        localStorage.removeItem('as_session');
+      }
+    } catch(e) {
+      localStorage.removeItem('as_session');
+    }
+  }
 }
 
-function setChatKey(contactPhone, key) {
-  if (!state.chats[contactPhone]) {
-    state.chats[contactPhone] = { name: '+7'+contactPhone, messages: [], chatKey: null };
-  }
-  state.chats[contactPhone].chatKey = key;
-  saveSession();
-}
+// Шифрование
+function getKey(phone) { return state.keys[phone] || null; }
+function setKey(phone, key) { state.keys[phone] = key; updateChatStatus(); }
 
-function encrypt(text, contactPhone) {
-  const key = getChatKey(contactPhone);
-  if (!key) {
-    alert('⚠️ Ключ шифрования не установлен для этого контакта!');
-    throw new Error('Нет ключа');
-  }
+function encrypt(text, phone) {
+  const key = getKey(phone);
+  if (!key) throw new Error('Нет ключа шифрования');
   return CryptoJS.AES.encrypt(text, key).toString();
 }
 
-function decrypt(cipherText, contactPhone) {
-  const key = getChatKey(contactPhone);
+function decrypt(cipher, phone) {
+  const key = getKey(phone);
   if (!key) return '[нет ключа]';
-  try {
-    const bytes = CryptoJS.AES.decrypt(cipherText, key);
-    return bytes.toString(CryptoJS.enc.Utf8);
-  } catch(e) { return '[ошибка расшифровки]'; }
+  try { return CryptoJS.AES.decrypt(cipher, key).toString(CryptoJS.enc.Utf8); } catch(e) { return '[ошибка]'; }
 }
 
-// ==================== АВТОРИЗАЦИЯ ====================
-async function requestOTP() {
-  const phone = $('phoneInput').value.trim();
-  if (!/^\d{10}$/.test(phone)) {
-    setStatus('phone-status', 'Введите ровно 10 цифр (без +7)', 'error');
-    return;
-  }
-  setStatus('phone-status', 'Отправка кода...');
+// ===== АВТОРИЗАЦИЯ =====
+function showAuthStep(stepId) {
+  ['step-phone','step-otp','step-register','step-login'].forEach(id => $(id).classList.add('hidden'));
+  $(stepId).classList.remove('hidden');
+  setStatus('');
+}
+
+async function sendOTP() {
+  const phone = $('auth-phone').value.trim();
+  if (!/^\d{10}$/.test(phone)) return setStatus('Введите 10 цифр', 'error');
+  setStatus('Отправка кода...');
   try {
-    const res = await fetch(`${SERVER_URL}/api/auth/request-otp`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phone})
+    const res = await fetch(`${API_URL}/api/auth/request-otp`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({phone})
     });
     const data = await res.json();
-    if (res.ok) {
-      state.phone = phone;
-      setStatus('phone-status', '✅ Код отправлен! (Смотри консоль сервера)', 'success');
-      setTimeout(() => showScreen('screen-otp'), 800);
-    } else {
-      setStatus('phone-status', data.error || 'Ошибка', 'error');
-    }
-  } catch(e) {
-    setStatus('phone-status', 'Нет связи с сервером: ' + e.message, 'error');
-  }
+    if (res.ok) { state.phone = phone; showAuthStep('step-otp'); setStatus('Код отправлен (смотрите консоль сервера)', 'success'); }
+    else setStatus(data.error, 'error');
+  } catch(e) { setStatus('Ошибка сети', 'error'); }
 }
 
-function backToPhone() { showScreen('screen-phone'); }
-
 async function verifyOTP() {
-  const code = $('otpInput').value.trim();
-  if (!/^\d{4}$/.test(code)) {
-    setStatus('otp-status', 'Введите 4 цифры', 'error');
-    return;
-  }
-  setStatus('otp-status', 'Проверка...');
+  const code = $('auth-otp').value.trim();
+  if (!/^\d{4}$/.test(code)) return setStatus('Введите 4 цифры', 'error');
+  setStatus('Проверка...');
+  state.deviceId = 'web_' + Date.now();
   try {
-    const res = await fetch(`${SERVER_URL}/api/auth/verify-otp`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phone: state.phone, code})
+    const res = await fetch(`${API_URL}/api/auth/verify-otp`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone: state.phone, code, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
     });
     const data = await res.json();
     if (data.status === 'login_success') {
       state.token = data.token;
-      state.userName = data.user.name;
-      setStatus('otp-status', '✅ Вход выполнен!', 'success');
-      saveSession();
-      setTimeout(enterMessenger, 600);
-    } else if (data.status === 'need_registration') {
-      setStatus('otp-status', 'Новый пользователь — нужна регистрация', 'success');
-      setTimeout(() => showScreen('screen-register'), 600);
-    } else {
-      setStatus('otp-status', data.error || 'Ошибка', 'error');
-    }
-  } catch(e) {
-    setStatus('otp-status', 'Ошибка сети: ' + e.message, 'error');
-  }
+      state.name = data.user.name;
+      saveAuth(); // Сохраняем только авторизацию
+      await initApp();
+    } else if (data.status === 'need_registration') showAuthStep('step-register');
+    else setStatus(data.error, 'error');
+  } catch(e) { setStatus('Ошибка сети', 'error'); }
 }
 
 async function register() {
-  const name = $('regName').value.trim();
-  const p1 = $('regPassword').value;
-  const p2 = $('regPassword2').value;
-  if (!name || p1.length < 6) {
-    setStatus('reg-status', 'Имя и пароль (мин. 6 символов) обязательны', 'error');
-    return;
-  }
-  if (p1 !== p2) {
-    setStatus('reg-status', 'Пароли не совпадают', 'error');
-    return;
-  }
-  setStatus('reg-status', 'Создание аккаунта...');
+  const name = $('reg-name').value.trim();
+  const password = $('reg-password').value;
+  if (!name || password.length < 6) return setStatus('Заполните все поля (пароль мин. 6)', 'error');
+  setStatus('Создание аккаунта...');
   try {
-    const res = await fetch(`${SERVER_URL}/api/auth/register`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phone: state.phone, name, password: p1})
+    const res = await fetch(`${API_URL}/api/auth/register`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone: state.phone, name, password, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
     });
     const data = await res.json();
     if (res.ok) {
       state.token = data.token;
-      state.userName = name;
-      setStatus('reg-status', '✅ Аккаунт создан!', 'success');
-      saveSession();
-      setTimeout(enterMessenger, 600);
-    } else {
-      setStatus('reg-status', data.error || 'Ошибка', 'error');
-    }
-  } catch(e) {
-    setStatus('reg-status', 'Ошибка сети: ' + e.message, 'error');
-  }
+      state.name = name;
+      saveAuth();
+      await initApp();
+    } else setStatus(data.error, 'error');
+  } catch(e) { setStatus('Ошибка сети', 'error'); }
+}
+
+async function loginPassword() {
+  const password = $('login-password').value;
+  setStatus('Вход...');
+  try {
+    const res = await fetch(`${API_URL}/api/auth/login-password`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone: state.phone, password, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      state.token = data.token;
+      state.name = data.user.name;
+      saveAuth();
+      await initApp();
+    } else setStatus(data.error, 'error');
+  } catch(e) { setStatus('Ошибка сети', 'error'); }
 }
 
 function logout() {
-  if (!confirm('Выйти из аккаунта?')) return;
-  localStorage.removeItem('antiscam_session');
-  if (state.ws) state.ws.close();
+  localStorage.removeItem('as_auth');
   location.reload();
 }
 
-// ==================== МЕССЕНДЖЕР ====================
-function enterMessenger() {
-  showScreen('screen-chats');
-  $('currentUserInfo').textContent = `👤 ${state.userName} · +7${state.phone}`;
+function clearCacheAndLogout() {
+  if (confirm('Очистить весь кэш и выйти? Все локальные данные будут удалены.')) {
+    localStorage.clear();
+    location.reload();
+  }
+}
+
+// ===== ИНИЦИАЛИЗАЦИЯ =====
+async function initApp() {
+  $('auth-screen').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  
+  //  Загружаем ключи С СЕРВЕРА (не из localStorage!)
+  await loadKeysFromServer();
+  await loadSessions();
   renderChatList();
+  updateProfileUI();
   connectWebSocket();
 }
 
-function renderChatList() {
-  const list = $('chatList');
-  const phones = Object.keys(state.chats);
-  if (phones.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">💬</div><p>У вас пока нет чатов</p><p style="font-size:13px; margin-top:8px;">Нажмите «➕ Чат», чтобы начать переписку</p></div>`;
-    return;
-  }
-  list.innerHTML = phones.map(phone => {
-    const chat = state.chats[phone];
-    const lastMsg = chat.messages[chat.messages.length - 1];
-    let preview = 'Нет сообщений';
-    if (lastMsg) {
-      preview = lastMsg.decrypted || (lastMsg.mediaType === 'image' ? '📷 Изображение' : '...');
-      if (preview.length > 40) preview = preview.substring(0, 40) + '...';
+async function loadKeysFromServer() {
+  try {
+    const res = await fetch(`${API_URL}/api/keys/all`, { headers: {'Authorization':'Bearer '+state.token} });
+    if (res.ok) {
+      const keys = await res.json();
+      state.keys = {}; // Очищаем старые
+      keys.forEach(k => state.keys[k.contact_phone] = k.chat_key);
+      console.log(`[+] Загружено ${keys.length} ключей с сервера`);
     }
+  } catch(e) { console.error('Ошибка загрузки ключей:', e); }
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch(`${API_URL}/api/auth/sessions`, { headers: {'Authorization':'Bearer '+state.token} });
+    if (res.ok) renderSessions(await res.json());
+  } catch(e) {}
+}
+
+function renderSessions(sessions) {
+  const list = $('sessions-list');
+  if (sessions.length === 0) { list.innerHTML = '<div style="color: var(--text-secondary); font-size: 13px;">Нет активных сессий</div>'; return; }
+  list.innerHTML = sessions.map(s => `
+    <div class="session-item">
+      <div class="session-info">
+        <div class="session-device">${s.device_name || s.device_id}</div>
+        <div class="session-time">Активность: ${new Date(s.last_active).toLocaleString('ru-RU')}</div>
+      </div>
+      ${s.device_id !== state.deviceId ? `<button class="session-delete" onclick="deleteSession('${s.device_id}')">✕</button>` : '<span style="font-size: 12px; color: var(--success);">Это вы</span>'}
+    </div>
+  `).join('');
+}
+
+async function deleteSession(deviceId) {
+  if (!confirm('Завершить эту сессию?')) return;
+  try {
+    const res = await fetch(`${API_URL}/api/auth/sessions/${deviceId}`, { method: 'DELETE', headers: {'Authorization':'Bearer '+state.token} });
+    if (res.ok) await loadSessions();
+  } catch(e) { alert('Ошибка'); }
+}
+
+// ===== ЧАТЫ =====
+function renderChatList() {
+  const list = $('chat-list');
+  const chats = Object.entries(state.chats).sort((a,b) => (b[1].lastMsg?.ts || 0) - (a[1].lastMsg?.ts || 0));
+  if (chats.length === 0) { list.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-secondary);">Нет чатов. Добавьте новый!</div>'; return; }
+  list.innerHTML = chats.map(([phone, chat]) => {
+    const isActive = state.currentChat === phone ? 'active' : '';
     const initial = (chat.name || '?')[0].toUpperCase();
-    return `<div class="chat-item" onclick="openChat('${phone}')">
+    const preview = chat.lastMsg ? (chat.lastMsg.type === 'image' ? '📷 Фото' : chat.lastMsg.text) : 'Нет сообщений';
+    const time = chat.lastMsg ? new Date(chat.lastMsg.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}) : '';
+    return `<div class="chat-item ${isActive}" onclick="openChat('${phone}')">
       <div class="avatar">${initial}</div>
       <div class="chat-info">
-        <div class="chat-name">${chat.name || '+7'+phone}</div>
+        <div class="chat-top"><span class="chat-name">${chat.name}</span><span class="chat-time">${time}</span></div>
         <div class="chat-preview">${preview}</div>
       </div>
     </div>`;
   }).join('');
 }
 
-async function openChat(phone) {
-  if (!state.chats[phone]) {
-    state.chats[phone] = {name: '+7'+phone, messages: [], chatKey: null};
-  }
-  state.currentChat = {phone, name: state.chats[phone].name};
-  showScreen('screen-chat');
-  $('chatContactName').textContent = state.chats[phone].name;
-  $('chatContactStatus').textContent = '+7' + phone;
-  $('chatAvatar').textContent = (state.chats[phone].name || '?')[0].toUpperCase();
-
-  await loadHistory(phone);
-  renderMessages();
-  setTimeout(decryptAllImages, 100);
+function filterChats(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.chat-item').forEach(el => {
+    el.style.display = el.querySelector('.chat-name').textContent.toLowerCase().includes(q) ? 'flex' : 'none';
+  });
 }
 
-async function loadHistory(phone) {
+async function openChat(phone) {
+  state.currentChat = phone;
+  const chat = state.chats[phone];
+  $('empty-state').classList.add('hidden');
+  $('active-chat').classList.remove('hidden');
+  $('chat-area').classList.add('active');
+  $('chat-header-name').textContent = chat.name;
+  $('chat-header-avatar').textContent = chat.name[0].toUpperCase();
+  updateChatStatus();
+  
+  // 🔥 Всегда загружаем сообщения С СЕРВЕРА
+  chat.messages = [];
   try {
-    const res = await fetch(`${SERVER_URL}/api/messages/history/${phone}`, {
-      headers: {'Authorization': 'Bearer ' + state.token}
-    });
+    const res = await fetch(`${API_URL}/api/messages/history/${phone}`, { headers: {'Authorization':'Bearer '+state.token} });
     if (res.ok) {
-      const rows = await res.json();
-      state.chats[phone].messages = rows.map(r => ({
-        id: r.id,
-        senderPhone: r.sender_phone,
-        encryptedText: r.encrypted_text,
-        decrypted: r.media_type === 'text' ? decrypt(r.encrypted_text, phone) : null,
-        mediaUrl: r.media_url,
-        mediaType: r.media_type,
-        timestamp: r.timestamp
+      const msgs = await res.json();
+      chat.messages = msgs.map(m => ({
+        id: m.id, from: m.sender_phone,
+        text: m.media_type === 'text' ? decrypt(m.encrypted_text, phone) : null,
+        type: m.media_type, mediaUrl: m.media_url, ts: m.timestamp
       }));
     }
   } catch(e) { console.error('Ошибка загрузки истории:', e); }
+  
+  renderMessages();
+  renderChatList();
 }
 
+function updateChatStatus() {
+  if (!state.currentChat) return;
+  const phone = state.currentChat;
+  const hasKey = !!getKey(phone);
+  const presence = state.presenceData[phone];
+  
+  let statusText = '';
+  let statusClass = '';
+  
+  if (presence && presence.isOnline) {
+    statusText = 'В сети';
+    statusClass = 'online';
+  } else if (presence && presence.lastSeen) {
+    statusText = 'Был(а) ' + formatLastSeen(presence.lastSeen);
+  } else {
+    statusText = 'Не в сети';
+  }
+  
+  if (!hasKey) {
+    statusText = '⚠️ Нет ключа шифрования';
+    statusClass = '';
+  }
+  
+  $('chat-header-status').textContent = statusText;
+  $('chat-header-status').className = 'chat-header-status ' + statusClass;
+}
+
+function formatLastSeen(ts) {
+  const diff = Date.now() - ts;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'только что';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  const days = Math.floor(hours / 24);
+  return `${days} дн назад`;
+}
+
+function closeChat() {
+  state.currentChat = null;
+  $('active-chat').classList.add('hidden');
+  $('empty-state').classList.remove('hidden');
+  $('chat-area').classList.remove('active');
+  renderChatList();
+}
+
+// ===== СТАТУСЫ =====
+function onTyping() {
+  if (!state.currentChat) return;
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: state.currentChat, isTyping: true }));
+  }
+  clearTimeout(state.typingTimeout);
+  state.typingTimeout = setTimeout(() => {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: state.currentChat, isTyping: false }));
+    }
+  }, 2000);
+}
+
+// ===== СООБЩЕНИЯ =====
 function renderMessages() {
-  const container = $('messagesList');
-  const msgs = state.chats[state.currentChat.phone].messages;
+  const container = $('messages-container');
+  const msgs = state.chats[state.currentChat]?.messages || [];
   container.innerHTML = msgs.map(m => {
-    const isOut = m.senderPhone === state.phone;
-    const time = new Date(m.timestamp).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+    const isOut = m.from === state.phone;
+    const time = new Date(m.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
     let content = '';
-    if (m.mediaType === 'image' && m.mediaUrl) {
-      content = `<img data-src="${m.mediaUrl}" data-phone="${state.currentChat.phone}" src="" alt="Загрузка..." onload="this.style.display='block'" onerror="this.alt='[ошибка загрузки]'">`;
-    }
-    if (m.decrypted) {
-      content += `<div>${escapeHtml(m.decrypted)}</div>`;
-    }
-    return `<div class="message ${isOut ? 'out' : 'in'}">
-      ${content}
-      <div class="time">${time}</div>
-      <span class="encrypted-tag">🔒 E2EE</span>
-    </div>`;
+    if (m.type === 'image' && m.mediaUrl) content = `<img data-url="${m.mediaUrl}" class="enc-img" alt="Загрузка...">`;
+    if (m.text) content += `<div>${escapeHtml(m.text)}</div>`;
+    return `<div class="message ${isOut ? 'out' : 'in'}">${content}<div class="message-time">${time} <span class="encrypted-badge"></span></div></div>`;
   }).join('');
-  const messagesDiv = $('messagesContainer');
-  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  container.scrollTop = container.scrollHeight;
+  setTimeout(loadAndDecryptImages, 50);
 }
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-async function decryptAllImages() {
-  const imgs = document.querySelectorAll('#messagesList img[data-src]');
+async function loadAndDecryptImages() {
+  const imgs = document.querySelectorAll('.enc-img');
   for (const img of imgs) {
-    if (img.src && img.src.startsWith('blob:')) continue;
+    if (img.dataset.loaded) continue;
+    img.dataset.loaded = 'true';
     try {
-      const res = await fetch(`${SERVER_URL}${img.dataset.src}`, {
-        headers: {'Authorization': 'Bearer ' + state.token}
-      });
-      if (!res.ok) { img.alt = '[ошибка]'; continue; }
-      const cipherText = await res.text();
-      const plainText = decrypt(cipherText, img.dataset.phone);
-      if (plainText && plainText.startsWith('data:image')) {
-        img.src = plainText;
-      } else {
-        img.alt = '[не удалось расшифровать]';
+      const res = await fetch(`${API_URL}${img.dataset.url}`, { headers: {'Authorization':'Bearer '+state.token} });
+      if (res.ok) {
+        const cipher = await res.text();
+        const plain = decrypt(cipher, state.currentChat);
+        if (plain && plain.startsWith('data:image')) img.src = plain;
+        else img.alt = '[ошибка расшифровки]';
       }
     } catch(e) { img.alt = '[ошибка]'; }
   }
 }
 
-// ==================== ОТПРАВКА СООБЩЕНИЙ ====================
-function sendMessage() {
-  const input = $('messageInput');
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function sendText() {
+  const input = $('message-input');
   const text = input.value.trim();
   if (!text || !state.currentChat) return;
-  const phone = state.currentChat.phone;
-
-  if (!getChatKey(phone)) {
-    alert('⚠️ Ключ шифрования ещё не получен от собеседника!\nПодождите или попросите его написать первым.');
-    return;
-  }
-
-  const encrypted = encrypt(text, phone);
-  const payload = {
-    type: 'message',
-    receiverPhone: phone,
-    encryptedText: encrypted,
-    mediaType: 'text'
-  };
+  const phone = state.currentChat;
+  if (!getKey(phone)) return alert('Собеседник ещё не получил ключ!');
+  
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-    state.ws.send(JSON.stringify(payload));
-  } else {
-    alert('Нет соединения с сервером!');
-    return;
+    state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: phone, isTyping: false }));
   }
-  state.chats[phone].messages.push({
-    id: 'tmp_' + Date.now(),
-    senderPhone: state.phone,
-    encryptedText: encrypted,
-    decrypted: text,
-    mediaType: 'text',
-    timestamp: Date.now()
-  });
-  input.value = '';
-  renderMessages();
-  saveSession();
+  
+  try {
+    const enc = encrypt(text, phone);
+    state.ws.send(JSON.stringify({ type: 'message', receiverPhone: phone, encryptedText: enc, mediaType: 'text' }));
+    const msg = { id: 'tmp'+Date.now(), from: state.phone, text, type: 'text', ts: Date.now() };
+    state.chats[phone].messages.push(msg);
+    state.chats[phone].lastMsg = { text, type: 'text', ts: Date.now() };
+    input.value = '';
+    renderMessages();
+    renderChatList();
+  } catch(e) { alert(e.message); }
 }
 
 async function sendImage(event) {
   const file = event.target.files[0];
   if (!file || !state.currentChat) return;
-  if (file.size > 10 * 1024 * 1024) { alert('Файл слишком большой (макс. 10 МБ)'); return; }
-
-  const phone = state.currentChat.phone;
-  if (!getChatKey(phone)) {
-    alert('⚠️ Ключ шифрования ещё не получен!');
-    return;
+  const phone = state.currentChat;
+  if (!getKey(phone)) return alert('Нет ключа!');
+  
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'uploading_photo', receiverPhone: phone, isUploading: true }));
   }
-
+  
   const reader = new FileReader();
   reader.onload = async () => {
     const base64 = reader.result;
-    const encrypted = encrypt(base64, phone);
-
-    const blob = new Blob([encrypted], {type: 'text/plain'});
-    const formData = new FormData();
-    formData.append('media', blob, 'encrypted.bin');
-
+    const enc = encrypt(base64, phone);
+    const blob = new Blob([enc], {type:'text/plain'});
+    const fd = new FormData();
+    fd.append('media', blob, 'enc.bin');
+    
     try {
-      const res = await fetch(`${SERVER_URL}/api/media/upload`, {
-        method: 'POST',
-        headers: {'Authorization': 'Bearer ' + state.token},
-        body: formData
+      const res = await fetch(`${API_URL}/api/media/upload`, {
+        method: 'POST', headers: {'Authorization':'Bearer '+state.token}, body: fd
       });
       const data = await res.json();
-      if (!res.ok) { alert('Ошибка загрузки: ' + (data.error || '')); return; }
-
-      const payload = {
-        type: 'message',
-        receiverPhone: phone,
-        encryptedText: '[image]',
-        mediaUrl: data.mediaUrl,
-        mediaType: 'image'
-      };
-      state.ws.send(JSON.stringify(payload));
-
-      state.chats[phone].messages.push({
-        id: 'tmp_' + Date.now(),
-        senderPhone: state.phone,
-        encryptedText: '[image]',
-        mediaUrl: data.mediaUrl,
-        mediaType: 'image',
-        timestamp: Date.now()
-      });
-      renderMessages();
-      saveSession();
-      setTimeout(decryptAllImages, 300);
-    } catch(e) { alert('Ошибка: ' + e.message); }
+      if (res.ok) {
+        state.ws.send(JSON.stringify({ type: 'message', receiverPhone: phone, encryptedText: '[img]', mediaUrl: data.mediaUrl, mediaType: 'image' }));
+        const msg = { id: 'tmp'+Date.now(), from: state.phone, text: null, type: 'image', mediaUrl: data.mediaUrl, ts: Date.now() };
+        state.chats[phone].messages.push(msg);
+        state.chats[phone].lastMsg = { text: '📷 Фото', type: 'image', ts: Date.now() };
+        renderMessages();
+        renderChatList();
+      }
+    } catch(e) { alert('Ошибка загрузки'); }
+    finally {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'uploading_photo', receiverPhone: phone, isUploading: false }));
+      }
+    }
   };
   reader.readAsDataURL(file);
   event.target.value = '';
 }
 
-function backToChats() {
-  state.currentChat = null;
-  showScreen('screen-chats');
-  renderChatList();
-}
-
-// ==================== МОДАЛЬНЫЕ ОКНА ====================
-function openAddChatModal() {
-  $('modal-add-chat').classList.remove('hidden');
-  $('newChatPhone').value = '';
-  $('find-status').textContent = '';
-}
+// ===== НОВЫЙ ЧАТ =====
+function openNewChatModal() { $('modal-new-chat').classList.remove('hidden'); $('new-chat-status').textContent=''; }
 function closeModal(id) { $(id).classList.add('hidden'); }
 
-async function findUser() {
-  const phone = $('newChatPhone').value.trim();
-  if (!/^\d{10}$/.test(phone)) {
-    setStatus('find-status', 'Введите 10 цифр', 'error');
-    return;
-  }
-  if (phone === state.phone) {
-    setStatus('find-status', 'Нельзя добавить себя', 'error');
-    return;
-  }
-  setStatus('find-status', 'Поиск...');
+async function createChat() {
+  const phone = $('new-chat-phone').value.trim();
+  if (!/^\d{10}$/.test(phone)) return setStatusModal('Введите 10 цифр', 'error');
+  if (phone === state.phone) return setStatusModal('Нельзя добавить себя', 'error');
+  setStatusModal('Поиск...');
   try {
-    const res = await fetch(`${SERVER_URL}/api/users/find/${phone}`, {
-      headers: {'Authorization': 'Bearer ' + state.token}
-    });
+    const res = await fetch(`${API_URL}/api/users/find/${phone}`, { headers: {'Authorization':'Bearer '+state.token} });
+    const data = await res.json();
     if (res.ok) {
-      const user = await res.json();
-      
-      // Создаём чат и генерируем ключ шифрования
-      if (!state.chats[phone]) {
-        state.chats[phone] = {name: user.name, messages: [], chatKey: null};
-      } else {
-        state.chats[phone].name = user.name;
-      }
-      saveSession();
-      closeModal('modal-add-chat');
-      
-      // 🔑 Генерируем случайный ключ и отправляем собеседнику
-      const newKey = CryptoJS.lib.WordArray.random(32).toString();
-      setChatKey(phone, newKey);
-      
-      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({
-          type: 'key_exchange',
-          receiverPhone: phone,
-          chatKey: newKey
-        }));
-        alert(`✅ Чат создан!\nКлюч шифрования отправлен собеседнику.\n\nЕсли он сейчас онлайн — он получит ключ автоматически.`);
-      } else {
-        alert('⚠️ Чат создан, но нет соединения с сервером.\nКлюч будет отправлен позже.');
-      }
-      
+      const key = CryptoJS.lib.WordArray.random(32).toString();
+      await fetch(`${API_URL}/api/keys/save`, {
+        method: 'POST', headers: {'Content-Type':'application/json', 'Authorization':'Bearer '+state.token},
+        body: JSON.stringify({ contactPhone: phone, chatKey: key })
+      });
+      setKey(phone, key);
+      state.chats[phone] = { name: data.name, messages: [], lastMsg: null };
+      closeModal('modal-new-chat');
+      renderChatList();
       openChat(phone);
-    } else {
+    } else setStatusModal(data.error, 'error');
+  } catch(e) { setStatusModal('Ошибка сети', 'error'); }
+}
+function setStatusModal(msg, type) { const el=$('new-chat-status'); el.textContent=msg; el.className='status-message '+type; }
+
+// ===== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ =====
+async function openUserProfile() {
+  if (!state.currentChat) return;
+  const phone = state.currentChat;
+  const modal = $('modal-user-profile');
+  modal.classList.remove('hidden');
+  
+  $('up-name').textContent = state.chats[phone]?.name || '—';
+  $('up-phone').textContent = '+7' + phone;
+  $('up-avatar').textContent = (state.chats[phone]?.name || '?')[0].toUpperCase();
+  $('up-bio').textContent = 'Загрузка...';
+  $('up-bio').className = 'user-profile-field-value';
+  $('up-registered').textContent = '—';
+  $('up-status').textContent = 'загрузка...';
+  $('up-status').className = 'user-profile-status';
+  
+  try {
+    const res = await fetch(`${API_URL}/api/users/${phone}/profile`, { headers: {'Authorization':'Bearer '+state.token} });
+    if (res.ok) {
       const data = await res.json();
-      setStatus('find-status', data.error || 'Не найден', 'error');
+      $('up-name').textContent = data.name;
+      $('up-avatar').innerHTML = data.avatar_url ? `<img src="${API_URL}${data.avatar_url}" onerror="this.parentElement.textContent='${data.name[0].toUpperCase()}'">` : data.name[0].toUpperCase();
+      
+      if (data.bio) {
+        $('up-bio').textContent = data.bio;
+        $('up-bio').className = 'user-profile-field-value';
+      } else {
+        $('up-bio').textContent = 'Пользователь не указал информацию о себе';
+        $('up-bio').className = 'user-profile-field-value empty';
+      }
+      
+      if (data.registered_at) {
+        $('up-registered').textContent = new Date(data.registered_at).toLocaleDateString('ru-RU', {year:'numeric', month:'long', day:'numeric'});
+      }
+      
+      if (data.isOnline) {
+        $('up-status').textContent = '● В сети';
+        $('up-status').className = 'user-profile-status online';
+      } else if (data.lastSeen) {
+        $('up-status').textContent = 'Был(а) ' + formatLastSeen(data.lastSeen);
+      } else {
+        $('up-status').textContent = 'Не в сети';
+      }
     }
   } catch(e) {
-    setStatus('find-status', 'Ошибка: ' + e.message, 'error');
+    $('up-bio').textContent = 'Ошибка загрузки профиля';
   }
 }
 
-// ==================== WEBSOCKET ====================
+function closeUserProfile() { $('modal-user-profile').classList.add('hidden'); }
+
+// ===== МОЙ ПРОФИЛЬ =====
+function toggleProfile() { $('profile-panel').classList.toggle('open'); }
+function updateProfileUI() {
+  $('profile-name').textContent = state.name;
+  $('profile-phone').textContent = '+7' + state.phone;
+  $('edit-name').value = state.name;
+}
+async function saveProfile() {
+  const name = $('edit-name').value.trim();
+  if (!name) return alert('Имя обязательно');
+  state.name = name;
+  saveAuth();
+  renderChatList();
+  alert('Сохранено!');
+}
+async function uploadAvatar(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('avatar', file);
+  try {
+    const res = await fetch(`${API_URL}/api/profile/avatar`, { method: 'POST', headers: {'Authorization':'Bearer '+state.token}, body: fd });
+    const data = await res.json();
+    if (res.ok) alert('Аватарка загружена!');
+  } catch(e) { alert('Ошибка загрузки аватарки'); }
+}
+
+// ===== WEBSOCKET =====
 function connectWebSocket() {
   if (state.ws) state.ws.close();
   const ws = new WebSocket(WS_URL);
   state.ws = ws;
-
-  ws.onopen = () => {
-    $('connectionStatus').classList.remove('hidden');
-    $('connectionStatus').classList.add('online');
-    $('connectionStatus').textContent = '● online';
-    ws.send(JSON.stringify({type: 'auth', token: state.token}));
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token: state.token }));
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'key_exchange') { setKey(d.fromPhone, d.chatKey); if (state.currentChat === d.fromPhone) updateChatStatus(); }
+    else if (d.type === 'new_message') handleIncomingMessage(d);
+    else if (d.type === 'presence') handlePresence(d);
+    else if (d.type === 'user_typing') handleTyping(d);
+    else if (d.type === 'user_uploading') handleUploading(d);
   };
+  ws.onclose = () => setTimeout(connectWebSocket, 3000);
+}
 
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.type === 'auth_success') {
-        console.log('✅ WebSocket авторизован');
-      } else if (data.type === 'key_exchange') {
-        // 🔑 Получили ключ от собеседника
-        console.log(`[🔑] Получен ключ от +7${data.fromPhone}`);
-        setChatKey(data.fromPhone, data.chatKey);
-        if (state.currentChat && state.currentChat.phone === data.fromPhone) {
-          alert('🔑 Ключ шифрования получен! Теперь можно переписываться.');
-        }
-      } else if (data.type === 'key_exchange_ack') {
-        console.log(`[🔑] Ключ доставлен +7${data.receiverPhone}`);
-      } else if (data.type === 'new_message') {
-        handleIncomingMessage(data);
-      } else if (data.type === 'msg_delivered') {
-        console.log('📨 Сообщение доставлено:', data.messageId);
-      } else if (data.type === 'error') {
-        console.error('WS ошибка:', data.error);
-      }
-    } catch(e) { console.error('Parse error:', e); }
-  };
+function handlePresence(data) {
+  state.presenceData[data.phone] = { isOnline: data.isOnline, lastSeen: data.lastSeen };
+  if (state.currentChat === data.phone) updateChatStatus();
+}
 
-  ws.onclose = () => {
-    $('connectionStatus').classList.remove('online');
-    $('connectionStatus').classList.add('offline');
-    $('connectionStatus').textContent = '● offline';
-    $('connectionStatus').classList.remove('hidden');
-    if (state.token) setTimeout(connectWebSocket, 3000);
-  };
+function handleTyping(data) {
+  if (state.currentChat === data.fromPhone) {
+    const statusEl = $('chat-header-status');
+    if (data.isTyping) {
+      statusEl.textContent = '✍️ Печатает...';
+      statusEl.className = 'chat-header-status typing';
+    } else {
+      updateChatStatus();
+    }
+  }
+}
 
-  ws.onerror = (e) => console.error('WS error', e);
+function handleUploading(data) {
+  if (state.currentChat === data.fromPhone) {
+    const statusEl = $('chat-header-status');
+    if (data.isUploading) {
+      statusEl.textContent = '📸 Отправляет фото...';
+      statusEl.className = 'chat-header-status typing';
+    } else {
+      updateChatStatus();
+    }
+  }
 }
 
 function handleIncomingMessage(data) {
   const phone = data.senderPhone;
-  if (!state.chats[phone]) {
-    state.chats[phone] = {name: '+7'+phone, messages: [], chatKey: null};
-  }
-  const decrypted = data.mediaType === 'text' ? decrypt(data.encryptedText, phone) : null;
-  state.chats[phone].messages.push({
-    id: data.id,
-    senderPhone: data.senderPhone,
-    encryptedText: data.encryptedText,
-    decrypted: decrypted,
-    mediaUrl: data.mediaUrl,
-    mediaType: data.mediaType,
-    timestamp: data.timestamp
-  });
-  saveSession();
-  if (state.currentChat && state.currentChat.phone === phone) {
-    renderMessages();
-    setTimeout(decryptAllImages, 100);
-  } else {
-    renderChatList();
+  if (!state.chats[phone]) state.chats[phone] = { name: '+7'+phone, messages: [], lastMsg: null };
+  const msg = {
+    id: data.id, from: phone,
+    text: data.mediaType === 'text' ? decrypt(data.encryptedText, phone) : null,
+    type: data.mediaType, mediaUrl: data.mediaUrl, ts: data.timestamp
+  };
+  state.chats[phone].messages.push(msg);
+  state.chats[phone].lastMsg = { text: msg.text || (msg.type==='image'?'📷 Фото':'...'), type: msg.type, ts: msg.ts };
+  renderChatList();
+  
+  if (state.currentChat === phone) {
+    const container = $('messages-container');
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+    const isOut = msg.from === state.phone;
+    const time = new Date(msg.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+    let content = '';
+    if (msg.type === 'image' && msg.mediaUrl) content = `<img data-url="${msg.mediaUrl}" class="enc-img" alt="...">`;
+    if (msg.text) content += `<div>${escapeHtml(msg.text)}</div>`;
+    const div = document.createElement('div');
+    div.className = `message ${isOut ? 'out' : 'in'}`;
+    div.innerHTML = `${content}<div class="message-time">${time} <span class="encrypted-badge"></span></div>`;
+    container.appendChild(div);
+    if (isAtBottom) container.scrollTop = container.scrollHeight;
+    setTimeout(loadAndDecryptImages, 50);
   }
 }
 
-// ==================== ЗАПУСК ====================
-window.addEventListener('load', () => {
-  if (loadSession() && state.token) {
-    enterMessenger();
+// ===== СТАРТ =====
+window.onload = () => {
+  cleanOldCache(); // 🔥 Чистим старый мусор
+  
+  if (loadAuth()) {
+    // Если есть токен — сразу входим
+    initApp();
   } else {
-    showScreen('screen-phone');
+    // Нет токена — показываем экран авторизации
+    $('auth-screen').classList.remove('hidden');
   }
-});
+};
 </script>
 </body>
 </html>
