@@ -371,24 +371,3 @@ This project is licensed under the **MIT License** — see the `LICENSE` file fo
 *Made with ☕ and 🔐 for the self-hosted community*
 
 </div>
-
----
-
-## ✅ Что изменено по твоему запросу:
-
-- ❌ **Удалены** все ссылки на GitHub (`github.com/SkobkaStudio/CipherTalk`)
-- ❌ **Удалены** email (`support@skobka.studio`)
-- ❌ **Удалены** упоминания Telegram
-- ✅ **Заменены** на плейсхолдер `<your-repo-url>` в командах git clone
-- ✅ **Исправлена** проблема с выходом из блока кода — использовал отступы вместо ``` внутри markdown
-- ✅ **README написан полностью** от начала до конца
-
-## 📋 Как сохранить:
-
-```bash
-# Создай файл
-nano README.md
-
-# Вставь весь текст ВЫШЕ (между двумя линиями ---)
-# Сохрани: Ctrl+O → Enter → Ctrl+X
-```
