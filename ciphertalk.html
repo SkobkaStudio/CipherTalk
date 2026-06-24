@@ -1,927 +1,1270 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" class="h-full">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CipherTalk Messenger</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
-<style>
-  :root {
-    --primary: #3390ec;
-    --primary-dark: #2575c4;
-    --bg-main: #ffffff;
-    --bg-sidebar: #f4f4f5;
-    --bg-chat: #e5ddd5;
-    --text-primary: #000000;
-    --text-secondary: #707579;
-    --msg-in: #ffffff;
-    --msg-out: #eeffde;
-    --border: #dfe1e5;
-    --hover: #f0f2f5;
-    --danger: #e53935;
-    --success: #43a047;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  body { background: var(--bg-main); height: 100vh; overflow: hidden; }
-  .hidden { display: none !important; }
-
-  /* AUTH */
-  .auth-container { position: fixed; inset: 0; background: var(--bg-main); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-  .auth-box { width: 100%; max-width: 360px; text-align: center; }
-  .auth-logo { font-size: 64px; margin-bottom: 16px; }
-  .auth-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-  .auth-subtitle { color: var(--text-secondary); margin-bottom: 32px; font-size: 14px; }
-  .auth-input { width: 100%; padding: 12px 16px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; outline: none; }
-  .auth-input:focus { border-color: var(--primary); }
-  .auth-button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px; }
-  .auth-button:hover { background: var(--primary-dark); }
-  .back-link { display: block; margin-top: 16px; color: var(--primary); cursor: pointer; font-size: 14px; text-decoration: underline; }
-  .status-message { margin-top: 12px; font-size: 13px; min-height: 20px; }
-  .status-message.error { color: var(--danger); }
-  .status-message.success { color: var(--success); }
-
-  /* APP */
-  .app-container { display: flex; width: 100%; height: 100%; }
-  .sidebar { width: 320px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-  .sidebar-header { padding: 12px 16px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-  .menu-button { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-secondary); padding: 8px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
-  .menu-button:hover { background: var(--hover); }
-  .search-input { flex: 1; padding: 8px 16px; border: none; background: #f0f2f5; border-radius: 20px; font-size: 14px; outline: none; }
-  .chat-list { flex: 1; overflow-y: auto; background: var(--bg-main); }
-  .chat-item { padding: 10px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.15s; }
-  .chat-item:hover { background: var(--hover); }
-  .chat-item.active { background: #e3f2fd; }
-  .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; flex-shrink: 0; overflow: hidden; cursor: pointer; }
-  .avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .chat-info { flex: 1; overflow: hidden; }
-  .chat-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-  .chat-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chat-time { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
-  .chat-preview { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  /* CHAT */
-  .chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-chat); position: relative; }
-  .chat-header { padding: 10px 16px; background: var(--bg-main); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); z-index: 10; cursor: pointer; }
-  .chat-header:hover { background: var(--hover); }
-  .back-button { display: none; background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-secondary); padding: 8px; }
-  .chat-header-info { flex: 1; }
-  .chat-header-name { font-weight: 600; font-size: 15px; color: var(--text-primary); }
-  .chat-header-status { font-size: 12px; color: var(--text-secondary); transition: color 0.2s; }
-  .chat-header-status.online { color: var(--primary); }
-  .chat-header-status.typing { color: var(--primary); font-style: italic; }
-  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 14px; background: rgba(0,0,0,0.03); }
-  .messages-container { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
-  .message { max-width: 65%; padding: 8px 12px; border-radius: 12px; position: relative; word-wrap: break-word; font-size: 14px; line-height: 1.4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
-  .message.in { background: var(--msg-in); align-self: flex-start; border-bottom-left-radius: 4px; }
-  .message.out { background: var(--msg-out); align-self: flex-end; border-bottom-right-radius: 4px; }
-  .message img { max-width: 100%; border-radius: 8px; margin-bottom: 4px; display: block; cursor: pointer; }
-  .message-time { font-size: 10px; color: var(--text-secondary); text-align: right; margin-top: 4px; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
-  .encrypted-badge { color: var(--success); font-size: 9px; }
-  .input-area { padding: 10px 16px; background: var(--bg-main); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
-  .attach-button { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); padding: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-  .attach-button:hover { background: var(--hover); color: var(--primary); }
-  .message-input { flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 20px; font-size: 14px; outline: none; }
-  .message-input:focus { border-color: var(--primary); }
-  .send-button { background: var(--primary); color: white; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
-  .send-button:hover { background: var(--primary-dark); }
-  input[type="file"] { display: none; }
-
-  /* PROFILE PANEL */
-  .profile-panel { position: absolute; left: 0; top: 0; bottom: 0; width: 320px; background: var(--bg-main); z-index: 500; box-shadow: 2px 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; transform: translateX(-100%); transition: transform 0.3s; }
-  .profile-panel.open { transform: translateX(0); }
-  .profile-header { padding: 20px; text-align: center; border-bottom: 1px solid var(--border); position: relative; }
-  .close-profile { position: absolute; right: 16px; top: 16px; background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); }
-  .profile-avatar-large { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; font-size: 36px; color: white; font-weight: bold; overflow: hidden; cursor: pointer; position: relative; }
-  .profile-avatar-large img { width: 100%; height: 100%; object-fit: cover; }
-  .profile-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
-  .profile-phone { font-size: 13px; color: var(--text-secondary); }
-  .profile-body { padding: 16px; flex: 1; overflow-y: auto; }
-  .profile-section { margin-bottom: 24px; }
-  .profile-label { display: block; font-size: 12px; color: var(--primary); margin-bottom: 6px; font-weight: 600; }
-  .profile-input, .profile-textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; font-family: inherit; }
-  .profile-textarea { resize: vertical; min-height: 80px; }
-  .sessions-list { margin-top: 8px; }
-  .session-item { padding: 10px; background: var(--bg-sidebar); border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-  .session-info { flex: 1; }
-  .session-device { font-weight: 600; font-size: 13px; }
-  .session-time { font-size: 11px; color: var(--text-secondary); }
-  .session-delete { background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-  .save-button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; margin-top: 8px; }
-  .logout-button { margin: 16px; padding: 12px; background: #ffebee; color: var(--danger); border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; }
-
-  /* МОДАЛКА ПРОФИЛЯ ПОЛЬЗОВАТЕЛЯ */
-  .user-profile-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 3000; display: flex; align-items: center; justify-content: center; }
-  .user-profile-content { background: var(--bg-main); border-radius: 16px; width: 90%; max-width: 360px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
-  .user-profile-header { background: linear-gradient(135deg, #667eea, #764ba2); padding: 30px 20px; text-align: center; color: white; position: relative; }
-  .user-profile-close { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .user-profile-avatar { width: 100px; height: 100px; border-radius: 50%; background: rgba(255,255,255,0.3); margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: bold; overflow: hidden; border: 3px solid white; }
-  .user-profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .user-profile-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-  .user-profile-phone { font-size: 14px; opacity: 0.9; }
-  .user-profile-status { margin-top: 8px; font-size: 13px; opacity: 0.85; }
-  .user-profile-status.online { color: #a8e6a3; font-weight: 600; }
-  .user-profile-body { padding: 20px; }
-  .user-profile-field { margin-bottom: 16px; }
-  .user-profile-field-label { font-size: 12px; color: var(--primary); font-weight: 600; margin-bottom: 6px; }
-  .user-profile-field-value { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
-  .user-profile-field-value.empty { color: var(--text-secondary); font-style: italic; }
-
-  /* Modal */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-  .modal { background: var(--bg-main); border-radius: 16px; width: 90%; max-width: 400px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-  .modal-title { margin-bottom: 16px; font-size: 18px; }
-  .modal-input { width: 100%; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; }
-  .modal-buttons { display: flex; gap: 10px; justify-content: flex-end; }
-  .modal-button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
-  .modal-button.primary { background: var(--primary); color: white; }
-  .modal-button.secondary { background: var(--hover); color: var(--text-primary); }
-
-  @media (max-width: 768px) {
-    .sidebar { width: 100%; position: absolute; inset: 0; z-index: 10; }
-    .chat-area { width: 100%; position: absolute; inset: 0; z-index: 20; transform: translateX(100%); transition: transform 0.3s; }
-    .chat-area.active { transform: translateX(0); }
-    .profile-panel { width: 100%; }
-    .message { max-width: 85%; }
-    .back-button { display: block; }
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CipherTalk | КипяТок — Сверхзащищенный мессенджер</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Шрифты Google Fonts (Inter) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons для иконок Telegram-style -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* Кастомный скроллбар */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(156, 163, 175, 0.3);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(156, 163, 175, 0.5);
+        }
+    </style>
 </head>
-<body>
+<body class="h-full bg-slate-900 text-slate-100 flex flex-col justify-between overflow-hidden select-none">
 
-<!-- AUTH -->
-<div id="auth-screen" class="auth-container">
-  <div class="auth-box">
-    <div class="auth-logo">🛡️</div>
-    <h1 class="auth-title">CipherTalk</h1>
-    <p class="auth-subtitle">Защищенный мессенджер</p>
-    <div id="step-phone">
-      <input type="tel" id="auth-phone" class="auth-input" placeholder="Номер телефона (10 цифр)" maxlength="10">
-      <button class="auth-button" onclick="sendOTP()">Получить код</button>
-    </div>
-    <div id="step-otp" class="hidden">
-      <input type="text" id="auth-otp" class="auth-input" placeholder="Код из СМС (4 цифры)" maxlength="4">
-      <button class="auth-button" onclick="verifyOTP()">Подтвердить</button>
-      <span class="back-link" onclick="showAuthStep('step-phone')">← Изменить номер</span>
-    </div>
-    <div id="step-register" class="hidden">
-      <input type="text" id="reg-name" class="auth-input" placeholder="Ваше имя">
-      <input type="password" id="reg-password" class="auth-input" placeholder="Пароль (мин. 6 символов)">
-      <button class="auth-button" onclick="register()">Зарегистрироваться</button>
-    </div>
-    <div id="step-login" class="hidden">
-      <input type="password" id="login-password" class="auth-input" placeholder="Введите пароль">
-      <button class="auth-button" onclick="loginPassword()">Войти</button>
-      <span class="back-link" onclick="showAuthStep('step-phone')">← Другой номер</span>
-    </div>
-    <div id="auth-status" class="status-message"></div>
-  </div>
-</div>
+    <!-- КАНВАС АВТОРИЗАЦИИ (Вход по номеру) -->
+    <div id="authScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 p-4 transition-all duration-300">
+        <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl space-y-6">
+            <div class="text-center">
+                <div class="mx-auto w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-4 animate-pulse">
+                    <i data-lucide="shield-alert" class="w-8 h-8 text-white"></i>
+                </div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white">CipherTalk</h1>
+                <p class="text-xs text-blue-400 font-semibold uppercase tracking-widest mt-1">КипяТок Messenger</p>
+                <p class="text-sm text-slate-400 mt-2">Безопасное сквозное шифрование на лету (AES-256-GCM)</p>
+            </div>
 
-<!-- APP -->
-<div class="app-container hidden" id="app">
-  <div class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <button class="menu-button" onclick="toggleProfile()">☰</button>
-      <input type="text" class="search-input" placeholder="Поиск" oninput="filterChats(this.value)">
-    </div>
-    <div class="chat-list" id="chat-list"></div>
-  </div>
+            <!-- Шаг 1: Ввод номера телефона, имени и юзернейма -->
+            <div id="phoneStep" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Ваше Имя (для новых пользователей)</label>
+                    <input type="text" id="authName" placeholder="Например, Иван" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition text-base">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Имя пользователя (Username @)</label>
+                    <div class="relative">
+                        <span class="absolute left-4 top-3 text-slate-550 font-mono text-base text-slate-500">@</span>
+                        <input type="text" id="authUsername" placeholder="nickname" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:outline-none focus:border-blue-500 transition text-base font-mono">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Номер телефона</label>
+                    <input type="tel" id="authPhone" placeholder="+79991234567" value="+7" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 tracking-wide font-mono text-lg transition">
+                </div>
+                <button id="btnSendCode" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/20 transition flex items-center justify-center space-x-2 text-base">
+                    <span>Получить код</span>
+                    <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                </button>
+            </div>
 
-  <div class="chat-area" id="chat-area">
-    <div class="empty-state" id="empty-state">
-      <div style="text-align: center;">
-        <div style="font-size: 64px; margin-bottom: 16px;">💬</div>
-        <div style="font-size: 16px; margin-bottom: 8px;">Добро пожаловать в CipherTalk!</div>
-        <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 24px;">Выберите чат или создайте новый</div>
-        <button class="auth-button" style="max-width: 200px;" onclick="openNewChatModal()">+ Новый чат</button>
-      </div>
-    </div>
+            <!-- Шаг 2: Ввод кода подтверждения -->
+            <div id="codeStep" class="hidden space-y-4">
+                <div class="text-center py-2">
+                    <span class="inline-block bg-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-full font-mono" id="displayTargetPhone"></span>
+                    <p class="text-xs text-yellow-500 mt-2">Код отправлен! Посмотрите вывод консоли (лог) на сервере.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Четырехзначный код</label>
+                    <input type="text" id="authCode" maxlength="4" placeholder="••••" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-center text-white tracking-[1em] font-mono text-2xl focus:outline-none focus:border-blue-500 transition">
+                </div>
+                <div class="flex space-x-3">
+                    <button id="btnBackToPhone" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-3 px-4 rounded-xl transition text-sm">Назад</button>
+                    <button id="btnVerifyCode" class="flex-[2] bg-green-600 hover:bg-green-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-green-500/20 transition flex items-center justify-center space-x-2 text-sm">
+                        <span>Войти</span>
+                        <i data-lucide="check-circle-2" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
 
-    <div id="active-chat" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
-      <div class="chat-header" onclick="openUserProfile()">
-        <button class="back-button" onclick="closeChat()">←</button>
-        <div class="avatar" id="chat-header-avatar">?</div>
-        <div class="chat-header-info">
-          <div class="chat-header-name" id="chat-header-name">—</div>
-          <div class="chat-header-status" id="chat-header-status">загрузка...</div>
+            <!-- Блок Ошибки -->
+            <div id="authError" class="hidden bg-red-950/50 border border-red-800/80 rounded-xl p-3 text-center">
+                <p id="authErrorText" class="text-sm text-red-400 font-medium"></p>
+            </div>
         </div>
-      </div>
-      <div class="messages-container" id="messages-container"></div>
-      <div class="input-area">
-        <label for="file-input" class="attach-button" title="Прикрепить файл"></label>
-        <input type="file" id="file-input" accept="image/*" onchange="sendImage(event)">
-        <input type="text" id="message-input" class="message-input" placeholder="Сообщение" onkeypress="if(event.key==='Enter')sendText()" oninput="onTyping()">
-        <button class="send-button" onclick="sendText()">➤</button>
-      </div>
     </div>
-  </div>
 
-  <!-- Мой профиль -->
-  <div class="profile-panel" id="profile-panel">
-    <div class="profile-header">
-      <button class="close-profile" onclick="toggleProfile()">✕</button>
-      <div class="profile-avatar-large" id="profile-avatar" onclick="document.getElementById('avatar-input').click()">
-        <span id="profile-avatar-text">?</span>
-        <img id="profile-avatar-img" class="hidden" alt="">
-      </div>
-      <input type="file" id="avatar-input" accept="image/*" onchange="uploadAvatar(event)">
-      <div class="profile-name" id="profile-name">—</div>
-      <div class="profile-phone" id="profile-phone">+7 —</div>
+    <!-- ГЛАВНЫЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ -->
+    <div class="flex-1 flex h-full overflow-hidden relative">
+        
+        <!-- ЛЕВАЯ ПАНЕЛЬ: Список чатов (Telegram style) -->
+        <aside id="sidebarPanel" class="w-full md:w-80 lg:w-96 border-r border-slate-800 bg-slate-900/50 flex flex-col h-full flex-shrink-0 z-10">
+            <!-- Шапка левой панели -->
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-md shadow-indigo-500/10">
+                        КТ
+                    </div>
+                    <div>
+                        <h2 class="font-bold text-white leading-tight">КипяТок</h2>
+                        <span class="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-ping"></span>
+                            Защищен
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="flex space-x-1">
+                    <!-- Кнопка Настроек Профиля -->
+                    <button id="btnOpenSettings" title="Настройки профиля" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                        <i data-lucide="settings" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Кнопка Выхода -->
+                    <button id="btnLogOut" title="Выйти" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Профиль текущего пользователя -->
+            <div class="px-4 py-3 bg-slate-950 border-b border-slate-800/50 flex items-center justify-between">
+                <div class="flex items-center space-x-3 overflow-hidden">
+                    <div id="myAvatar" class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold text-sm text-white flex-shrink-0">U</div>
+                    <div class="overflow-hidden">
+                        <p class="text-xs font-semibold text-white truncate" id="myProfileName">Загрузка...</p>
+                        <p class="text-[10px] text-slate-400 font-mono truncate" id="myProfilePhone">+7...</p>
+                    </div>
+                </div>
+                <div id="myProfileUsernameTag" class="bg-blue-950 text-blue-400 text-[9px] px-2 py-0.5 rounded border border-blue-800/50 font-mono max-w-[120px] truncate">@...</div>
+            </div>
+
+            <!-- Поиск контактов -->
+            <div class="p-3">
+                <div class="relative">
+                    <input type="text" id="searchUsers" placeholder="Поиск по имени, телефону или @" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
+                    <i data-lucide="search" class="absolute left-3 top-3 w-4.5 h-4.5 text-slate-500"></i>
+                </div>
+            </div>
+
+            <!-- Список доступных контактов -->
+            <div class="flex-1 overflow-y-auto" id="chatsList">
+                <!-- Заполняется динамически -->
+            </div>
+        </aside>
+
+        <!-- ПРАВАЯ ПАНЕЛЬ: Окно переписки -->
+        <!-- Пустой экран (только для десктопов при отсутствии активного чата) -->
+        <main class="hidden md:flex flex-1 flex-col items-center justify-center text-center p-6 bg-slate-950 h-full relative" id="chatAreaPlaceholder">
+            <div class="w-20 h-20 bg-slate-900 border border-slate-800 rounded-3xl flex items-center justify-center text-slate-500 mb-4 shadow-xl">
+                <i data-lucide="message-square-lock" class="w-10 h-10 text-blue-500"></i>
+            </div>
+            <h3 class="text-lg font-bold text-white">Выберите чат для начала общения</h3>
+            <p class="text-sm text-slate-400 mt-1 max-w-sm">Все диалоги шифруются сквозным методом AES-256 с генерацией ключей на вашем устройстве.</p>
+        </main>
+
+        <!-- Активный чат -->
+        <main class="hidden flex-1 flex-col bg-slate-950 h-full w-full z-20" id="chatAreaActive">
+            <!-- Шапка чата -->
+            <div class="p-3 md:p-4 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between">
+                <div class="flex items-center space-x-2 md:space-x-3 overflow-hidden">
+                    <!-- Кнопка Назад на мобилках -->
+                    <button id="btnBackToList" class="md:hidden p-2 hover:bg-slate-800 rounded-lg text-slate-400 mr-1 transition">
+                        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                    </button>
+                    
+                    <div id="chatAvatar" class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-md shadow-md flex-shrink-0">
+                        С
+                    </div>
+                    <div class="overflow-hidden">
+                        <h3 class="font-bold text-white leading-tight truncate text-sm md:text-base" id="chatTitle">Собеседник</h3>
+                        <div class="flex items-center space-x-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="chatStatusDot"></span>
+                            <span class="text-[11px] text-slate-400" id="chatStatusText">не в сети</span>
+                            <span class="text-[11px] text-blue-400 font-semibold" id="typingStatus"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Индикатор шифрования ключей -->
+                <div class="flex items-center space-x-2 bg-slate-900 px-2.5 py-1.5 rounded-full border border-slate-800 flex-shrink-0">
+                    <div class="relative flex h-2 w-2">
+                        <span id="secureIndicatorPulse" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span id="secureIndicatorDot" class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </div>
+                    <span class="text-[10px] md:text-[11px] font-mono font-medium text-slate-300" id="encryptionStatusLabel">Генерация...</span>
+                    <button id="btnShowKeyDetails" title="Показать параметры шифрования" class="text-slate-400 hover:text-white transition">
+                        <i data-lucide="info" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Скрытая панель подробностей шифрования -->
+            <div id="keyDetailsPanel" class="hidden bg-slate-900 border-b border-slate-800 p-4 text-xs font-mono space-y-2 text-slate-400">
+                <div class="flex justify-between">
+                    <span class="text-blue-400">Алгоритм:</span>
+                    <span>Diffie-Hellman x25519 & AES-256-GCM</span>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-emerald-400">Общий секретный ключ (Shared Secret):</span>
+                    <span class="bg-slate-950 p-2 rounded mt-1 overflow-x-auto text-[10px] break-all select-all text-slate-300" id="sharedSecretHex">вычисляется...</span>
+                </div>
+                <div class="text-[10px] text-slate-500 leading-relaxed">
+                    Данный ключ вычислен вашим браузером и браузером собеседника. Сервер никогда не увидит этот ключ, поэтому расшифровать переписку невозможно.
+                </div>
+            </div>
+
+            <!-- Поле сообщений -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950" id="messagesBox">
+                <!-- Сообщения будут рендериться динамически -->
+            </div>
+
+            <!-- Панель ввода сообщения -->
+            <div class="p-3 md:p-4 border-t border-slate-800 bg-slate-900/20">
+                <form id="sendMessageForm" class="flex items-center space-x-2 md:space-x-3">
+                    <input type="text" id="messageInput" placeholder="Напишите сообщение..." autocomplete="off" class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition text-base">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl shadow-lg shadow-blue-500/10 transition flex items-center justify-center">
+                        <i data-lucide="send-horizontal" class="w-5 h-5"></i>
+                    </button>
+                </form>
+            </div>
+        </main>
     </div>
-    <div class="profile-body">
-      <div class="profile-section">
-        <label class="profile-label">Имя</label>
-        <input type="text" id="edit-name" class="profile-input">
-      </div>
-      <div class="profile-section">
-        <label class="profile-label">О себе</label>
-        <textarea id="edit-bio" class="profile-textarea" placeholder="Расскажите о себе..."></textarea>
-      </div>
-      <div class="profile-section">
-        <label class="profile-label">Устройства (сессии)</label>
-        <div class="sessions-list" id="sessions-list"></div>
-      </div>
-      <button class="save-button" onclick="saveProfile()">Сохранить</button>
-      <button class="logout-button" onclick="clearCacheAndLogout()" style="background:#fff3e0; color:#f57c00; margin-top:8px;">🗑 Очистить кэш и выйти</button>
+
+    <!-- МОДАЛЬНОЕ ОКНО: НАСТРОЙКИ ПРОФИЛЯ -->
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+        <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="user-cog" class="text-blue-500"></i> Мой Аккаунт
+                </h3>
+                <button id="btnCloseSettings" class="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Выбор цвета аватара -->
+            <div class="space-y-2">
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Цветовой стиль аватара</label>
+                <div class="flex items-center space-x-3 py-1" id="avatarColorPicker">
+                    <button data-color="bg-blue-600" class="w-8 h-8 rounded-full bg-blue-600 border-2 border-transparent transition-all scale-110"></button>
+                    <button data-color="bg-emerald-600" class="w-8 h-8 rounded-full bg-emerald-600 border-2 border-transparent transition-all"></button>
+                    <button data-color="bg-red-600" class="w-8 h-8 rounded-full bg-red-600 border-2 border-transparent transition-all"></button>
+                    <button data-color="bg-purple-600" class="w-8 h-8 rounded-full bg-purple-600 border-2 border-transparent transition-all"></button>
+                    <button data-color="bg-amber-600" class="w-8 h-8 rounded-full bg-amber-600 border-2 border-transparent transition-all"></button>
+                    <button data-color="bg-pink-600" class="w-8 h-8 rounded-full bg-pink-600 border-2 border-transparent transition-all"></button>
+                </div>
+            </div>
+
+            <!-- Поля ввода -->
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Имя</label>
+                    <input type="text" id="settingsName" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 text-sm transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Имя пользователя (Username @)</label>
+                    <div class="relative">
+                        <span class="absolute left-4 top-2.5 text-slate-500 font-mono text-sm">@</span>
+                        <input type="text" id="settingsUsername" placeholder="nickname" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-4 py-2.5 text-white focus:outline-none focus:border-blue-500 text-sm font-mono transition">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">О себе</label>
+                    <textarea id="settingsBio" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 text-sm transition resize-none"></textarea>
+                </div>
+            </div>
+
+            <!-- Системный статус / ошибка профиля -->
+            <div id="settingsStatus" class="hidden text-xs text-center font-medium p-2 rounded-xl"></div>
+
+            <div class="flex space-x-3 pt-2">
+                <button id="btnCancelSettings" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl text-sm transition">Отмена</button>
+                <button id="btnSaveProfile" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm transition shadow-lg shadow-blue-500/10">Сохранить</button>
+            </div>
+        </div>
     </div>
-    <button class="logout-button" onclick="logout()">Выйти из аккаунта</button>
-  </div>
-</div>
 
-<!-- Модалка: Новый чат -->
-<div id="modal-new-chat" class="modal-overlay hidden">
-  <div class="modal">
-    <h3 class="modal-title">Новый чат</h3>
-    <input type="tel" id="new-chat-phone" class="modal-input" placeholder="Номер телефона (10 цифр)" maxlength="10">
-    <div class="modal-buttons">
-      <button class="modal-button secondary" onclick="closeModal('modal-new-chat')">Отмена</button>
-      <button class="modal-button primary" onclick="createChat()">Создать</button>
+    <!-- Уведомление об ошибке подключения -->
+    <div id="connectionErrorModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+        <div class="bg-slate-900 border border-red-800 rounded-xl p-6 max-w-sm w-full text-center space-y-4">
+            <div class="mx-auto w-12 h-12 bg-red-950 flex items-center justify-center rounded-full text-red-500">
+                <i data-lucide="wifi-off" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-md font-bold text-white">Потеряно соединение с сервером</h3>
+            <p class="text-xs text-slate-400">Пытаемся восстановить соединение...</p>
+        </div>
     </div>
-    <div id="new-chat-status" class="status-message"></div>
-  </div>
-</div>
 
-<!-- Модалка: Профиль пользователя -->
-<div id="modal-user-profile" class="user-profile-modal hidden">
-  <div class="user-profile-content">
-    <div class="user-profile-header">
-      <button class="user-profile-close" onclick="closeUserProfile()">✕</button>
-      <div class="user-profile-avatar" id="up-avatar">?</div>
-      <div class="user-profile-name" id="up-name">—</div>
-      <div class="user-profile-phone" id="up-phone">+7 —</div>
-      <div class="user-profile-status" id="up-status">загрузка...</div>
-    </div>
-    <div class="user-profile-body">
-      <div class="user-profile-field">
-        <div class="user-profile-field-label">О себе</div>
-        <div class="user-profile-field-value empty" id="up-bio">Пользователь не указал информацию о себе</div>
-      </div>
-      <div class="user-profile-field">
-        <div class="user-profile-field-label">Зарегистрирован</div>
-        <div class="user-profile-field-value" id="up-registered">—</div>
-      </div>
-    </div>
-  </div>
-</div>
+    <script>
+        const BACKEND_URL = 'https://ciphertalk-server.cloudpub.ru';
+        const WS_URL = 'wss://ciphertalk-server.cloudpub.ru';
 
-<script>
-const API_URL = 'https://ciphertalk-server.cloudpub.ru/';
-const WS_URL = 'wss://ciphertalk-server.cloudpub.ru/';
+        // Состояние приложения
+        let currentUser = null;
+        let token = localStorage.getItem('ciphertalk_token') || null;
+        let socket = null;
+        let activeChats = []; 
+        let activeChatUserId = null;
+        let typingTimeout = null;
+        let selectedAvatarColor = 'bg-blue-600';
 
-// 🔥 ВАЖНО: localStorage хранит ТОЛЬКО данные для входа
-// Чаты, ключи и сообщения НЕ сохраняются — они всегда загружаются с сервера
+        // Хранение ключей в ОЗУ: { [userId]: { privateKey, publicKey, sharedSecretKey, hexSecret, active } }
+        const cryptoSessions = {}; 
 
-let state = {
-  phone: null,
-  token: null,
-  name: null,
-  deviceId: null,
-  chats: {},      // Только в памяти! Очищается при перезагрузке
-  keys: {},       // Только в памяти! Загружается с сервера при входе
-  currentChat: null,
-  ws: null,
-  typingTimeout: null,
-  presenceData: {}
-};
+        lucide.createIcons();
 
-const $ = id => document.getElementById(id);
-const setStatus = (msg, type = '') => { const el = $('auth-status'); el.textContent = msg; el.className = 'status-message ' + type; };
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (token) {
+                const verified = await checkTokenAndInit();
+                if (!verified) showAuthScreen(true);
+            } else {
+                showAuthScreen(true);
+            }
+            
+            // Настройка адаптивного интерфейса при ресайзе
+            window.addEventListener('resize', updateResponsiveLayout);
+        });
 
-//  СОХРАНЯЕМ ТОЛЬКО АВТОРИЗАЦИЮ
-function saveAuth() {
-  localStorage.setItem('as_auth', JSON.stringify({
-    phone: state.phone,
-    token: state.token,
-    name: state.name,
-    deviceId: state.deviceId
-  }));
-}
+        function showAuthScreen(show) {
+            const screen = document.getElementById('authScreen');
+            if (show) {
+                screen.classList.remove('hidden');
+                document.getElementById('phoneStep').classList.remove('hidden');
+                document.getElementById('codeStep').classList.add('hidden');
+                document.getElementById('authError').classList.add('hidden');
+            } else {
+                screen.classList.add('hidden');
+            }
+        }
 
-// 🔥 ЗАГРУЖАЕМ ТОЛЬКО АВТОРИЗАЦИЮ
-function loadAuth() {
-  const data = localStorage.getItem('as_auth');
-  if (data) {
-    try {
-      const s = JSON.parse(data);
-      state.phone = s.phone;
-      state.token = s.token;
-      state.name = s.name;
-      state.deviceId = s.deviceId;
-      return !!s.token;
-    } catch(e) {}
-  }
-  return false;
-}
+        // --- МОБИЛЬНЫЙ ИНТЕРФЕЙС И НАВИГАЦИЯ ---
 
-// 🔥 АВТООЧИСТКА СТАРОГО МУСОРА ПРИ ЗАГРУЗКЕ
-function cleanOldCache() {
-  // Удаляем старые ключи, если они есть (от прошлых версий)
-  const oldKeys = localStorage.getItem('as_session');
-  if (oldKeys) {
-    try {
-      const parsed = JSON.parse(oldKeys);
-      // Если там есть chats или keys — это старый формат, удаляем
-      if (parsed.chats || parsed.keys) {
-        console.log('🗑 Найден старый кэш, очищаем...');
-        localStorage.removeItem('as_session');
-      }
-    } catch(e) {
-      localStorage.removeItem('as_session');
-    }
-  }
-}
+        function updateResponsiveLayout() {
+            const isMobile = window.innerWidth < 768;
+            const sidebar = document.getElementById('sidebarPanel');
+            const chatActive = document.getElementById('chatAreaActive');
+            const chatPlaceholder = document.getElementById('chatAreaPlaceholder');
 
-// Шифрование
-function getKey(phone) { return state.keys[phone] || null; }
-function setKey(phone, key) { state.keys[phone] = key; updateChatStatus(); }
+            if (isMobile) {
+                chatPlaceholder.classList.add('hidden');
+                if (activeChatUserId) {
+                    sidebar.classList.add('hidden');
+                    chatActive.classList.remove('hidden');
+                    chatActive.classList.add('flex');
+                } else {
+                    sidebar.classList.remove('hidden');
+                    sidebar.classList.add('flex');
+                    chatActive.classList.add('hidden');
+                }
+            } else {
+                sidebar.classList.remove('hidden');
+                sidebar.classList.add('flex');
+                if (activeChatUserId) {
+                    chatActive.classList.remove('hidden');
+                    chatActive.classList.add('flex');
+                    chatPlaceholder.classList.add('hidden');
+                } else {
+                    chatActive.classList.add('hidden');
+                    chatPlaceholder.classList.remove('hidden');
+                    chatPlaceholder.classList.add('flex');
+                }
+            }
+        }
 
-function encrypt(text, phone) {
-  const key = getKey(phone);
-  if (!key) throw new Error('Нет ключа шифрования');
-  return CryptoJS.AES.encrypt(text, key).toString();
-}
+        // Кнопка возврата к списку контактов (на смартфонах)
+        document.getElementById('btnBackToList').addEventListener('click', () => {
+            activeChatUserId = null;
+            updateResponsiveLayout();
+            renderActiveChatsList(activeChats);
+        });
 
-function decrypt(cipher, phone) {
-  const key = getKey(phone);
-  if (!key) return '[нет ключа]';
-  try { return CryptoJS.AES.decrypt(cipher, key).toString(CryptoJS.enc.Utf8); } catch(e) { return '[ошибка]'; }
-}
+        // --- ЭТАП АВТОРИЗАЦИИ ---
 
-// ===== АВТОРИЗАЦИЯ =====
-function showAuthStep(stepId) {
-  ['step-phone','step-otp','step-register','step-login'].forEach(id => $(id).classList.add('hidden'));
-  $(stepId).classList.remove('hidden');
-  setStatus('');
-}
+        const authPhoneInput = document.getElementById('authPhone');
+        const authNameInput = document.getElementById('authName');
+        const authUsernameInput = document.getElementById('authUsername');
+        const authCodeInput = document.getElementById('authCode');
+        const btnSendCode = document.getElementById('btnSendCode');
+        const btnVerifyCode = document.getElementById('btnVerifyCode');
+        const btnBackToPhone = document.getElementById('btnBackToPhone');
+        const authError = document.getElementById('authError');
+        const authErrorText = document.getElementById('authErrorText');
 
-async function sendOTP() {
-  const phone = $('auth-phone').value.trim();
-  if (!/^\d{10}$/.test(phone)) return setStatus('Введите 10 цифр', 'error');
-  setStatus('Отправка кода...');
-  try {
-    const res = await fetch(`${API_URL}/api/auth/request-otp`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({phone})
-    });
-    const data = await res.json();
-    if (res.ok) { state.phone = phone; showAuthStep('step-otp'); setStatus('Код отправлен (смотрите консоль сервера)', 'success'); }
-    else setStatus(data.error, 'error');
-  } catch(e) { setStatus('Ошибка сети', 'error'); }
-}
+        btnSendCode.addEventListener('click', async () => {
+            const phone = authPhoneInput.value.trim();
+            const name = authNameInput.value.trim();
+            const username = authUsernameInput.value.trim().replace('@', '');
 
-async function verifyOTP() {
-  const code = $('auth-otp').value.trim();
-  if (!/^\d{4}$/.test(code)) return setStatus('Введите 4 цифры', 'error');
-  setStatus('Проверка...');
-  state.deviceId = 'web_' + Date.now();
-  try {
-    const res = await fetch(`${API_URL}/api/auth/verify-otp`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone: state.phone, code, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
-    });
-    const data = await res.json();
-    if (data.status === 'login_success') {
-      state.token = data.token;
-      state.name = data.user.name;
-      saveAuth(); // Сохраняем только авторизацию
-      await initApp();
-    } else if (data.status === 'need_registration') showAuthStep('step-register');
-    else setStatus(data.error, 'error');
-  } catch(e) { setStatus('Ошибка сети', 'error'); }
-}
+            if (!phone || phone.length < 10) {
+                showError("Пожалуйста, введите корректный номер телефона");
+                return;
+            }
 
-async function register() {
-  const name = $('reg-name').value.trim();
-  const password = $('reg-password').value;
-  if (!name || password.length < 6) return setStatus('Заполните все поля (пароль мин. 6)', 'error');
-  setStatus('Создание аккаунта...');
-  try {
-    const res = await fetch(`${API_URL}/api/auth/register`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone: state.phone, name, password, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
-    });
-    const data = await res.json();
-    if (res.ok) {
-      state.token = data.token;
-      state.name = name;
-      saveAuth();
-      await initApp();
-    } else setStatus(data.error, 'error');
-  } catch(e) { setStatus('Ошибка сети', 'error'); }
-}
+            if (username && username.length < 3) {
+                showError("Имя пользователя (Username) должно быть не менее 3 символов");
+                return;
+            }
 
-async function loginPassword() {
-  const password = $('login-password').value;
-  setStatus('Вход...');
-  try {
-    const res = await fetch(`${API_URL}/api/auth/login-password`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone: state.phone, password, deviceId: state.deviceId, deviceName: 'Веб-браузер'})
-    });
-    const data = await res.json();
-    if (res.ok) {
-      state.token = data.token;
-      state.name = data.user.name;
-      saveAuth();
-      await initApp();
-    } else setStatus(data.error, 'error');
-  } catch(e) { setStatus('Ошибка сети', 'error'); }
-}
+            btnSendCode.disabled = true;
+            btnSendCode.innerHTML = `<span>Отправка...</span>`;
 
-function logout() {
-  localStorage.removeItem('as_auth');
-  location.reload();
-}
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/auth/request-code`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
 
-function clearCacheAndLogout() {
-  if (confirm('Очистить весь кэш и выйти? Все локальные данные будут удалены.')) {
-    localStorage.clear();
-    location.reload();
-  }
-}
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    localStorage.setItem('ciphertalk_phone', phone);
+                    if (name) localStorage.setItem('ciphertalk_name', name);
+                    if (username) localStorage.setItem('ciphertalk_username', username);
+                    
+                    document.getElementById('phoneStep').classList.add('hidden');
+                    document.getElementById('codeStep').classList.remove('hidden');
+                    document.getElementById('displayTargetPhone').innerText = phone;
+                    authError.classList.add('hidden');
+                } else {
+                    showError(data.error || "Ошибка отправки кода");
+                }
+            } catch (err) {
+                showError("Не удалось подключиться к серверу");
+            } finally {
+                btnSendCode.disabled = false;
+                btnSendCode.innerHTML = `<span>Получить код</span> <i data-lucide="arrow-right" class="w-5 h-5"></i>`;
+                lucide.createIcons();
+            }
+        });
 
-// ===== ИНИЦИАЛИЗАЦИЯ =====
-async function initApp() {
-  $('auth-screen').classList.add('hidden');
-  $('app').classList.remove('hidden');
-  
-  //  Загружаем ключи С СЕРВЕРА (не из localStorage!)
-  await loadKeysFromServer();
-  await loadSessions();
-  renderChatList();
-  updateProfileUI();
-  connectWebSocket();
-}
+        btnBackToPhone.addEventListener('click', () => {
+            document.getElementById('phoneStep').classList.remove('hidden');
+            document.getElementById('codeStep').classList.add('hidden');
+            authError.classList.add('hidden');
+        });
 
-async function loadKeysFromServer() {
-  try {
-    const res = await fetch(`${API_URL}/api/keys/all`, { headers: {'Authorization':'Bearer '+state.token} });
-    if (res.ok) {
-      const keys = await res.json();
-      state.keys = {}; // Очищаем старые
-      keys.forEach(k => state.keys[k.contact_phone] = k.chat_key);
-      console.log(`[+] Загружено ${keys.length} ключей с сервера`);
-    }
-  } catch(e) { console.error('Ошибка загрузки ключей:', e); }
-}
+        btnVerifyCode.addEventListener('click', async () => {
+            const phone = authPhoneInput.value.trim();
+            const code = authCodeInput.value.trim();
+            const name = authNameInput.value.trim();
 
-async function loadSessions() {
-  try {
-    const res = await fetch(`${API_URL}/api/auth/sessions`, { headers: {'Authorization':'Bearer '+state.token} });
-    if (res.ok) renderSessions(await res.json());
-  } catch(e) {}
-}
+            if (!code || code.length !== 4) {
+                showError("Код должен содержать 4 цифры");
+                return;
+            }
 
-function renderSessions(sessions) {
-  const list = $('sessions-list');
-  if (sessions.length === 0) { list.innerHTML = '<div style="color: var(--text-secondary); font-size: 13px;">Нет активных сессий</div>'; return; }
-  list.innerHTML = sessions.map(s => `
-    <div class="session-item">
-      <div class="session-info">
-        <div class="session-device">${s.device_name || s.device_id}</div>
-        <div class="session-time">Активность: ${new Date(s.last_active).toLocaleString('ru-RU')}</div>
-      </div>
-      ${s.device_id !== state.deviceId ? `<button class="session-delete" onclick="deleteSession('${s.device_id}')">✕</button>` : '<span style="font-size: 12px; color: var(--success);">Это вы</span>'}
-    </div>
-  `).join('');
-}
+            btnVerifyCode.disabled = true;
 
-async function deleteSession(deviceId) {
-  if (!confirm('Завершить эту сессию?')) return;
-  try {
-    const res = await fetch(`${API_URL}/api/auth/sessions/${deviceId}`, { method: 'DELETE', headers: {'Authorization':'Bearer '+state.token} });
-    if (res.ok) await loadSessions();
-  } catch(e) { alert('Ошибка'); }
-}
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/auth/verify-code`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone, code, name })
+                });
 
-// ===== ЧАТЫ =====
-function renderChatList() {
-  const list = $('chat-list');
-  const chats = Object.entries(state.chats).sort((a,b) => (b[1].lastMsg?.ts || 0) - (a[1].lastMsg?.ts || 0));
-  if (chats.length === 0) { list.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-secondary);">Нет чатов. Добавьте новый!</div>'; return; }
-  list.innerHTML = chats.map(([phone, chat]) => {
-    const isActive = state.currentChat === phone ? 'active' : '';
-    const initial = (chat.name || '?')[0].toUpperCase();
-    const preview = chat.lastMsg ? (chat.lastMsg.type === 'image' ? '📷 Фото' : chat.lastMsg.text) : 'Нет сообщений';
-    const time = chat.lastMsg ? new Date(chat.lastMsg.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}) : '';
-    return `<div class="chat-item ${isActive}" onclick="openChat('${phone}')">
-      <div class="avatar">${initial}</div>
-      <div class="chat-info">
-        <div class="chat-top"><span class="chat-name">${chat.name}</span><span class="chat-time">${time}</span></div>
-        <div class="chat-preview">${preview}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    token = data.token;
+                    localStorage.setItem('ciphertalk_token', token);
+                    currentUser = data.user;
 
-function filterChats(q) {
-  q = q.toLowerCase();
-  document.querySelectorAll('.chat-item').forEach(el => {
-    el.style.display = el.querySelector('.chat-name').textContent.toLowerCase().includes(q) ? 'flex' : 'none';
-  });
-}
+                    // Если юзер ввел username при регистрации, отправляем обновление на сервер
+                    const regUsername = localStorage.getItem('ciphertalk_username');
+                    if (regUsername) {
+                        try {
+                            const updateResp = await fetch(`${BACKEND_URL}/api/profile/update`, {
+                                method: 'POST',
+                                headers: { 
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                    name: currentUser.name || name,
+                                    username: '@' + regUsername,
+                                    bio: currentUser.bio || 'Привет! Я использую КипяТок.',
+                                    avatarColor: currentUser.avatarColor || 'bg-blue-600'
+                                })
+                            });
+                            if (updateResp.ok) {
+                                const updateData = await updateResp.json();
+                                currentUser = updateData.user;
+                            }
+                        } catch (err) {
+                            console.error("Не удалось сохранить имя пользователя при первой сессии:", err);
+                        }
+                        localStorage.removeItem('ciphertalk_username');
+                    }
 
-async function openChat(phone) {
-  state.currentChat = phone;
-  const chat = state.chats[phone];
-  $('empty-state').classList.add('hidden');
-  $('active-chat').classList.remove('hidden');
-  $('chat-area').classList.add('active');
-  $('chat-header-name').textContent = chat.name;
-  $('chat-header-avatar').textContent = chat.name[0].toUpperCase();
-  updateChatStatus();
-  
-  // 🔥 Всегда загружаем сообщения С СЕРВЕРА
-  chat.messages = [];
-  try {
-    const res = await fetch(`${API_URL}/api/messages/history/${phone}`, { headers: {'Authorization':'Bearer '+state.token} });
-    if (res.ok) {
-      const msgs = await res.json();
-      chat.messages = msgs.map(m => ({
-        id: m.id, from: m.sender_phone,
-        text: m.media_type === 'text' ? decrypt(m.encrypted_text, phone) : null,
-        type: m.media_type, mediaUrl: m.media_url, ts: m.timestamp
-      }));
-    }
-  } catch(e) { console.error('Ошибка загрузки истории:', e); }
-  
-  renderMessages();
-  renderChatList();
-}
+                    if (currentUser.name) localStorage.setItem('ciphertalk_name', currentUser.name);
+                    if (currentUser.phone) localStorage.setItem('ciphertalk_phone', currentUser.phone);
+                    
+                    showAuthScreen(false);
+                    initApp();
+                } else {
+                    showError(data.error || "Неверный код подтверждения");
+                }
+            } catch (err) {
+                showError("Ошибка соединения с сервером");
+            } finally {
+                btnVerifyCode.disabled = false;
+            }
+        });
 
-function updateChatStatus() {
-  if (!state.currentChat) return;
-  const phone = state.currentChat;
-  const hasKey = !!getKey(phone);
-  const presence = state.presenceData[phone];
-  
-  let statusText = '';
-  let statusClass = '';
-  
-  if (presence && presence.isOnline) {
-    statusText = 'В сети';
-    statusClass = 'online';
-  } else if (presence && presence.lastSeen) {
-    statusText = 'Был(а) ' + formatLastSeen(presence.lastSeen);
-  } else {
-    statusText = 'Не в сети';
-  }
-  
-  if (!hasKey) {
-    statusText = '⚠️ Нет ключа шифрования';
-    statusClass = '';
-  }
-  
-  $('chat-header-status').textContent = statusText;
-  $('chat-header-status').className = 'chat-header-status ' + statusClass;
-}
+        function showError(msg) {
+            authError.classList.remove('hidden');
+            authErrorText.innerText = msg;
+        }
 
-function formatLastSeen(ts) {
-  const diff = Date.now() - ts;
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return 'только что';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} мин назад`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ч назад`;
-  const days = Math.floor(hours / 24);
-  return `${days} дн назад`;
-}
+        async function checkTokenAndInit() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chats`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    showAuthScreen(false);
+                    initApp();
+                    return true;
+                }
+                return false;
+            } catch (err) {
+                return false;
+            }
+        }
 
-function closeChat() {
-  state.currentChat = null;
-  $('active-chat').classList.add('hidden');
-  $('empty-state').classList.remove('hidden');
-  $('chat-area').classList.remove('active');
-  renderChatList();
-}
+        // --- РАБОТА С ШИФРОВАНИЕМ (Web Crypto API) ---
 
-// ===== СТАТУСЫ =====
-function onTyping() {
-  if (!state.currentChat) return;
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-    state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: state.currentChat, isTyping: true }));
-  }
-  clearTimeout(state.typingTimeout);
-  state.typingTimeout = setTimeout(() => {
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-      state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: state.currentChat, isTyping: false }));
-    }
-  }, 2000);
-}
+        async function generateKeyPair() {
+            return await window.crypto.subtle.generateKey(
+                { name: "ECDH", namedCurve: "P-256" },
+                true,
+                ["deriveKey", "deriveBits"]
+            );
+        }
 
-// ===== СООБЩЕНИЯ =====
-function renderMessages() {
-  const container = $('messages-container');
-  const msgs = state.chats[state.currentChat]?.messages || [];
-  container.innerHTML = msgs.map(m => {
-    const isOut = m.from === state.phone;
-    const time = new Date(m.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
-    let content = '';
-    if (m.type === 'image' && m.mediaUrl) content = `<img data-url="${m.mediaUrl}" class="enc-img" alt="Загрузка...">`;
-    if (m.text) content += `<div>${escapeHtml(m.text)}</div>`;
-    return `<div class="message ${isOut ? 'out' : 'in'}">${content}<div class="message-time">${time} <span class="encrypted-badge"></span></div></div>`;
-  }).join('');
-  container.scrollTop = container.scrollHeight;
-  setTimeout(loadAndDecryptImages, 50);
-}
+        async function exportPublicKey(key) {
+            return await window.crypto.subtle.exportKey("jwk", key);
+        }
 
-async function loadAndDecryptImages() {
-  const imgs = document.querySelectorAll('.enc-img');
-  for (const img of imgs) {
-    if (img.dataset.loaded) continue;
-    img.dataset.loaded = 'true';
-    try {
-      const res = await fetch(`${API_URL}${img.dataset.url}`, { headers: {'Authorization':'Bearer '+state.token} });
-      if (res.ok) {
-        const cipher = await res.text();
-        const plain = decrypt(cipher, state.currentChat);
-        if (plain && plain.startsWith('data:image')) img.src = plain;
-        else img.alt = '[ошибка расшифровки]';
-      }
-    } catch(e) { img.alt = '[ошибка]'; }
-  }
-}
+        async function importPublicKey(jwk) {
+            return await window.crypto.subtle.importKey(
+                "jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, true, []
+            );
+        }
 
-function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+        async function deriveAesKey(privateKey, publicKey) {
+            return await window.crypto.subtle.deriveKey(
+                { name: "ECDH", public: publicKey },
+                privateKey,
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+        }
 
-function sendText() {
-  const input = $('message-input');
-  const text = input.value.trim();
-  if (!text || !state.currentChat) return;
-  const phone = state.currentChat;
-  if (!getKey(phone)) return alert('Собеседник ещё не получил ключ!');
-  
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-    state.ws.send(JSON.stringify({ type: 'typing', receiverPhone: phone, isTyping: false }));
-  }
-  
-  try {
-    const enc = encrypt(text, phone);
-    state.ws.send(JSON.stringify({ type: 'message', receiverPhone: phone, encryptedText: enc, mediaType: 'text' }));
-    const msg = { id: 'tmp'+Date.now(), from: state.phone, text, type: 'text', ts: Date.now() };
-    state.chats[phone].messages.push(msg);
-    state.chats[phone].lastMsg = { text, type: 'text', ts: Date.now() };
-    input.value = '';
-    renderMessages();
-    renderChatList();
-  } catch(e) { alert(e.message); }
-}
+        async function exportKeyToHex(cryptoKey) {
+            const exported = await window.crypto.subtle.exportKey("raw", cryptoKey);
+            const hashArray = Array.from(new Uint8Array(exported));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        }
 
-async function sendImage(event) {
-  const file = event.target.files[0];
-  if (!file || !state.currentChat) return;
-  const phone = state.currentChat;
-  if (!getKey(phone)) return alert('Нет ключа!');
-  
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-    state.ws.send(JSON.stringify({ type: 'uploading_photo', receiverPhone: phone, isUploading: true }));
-  }
-  
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const base64 = reader.result;
-    const enc = encrypt(base64, phone);
-    const blob = new Blob([enc], {type:'text/plain'});
-    const fd = new FormData();
-    fd.append('media', blob, 'enc.bin');
-    
-    try {
-      const res = await fetch(`${API_URL}/api/media/upload`, {
-        method: 'POST', headers: {'Authorization':'Bearer '+state.token}, body: fd
-      });
-      const data = await res.json();
-      if (res.ok) {
-        state.ws.send(JSON.stringify({ type: 'message', receiverPhone: phone, encryptedText: '[img]', mediaUrl: data.mediaUrl, mediaType: 'image' }));
-        const msg = { id: 'tmp'+Date.now(), from: state.phone, text: null, type: 'image', mediaUrl: data.mediaUrl, ts: Date.now() };
-        state.chats[phone].messages.push(msg);
-        state.chats[phone].lastMsg = { text: '📷 Фото', type: 'image', ts: Date.now() };
-        renderMessages();
-        renderChatList();
-      }
-    } catch(e) { alert('Ошибка загрузки'); }
-    finally {
-      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({ type: 'uploading_photo', receiverPhone: phone, isUploading: false }));
-      }
-    }
-  };
-  reader.readAsDataURL(file);
-  event.target.value = '';
-}
+        async function encryptMessage(text, aesKey) {
+            const enc = new TextEncoder();
+            const encodedText = enc.encode(text);
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            
+            const encryptedRaw = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                aesKey,
+                encodedText
+            );
 
-// ===== НОВЫЙ ЧАТ =====
-function openNewChatModal() { $('modal-new-chat').classList.remove('hidden'); $('new-chat-status').textContent=''; }
-function closeModal(id) { $(id).classList.add('hidden'); }
+            const encryptedBytes = new Uint8Array(encryptedRaw);
+            let binary = '';
+            for (let i = 0; i < encryptedBytes.byteLength; i++) {
+                binary += String.fromCharCode(encryptedBytes[i]);
+            }
+            return {
+                payload: btoa(binary),
+                iv: Array.from(iv)
+            };
+        }
 
-async function createChat() {
-  const phone = $('new-chat-phone').value.trim();
-  if (!/^\d{10}$/.test(phone)) return setStatusModal('Введите 10 цифр', 'error');
-  if (phone === state.phone) return setStatusModal('Нельзя добавить себя', 'error');
-  setStatusModal('Поиск...');
-  try {
-    const res = await fetch(`${API_URL}/api/users/find/${phone}`, { headers: {'Authorization':'Bearer '+state.token} });
-    const data = await res.json();
-    if (res.ok) {
-      const key = CryptoJS.lib.WordArray.random(32).toString();
-      await fetch(`${API_URL}/api/keys/save`, {
-        method: 'POST', headers: {'Content-Type':'application/json', 'Authorization':'Bearer '+state.token},
-        body: JSON.stringify({ contactPhone: phone, chatKey: key })
-      });
-      setKey(phone, key);
-      state.chats[phone] = { name: data.name, messages: [], lastMsg: null };
-      closeModal('modal-new-chat');
-      renderChatList();
-      openChat(phone);
-    } else setStatusModal(data.error, 'error');
-  } catch(e) { setStatusModal('Ошибка сети', 'error'); }
-}
-function setStatusModal(msg, type) { const el=$('new-chat-status'); el.textContent=msg; el.className='status-message '+type; }
+        async function decryptMessage(base64Payload, ivArray, aesKey) {
+            try {
+                const binary = atob(base64Payload);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
 
-// ===== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ =====
-async function openUserProfile() {
-  if (!state.currentChat) return;
-  const phone = state.currentChat;
-  const modal = $('modal-user-profile');
-  modal.classList.remove('hidden');
-  
-  $('up-name').textContent = state.chats[phone]?.name || '—';
-  $('up-phone').textContent = '+7' + phone;
-  $('up-avatar').textContent = (state.chats[phone]?.name || '?')[0].toUpperCase();
-  $('up-bio').textContent = 'Загрузка...';
-  $('up-bio').className = 'user-profile-field-value';
-  $('up-registered').textContent = '—';
-  $('up-status').textContent = 'загрузка...';
-  $('up-status').className = 'user-profile-status';
-  
-  try {
-    const res = await fetch(`${API_URL}/api/users/${phone}/profile`, { headers: {'Authorization':'Bearer '+state.token} });
-    if (res.ok) {
-      const data = await res.json();
-      $('up-name').textContent = data.name;
-      $('up-avatar').innerHTML = data.avatar_url ? `<img src="${API_URL}${data.avatar_url}" onerror="this.parentElement.textContent='${data.name[0].toUpperCase()}'">` : data.name[0].toUpperCase();
-      
-      if (data.bio) {
-        $('up-bio').textContent = data.bio;
-        $('up-bio').className = 'user-profile-field-value';
-      } else {
-        $('up-bio').textContent = 'Пользователь не указал информацию о себе';
-        $('up-bio').className = 'user-profile-field-value empty';
-      }
-      
-      if (data.registered_at) {
-        $('up-registered').textContent = new Date(data.registered_at).toLocaleDateString('ru-RU', {year:'numeric', month:'long', day:'numeric'});
-      }
-      
-      if (data.isOnline) {
-        $('up-status').textContent = '● В сети';
-        $('up-status').className = 'user-profile-status online';
-      } else if (data.lastSeen) {
-        $('up-status').textContent = 'Был(а) ' + formatLastSeen(data.lastSeen);
-      } else {
-        $('up-status').textContent = 'Не в сети';
-      }
-    }
-  } catch(e) {
-    $('up-bio').textContent = 'Ошибка загрузки профиля';
-  }
-}
+                const decryptedRaw = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: new Uint8Array(ivArray) },
+                    aesKey,
+                    bytes
+                );
 
-function closeUserProfile() { $('modal-user-profile').classList.add('hidden'); }
+                return new TextDecoder().decode(decryptedRaw);
+            } catch (err) {
+                console.error("Ошибка дешифрования:", err);
+                return "🚨 [Ошибка расшифровки: отсутствует или изменен общий ключ]";
+            }
+        }
 
-// ===== МОЙ ПРОФИЛЬ =====
-function toggleProfile() { $('profile-panel').classList.toggle('open'); }
-function updateProfileUI() {
-  $('profile-name').textContent = state.name;
-  $('profile-phone').textContent = '+7' + state.phone;
-  $('edit-name').value = state.name;
-}
-async function saveProfile() {
-  const name = $('edit-name').value.trim();
-  if (!name) return alert('Имя обязательно');
-  state.name = name;
-  saveAuth();
-  renderChatList();
-  alert('Сохранено!');
-}
-async function uploadAvatar(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const fd = new FormData();
-  fd.append('avatar', file);
-  try {
-    const res = await fetch(`${API_URL}/api/profile/avatar`, { method: 'POST', headers: {'Authorization':'Bearer '+state.token}, body: fd });
-    const data = await res.json();
-    if (res.ok) alert('Аватарка загружена!');
-  } catch(e) { alert('Ошибка загрузки аватарки'); }
-}
+        // --- ИНИЦИАЛИЗАЦИЯ И РАБОТА С СЕТЬЮ ---
 
-// ===== WEBSOCKET =====
-function connectWebSocket() {
-  if (state.ws) state.ws.close();
-  const ws = new WebSocket(WS_URL);
-  state.ws = ws;
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token: state.token }));
-  ws.onmessage = (e) => {
-    const d = JSON.parse(e.data);
-    if (d.type === 'key_exchange') { setKey(d.fromPhone, d.chatKey); if (state.currentChat === d.fromPhone) updateChatStatus(); }
-    else if (d.type === 'new_message') handleIncomingMessage(d);
-    else if (d.type === 'presence') handlePresence(d);
-    else if (d.type === 'user_typing') handleTyping(d);
-    else if (d.type === 'user_uploading') handleUploading(d);
-  };
-  ws.onclose = () => setTimeout(connectWebSocket, 3000);
-}
+        async function initApp() {
+            try {
+                await loadMyProfile();
+                await loadMyChats();
+                connectWebSocket();
+                updateResponsiveLayout();
+            } catch (err) {
+                console.error("Ошибка при инициализации приложения:", err);
+            }
+        }
 
-function handlePresence(data) {
-  state.presenceData[data.phone] = { isOnline: data.isOnline, lastSeen: data.lastSeen };
-  if (state.currentChat === data.phone) updateChatStatus();
-}
+        // Подгрузка и применение профиля
+        async function loadMyProfile() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chats`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                // Чтобы получить актуальные данные себя, мы используем WS handshake или сопоставляем в памяти. 
+                // Создадим эндпоинт или возьмем локальные кэши. Для гарантии актуальности обновим на основе вебсокета.
+            } catch (e) {}
+        }
 
-function handleTyping(data) {
-  if (state.currentChat === data.fromPhone) {
-    const statusEl = $('chat-header-status');
-    if (data.isTyping) {
-      statusEl.textContent = '✍️ Печатает...';
-      statusEl.className = 'chat-header-status typing';
-    } else {
-      updateChatStatus();
-    }
-  }
-}
+        function updateMyProfileUI(user) {
+            currentUser = user;
+            document.getElementById('myProfileName').innerText = user.name;
+            document.getElementById('myProfilePhone').innerText = user.phone;
+            document.getElementById('myProfileUsernameTag').innerText = user.username || '@username';
+            
+            const avatar = document.getElementById('myAvatar');
+            avatar.innerText = user.name.slice(0, 1).toUpperCase();
+            avatar.className = `w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm text-white flex-shrink-0 ${user.avatarColor || 'bg-blue-600'}`;
+        }
 
-function handleUploading(data) {
-  if (state.currentChat === data.fromPhone) {
-    const statusEl = $('chat-header-status');
-    if (data.isUploading) {
-      statusEl.textContent = '📸 Отправляет фото...';
-      statusEl.className = 'chat-header-status typing';
-    } else {
-      updateChatStatus();
-    }
-  }
-}
+        // Загрузка только активных чатов текущего юзера
+        async function loadMyChats() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chats`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    activeChats = await response.json();
+                    renderActiveChatsList(activeChats);
+                }
+            } catch (e) {
+                console.error("Ошибка загрузки активных чатов:", e);
+            }
+        }
 
-function handleIncomingMessage(data) {
-  const phone = data.senderPhone;
-  if (!state.chats[phone]) state.chats[phone] = { name: '+7'+phone, messages: [], lastMsg: null };
-  const msg = {
-    id: data.id, from: phone,
-    text: data.mediaType === 'text' ? decrypt(data.encryptedText, phone) : null,
-    type: data.mediaType, mediaUrl: data.mediaUrl, ts: data.timestamp
-  };
-  state.chats[phone].messages.push(msg);
-  state.chats[phone].lastMsg = { text: msg.text || (msg.type==='image'?'📷 Фото':'...'), type: msg.type, ts: msg.ts };
-  renderChatList();
-  
-  if (state.currentChat === phone) {
-    const container = $('messages-container');
-    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
-    const isOut = msg.from === state.phone;
-    const time = new Date(msg.ts).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
-    let content = '';
-    if (msg.type === 'image' && msg.mediaUrl) content = `<img data-url="${msg.mediaUrl}" class="enc-img" alt="...">`;
-    if (msg.text) content += `<div>${escapeHtml(msg.text)}</div>`;
-    const div = document.createElement('div');
-    div.className = `message ${isOut ? 'out' : 'in'}`;
-    div.innerHTML = `${content}<div class="message-time">${time} <span class="encrypted-badge"></span></div>`;
-    container.appendChild(div);
-    if (isAtBottom) container.scrollTop = container.scrollHeight;
-    setTimeout(loadAndDecryptImages, 50);
-  }
-}
+        // Отрисовка списка диалогов
+        function renderActiveChatsList(chats) {
+            const listContainer = document.getElementById('chatsList');
+            listContainer.innerHTML = '';
 
-// ===== СТАРТ =====
-window.onload = () => {
-  cleanOldCache(); // 🔥 Чистим старый мусор
-  
-  if (loadAuth()) {
-    // Если есть токен — сразу входим
-    initApp();
-  } else {
-    // Нет токена — показываем экран авторизации
-    $('auth-screen').classList.remove('hidden');
-  }
-};
-</script>
+            if (chats.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="p-6 text-center text-slate-500 text-sm">
+                        <i data-lucide="search" class="w-8 h-8 mx-auto text-slate-600 mb-2"></i>
+                        Список чатов пуст.<br>Используйте поиск по номеру телефона или имени выше.
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            chats.forEach(user => {
+                const avatarChar = user.name ? user.name.slice(0, 1).toUpperCase() : '?';
+                const statusColor = user.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600';
+                const activeClass = user.id === activeChatUserId ? 'bg-slate-800 border-l-4 border-blue-500' : 'hover:bg-slate-800/40';
+
+                const contactItem = document.createElement('div');
+                contactItem.className = `p-3 flex items-center justify-between cursor-pointer border-b border-slate-850/50 transition ${activeClass}`;
+                contactItem.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="relative flex-shrink-0">
+                            <div class="w-10 h-10 ${user.avatarColor || 'bg-blue-600'} rounded-full flex items-center justify-center font-bold text-white">
+                                ${avatarChar}
+                            </div>
+                            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 ${statusColor} border-2 border-slate-900 rounded-full"></span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="font-medium text-white text-sm truncate">${user.name}</h4>
+                            <p class="text-xs text-slate-400 font-mono truncate">${user.username ? user.username : user.phone}</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end flex-shrink-0">
+                        <span class="text-[8px] px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800 uppercase tracking-widest font-mono">
+                            ${cryptoSessions[user.id]?.active ? 'Secure' : 'No Key'}
+                        </span>
+                    </div>
+                `;
+
+                contactItem.addEventListener('click', () => selectChat(user));
+                listContainer.appendChild(contactItem);
+            });
+            lucide.createIcons();
+        }
+
+        // Отрисовка результатов поиска (Глобальный поиск)
+        function renderSearchResults(results) {
+            const listContainer = document.getElementById('chatsList');
+            listContainer.innerHTML = '';
+
+            const title = document.createElement('div');
+            title.className = "px-4 py-2 text-xs font-semibold uppercase tracking-wider text-blue-400 bg-blue-950/20";
+            title.innerText = "Результаты поиска";
+            listContainer.appendChild(title);
+
+            if (results.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = "p-4 text-center text-slate-500 text-sm";
+                empty.innerText = "Пользователи не найдены";
+                listContainer.appendChild(empty);
+                return;
+            }
+
+            results.forEach(user => {
+                const avatarChar = user.name ? user.name.slice(0, 1).toUpperCase() : '?';
+                const statusColor = user.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600';
+
+                const item = document.createElement('div');
+                item.className = 'p-3 flex items-center justify-between cursor-pointer border-b border-slate-850/50 transition hover:bg-slate-800/40';
+                item.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="relative flex-shrink-0">
+                            <div class="w-10 h-10 ${user.avatarColor || 'bg-blue-600'} rounded-full flex items-center justify-center font-bold text-white">
+                                ${avatarChar}
+                            </div>
+                            <span class="absolute bottom-0 right-0 w-2.5 h-2.5 ${statusColor} border-2 border-slate-900 rounded-full"></span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="font-medium text-white text-sm truncate">${user.name}</h4>
+                            <p class="text-xs text-blue-400 font-mono truncate">${user.username ? user.username : user.phone}</p>
+                        </div>
+                    </div>
+                    <div class="text-blue-500">
+                        <i data-lucide="message-square-plus" class="w-5 h-5"></i>
+                    </div>
+                `;
+
+                item.addEventListener('click', async () => {
+                    // Активируем чат на сервере
+                    await fetch(`${BACKEND_URL}/api/chats/add`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ partnerId: user.id })
+                    });
+                    
+                    document.getElementById('searchUsers').value = '';
+                    await loadMyChats();
+                    selectChat(user);
+                });
+
+                listContainer.appendChild(item);
+            });
+            lucide.createIcons();
+        }
+
+        // Поиск с дебаунсом
+        let searchTimeout = null;
+        document.getElementById('searchUsers').addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            if (!query) {
+                renderActiveChatsList(activeChats);
+                return;
+            }
+
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch(`${BACKEND_URL}/api/users/search?q=${encodeURIComponent(query)}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (response.ok) {
+                        const results = await response.json();
+                        renderSearchResults(results);
+                    }
+                } catch (err) {
+                    console.error("Ошибка поиска:", err);
+                }
+            }, 250);
+        });
+
+        // Подключение вебсокета
+        function connectWebSocket() {
+            socket = new WebSocket(WS_URL);
+
+            socket.onopen = () => {
+                document.getElementById('connectionErrorModal').classList.add('hidden');
+                socket.send(JSON.stringify({ type: 'auth', token }));
+            };
+
+            socket.onmessage = async (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    switch (data.type) {
+                        case 'auth_success':
+                            updateMyProfileUI(data.user);
+                            break;
+
+                        case 'key_exchange_request': {
+                            const { senderId, initiatorPublicKey } = data;
+                            const myKeyPair = await generateKeyPair();
+                            const myPubJWK = await exportPublicKey(myKeyPair.publicKey);
+                            const foreignPubKey = await importPublicKey(initiatorPublicKey);
+
+                            const sharedAesKey = await deriveAesKey(myKeyPair.privateKey, foreignPubKey);
+                            const hexSecret = await exportKeyToHex(sharedAesKey);
+
+                            cryptoSessions[senderId] = {
+                                privateKey: myKeyPair.privateKey,
+                                publicKey: myKeyPair.publicKey,
+                                sharedSecretKey: sharedAesKey,
+                                hexSecret: hexSecret,
+                                active: true
+                            };
+
+                            socket.send(JSON.stringify({
+                                type: 'key_exchange_accept',
+                                recipientId: senderId,
+                                recipientPublicKey: myPubJWK
+                            }));
+
+                            updateEncryptionUI();
+                            renderActiveChatsList(activeChats);
+                            break;
+                        }
+
+                        case 'key_exchange_complete': {
+                            const { senderId, recipientPublicKey } = data;
+                            const session = cryptoSessions[senderId];
+                            if (session && session.privateKey) {
+                                const foreignPubKey = await importPublicKey(recipientPublicKey);
+                                const sharedAesKey = await deriveAesKey(session.privateKey, foreignPubKey);
+                                const hexSecret = await exportKeyToHex(sharedAesKey);
+
+                                session.sharedSecretKey = sharedAesKey;
+                                session.hexSecret = hexSecret;
+                                session.active = true;
+
+                                updateEncryptionUI();
+                                renderActiveChatsList(activeChats);
+                                addSystemMessage(senderId, "🔐 Зашифрованное соединение установлено успешно!");
+                            }
+                            break;
+                        }
+
+                        case 'secure_message': {
+                            const { senderId, encryptedPayload, iv, timestamp } = data;
+                            
+                            // Автоматически добавляем чат на клиенте, если нам написали
+                            if (!activeChats.some(c => c.id === senderId)) {
+                                await loadMyChats();
+                            }
+
+                            const session = cryptoSessions[senderId];
+                            let decryptedText = "🚨 Сообщение зашифровано. Настройка канала...";
+                            
+                            if (session && session.active) {
+                                decryptedText = await decryptMessage(encryptedPayload, iv, session.sharedSecretKey);
+                            } else {
+                                startKeyExchange(senderId);
+                            }
+
+                            appendMessage({
+                                sender: 'them',
+                                text: decryptedText,
+                                timestamp
+                            }, senderId);
+                            break;
+                        }
+
+                        case 'secure_message_sync': {
+                            // Синхронизация отправленного сообщения с других устройств текущего юзера
+                            const { recipientId, encryptedPayload, iv, timestamp } = data;
+                            const session = cryptoSessions[recipientId];
+                            let decryptedText = "[Синхронизированное сообщение]";
+                            if (session && session.active) {
+                                decryptedText = await decryptMessage(encryptedPayload, iv, session.sharedSecretKey);
+                            }
+                            appendMessage({
+                                sender: 'me',
+                                text: decryptedText,
+                                timestamp
+                            }, recipientId);
+                            break;
+                        }
+
+                        case 'user_status_change': {
+                            const { userId, status } = data;
+                            const chatUser = activeChats.find(u => u.id === userId);
+                            if (chatUser) {
+                                chatUser.status = status;
+                                renderActiveChatsList(activeChats);
+                                if (activeChatUserId === userId) {
+                                    updateChatHeaderStatus(status);
+                                }
+                            }
+                            break;
+                        }
+
+                        case 'typing': {
+                            const { senderId, isTyping } = data;
+                            if (activeChatUserId === senderId) {
+                                document.getElementById('typingStatus').innerText = isTyping ? 'печатает...' : '';
+                            }
+                            break;
+                        }
+
+                        case 'profile_updated':
+                            if (currentUser && data.user.id === currentUser.id) {
+                                updateMyProfileUI(data.user);
+                            }
+                            break;
+                    }
+                } catch (e) {
+                    console.error("Ошибка WebSocket:", e);
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('connectionErrorModal').classList.remove('hidden');
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        async function startKeyExchange(recipientId) {
+            const myKeyPair = await generateKeyPair();
+            const myPubJWK = await exportPublicKey(myKeyPair.publicKey);
+
+            cryptoSessions[recipientId] = {
+                privateKey: myKeyPair.privateKey,
+                publicKey: myKeyPair.publicKey,
+                sharedSecretKey: null,
+                active: false
+            };
+
+            socket.send(JSON.stringify({
+                type: 'key_exchange_init',
+                recipientId,
+                initiatorPublicKey: myPubJWK
+            }));
+
+            updateEncryptionUI();
+        }
+
+        // Выбор чата
+        async function selectChat(user) {
+            activeChatUserId = user.id;
+            updateResponsiveLayout();
+
+            const chatActive = document.getElementById('chatAreaActive');
+            chatActive.classList.remove('hidden');
+
+            document.getElementById('chatTitle').innerText = user.name;
+            updateChatHeaderStatus(user.status);
+
+            const messagesBox = document.getElementById('messagesBox');
+            messagesBox.innerHTML = '';
+
+            const avatar = document.getElementById('chatAvatar');
+            avatar.innerText = user.name.slice(0, 1).toUpperCase();
+            avatar.className = `w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-md shadow-md flex-shrink-0 ${user.avatarColor || 'bg-blue-600'}`;
+
+            // Если сессия шифрования не настроена, запускаем DH обмен
+            if (!cryptoSessions[user.id] || !cryptoSessions[user.id].active) {
+                updateEncryptionUI('process');
+                await startKeyExchange(user.id);
+            } else {
+                updateEncryptionUI('active');
+            }
+
+            // Загрузка истории переписки с сервера
+            await loadChatHistory(user.id);
+            renderActiveChatsList(activeChats);
+        }
+
+        async function loadChatHistory(userId) {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chats/history?userId=${userId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const history = await response.json();
+                    const messagesBox = document.getElementById('messagesBox');
+                    messagesBox.innerHTML = ''; // Очищаем
+
+                    for (const msg of history) {
+                        const session = cryptoSessions[userId];
+                        let text = "🚨 Сообщение зашифровано (сессия не готова)";
+                        
+                        if (session && session.active) {
+                            text = await decryptMessage(msg.encryptedPayload, msg.iv, session.sharedSecretKey);
+                        }
+                        
+                        appendMessage({
+                            sender: msg.senderId === currentUser.id ? 'me' : 'them',
+                            text,
+                            timestamp: msg.timestamp
+                        }, userId);
+                    }
+                }
+            } catch (e) {
+                console.error("Не удалось восстановить историю:", e);
+            }
+        }
+
+        function updateChatHeaderStatus(status) {
+            const dot = document.getElementById('chatStatusDot');
+            const txt = document.getElementById('chatStatusText');
+            if (status === 'online') {
+                dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse";
+                txt.innerText = 'в сети';
+                txt.className = 'text-[11px] text-emerald-400';
+            } else {
+                dot.className = "w-1.5 h-1.5 rounded-full bg-slate-500";
+                txt.innerText = 'не в сети';
+                txt.className = 'text-[11px] text-slate-400';
+            }
+        }
+
+        function updateEncryptionUI() {
+            if (!activeChatUserId) return;
+            const session = cryptoSessions[activeChatUserId];
+            const indicatorPulse = document.getElementById('secureIndicatorPulse');
+            const indicatorDot = document.getElementById('secureIndicatorDot');
+            const label = document.getElementById('encryptionStatusLabel');
+            const sharedSecretDisplay = document.getElementById('sharedSecretHex');
+
+            if (session && session.active) {
+                indicatorPulse.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75";
+                indicatorDot.className = "relative inline-flex rounded-full h-2 w-2 bg-emerald-500";
+                label.innerText = "Шифрование активно";
+                label.className = "text-[10px] md:text-[11px] font-mono font-medium text-emerald-400";
+                sharedSecretDisplay.innerText = session.hexSecret || "вычисляется...";
+            } else {
+                indicatorPulse.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75";
+                indicatorDot.className = "relative inline-flex rounded-full h-2 w-2 bg-amber-500";
+                label.innerText = "Генерация ключей...";
+                label.className = "text-[10px] md:text-[11px] font-mono font-medium text-amber-400";
+                sharedSecretDisplay.innerText = "Вычисление общего секретного ключа по схеме DH...";
+            }
+        }
+
+        function appendMessage(msg, chatUserId) {
+            if (chatUserId !== activeChatUserId) return;
+
+            const box = document.getElementById('messagesBox');
+            const isMe = msg.sender === 'me';
+            
+            const outerDiv = document.createElement('div');
+            outerDiv.className = `flex ${isMe ? 'justify-end' : 'justify-start'} w-full`;
+
+            const innerDiv = document.createElement('div');
+            innerDiv.className = `max-w-[80%] rounded-2xl p-3 shadow-md relative group ${
+                isMe 
+                ? 'bg-blue-600 text-white rounded-tr-none' 
+                : 'bg-slate-900 text-slate-100 border border-slate-800/80 rounded-tl-none'
+            }`;
+
+            const timeString = new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            innerDiv.innerHTML = `
+                <p class="text-[14px] md:text-[15px] break-words whitespace-pre-wrap leading-relaxed pr-6 select-text">${msg.text}</p>
+                <span class="absolute bottom-1 right-2 text-[9px] ${isMe ? 'text-blue-200' : 'text-slate-500'} font-mono">${timeString}</span>
+            `;
+
+            outerDiv.appendChild(innerDiv);
+            box.appendChild(outerDiv);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function addSystemMessage(chatUserId, text) {
+            if (chatUserId !== activeChatUserId) return;
+            const box = document.getElementById('messagesBox');
+            const div = document.createElement('div');
+            div.className = "flex justify-center w-full my-1";
+            div.innerHTML = `
+                <span class="bg-slate-900/60 border border-slate-800 text-slate-400 text-[10px] px-3 py-1 rounded-full font-mono text-center">
+                    ${text}
+                </span>
+            `;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        // ---ОТПРАВКА СООБЩЕНИЙ---
+
+        const messageForm = document.getElementById('sendMessageForm');
+        const messageInput = document.getElementById('messageInput');
+
+        messageForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = messageInput.value.trim();
+            if (!text || !activeChatUserId) return;
+
+            const session = cryptoSessions[activeChatUserId];
+            if (!session || !session.active) {
+                addSystemMessage(activeChatUserId, "⚠️ Ошибка: Сессия шифрования не готова.");
+                return;
+            }
+
+            messageInput.value = '';
+
+            try {
+                const { payload, iv } = await encryptMessage(text, session.sharedSecretKey);
+
+                socket.send(JSON.stringify({
+                    type: 'secure_message',
+                    recipientId: activeChatUserId,
+                    encryptedPayload: payload,
+                    iv: iv
+                }));
+
+                appendMessage({
+                    sender: 'me',
+                    text: text,
+                    timestamp: Date.now()
+                }, activeChatUserId);
+
+            } catch (err) {
+                console.error("Ошибка шифрования/отправки сообщения:", err);
+            }
+        });
+
+        messageInput.addEventListener('input', () => {
+            if (!activeChatUserId || !socket) return;
+            
+            socket.send(JSON.stringify({
+                type: 'typing',
+                recipientId: activeChatUserId,
+                isTyping: true
+            }));
+
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    recipientId: activeChatUserId,
+                    isTyping: false
+                }));
+            }, 1500);
+        });
+
+        // --- НАСТРОЙКИ ПРОФИЛЯ (МОЙ АККАУНТ) ---
+
+        const settingsModal = document.getElementById('settingsModal');
+        const btnOpenSettings = document.getElementById('btnOpenSettings');
+        const btnCloseSettings = document.getElementById('btnCloseSettings');
+        const btnCancelSettings = document.getElementById('btnCancelSettings');
+        const btnSaveProfile = document.getElementById('btnSaveProfile');
+        const settingsStatus = document.getElementById('settingsStatus');
+
+        // Открытие настроек
+        btnOpenSettings.addEventListener('click', () => {
+            if (!currentUser) return;
+            
+            document.getElementById('settingsName').value = currentUser.name || '';
+            document.getElementById('settingsUsername').value = (currentUser.username || '').replace('@', '');
+            document.getElementById('settingsBio').value = currentUser.bio || '';
+            
+            selectedAvatarColor = currentUser.avatarColor || 'bg-blue-600';
+            updateSelectedColorIndicator(selectedAvatarColor);
+            
+            settingsStatus.className = "hidden text-xs text-center font-medium p-2 rounded-xl";
+            settingsModal.classList.remove('hidden');
+        });
+
+        // Цветовая палитра аватара
+        document.getElementById('avatarColorPicker').addEventListener('click', (e) => {
+            const btn = e.target.closest('button');
+            if (btn) {
+                selectedAvatarColor = btn.getAttribute('data-color');
+                updateSelectedColorIndicator(selectedAvatarColor);
+            }
+        });
+
+        function updateSelectedColorIndicator(colorClass) {
+            const buttons = document.querySelectorAll('#avatarColorPicker button');
+            buttons.forEach(btn => {
+                if (btn.getAttribute('data-color') === colorClass) {
+                    btn.className = `w-8 h-8 rounded-full ${colorClass} border-2 border-white scale-110 transition-all`;
+                } else {
+                    const normalColor = btn.getAttribute('data-color');
+                    btn.className = `w-8 h-8 rounded-full ${normalColor} border-2 border-transparent transition-all hover:scale-105`;
+                }
+            });
+        }
+
+        // Закрытие настроек
+        const closeSettings = () => settingsModal.classList.add('hidden');
+        btnCloseSettings.addEventListener('click', closeSettings);
+        btnCancelSettings.addEventListener('click', closeSettings);
+
+        // Сохранить профиль
+        btnSaveProfile.addEventListener('click', async () => {
+            const name = document.getElementById('settingsName').value.trim();
+            const username = document.getElementById('settingsUsername').value.trim();
+            const bio = document.getElementById('settingsBio').value.trim();
+
+            if (!name) {
+                showSettingsMessage("Имя обязательно для заполнения", "error");
+                return;
+            }
+
+            btnSaveProfile.disabled = true;
+            btnSaveProfile.innerText = "Сохранение...";
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/profile/update`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        username: username ? '@' + username : '',
+                        bio,
+                        avatarColor: selectedAvatarColor
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    showSettingsMessage("Профиль успешно обновлен!", "success");
+                    updateMyProfileUI(data.user);
+                    setTimeout(closeSettings, 800);
+                } else {
+                    showSettingsMessage(data.error || "Произошла ошибка при обновлении", "error");
+                }
+            } catch (err) {
+                showSettingsMessage("Ошибка связи с сервером", "error");
+            } finally {
+                btnSaveProfile.disabled = false;
+                btnSaveProfile.innerText = "Сохранить";
+            }
+        });
+
+        function showSettingsMessage(text, type) {
+            settingsStatus.classList.remove('hidden');
+            settingsStatus.innerText = text;
+            if (type === 'success') {
+                settingsStatus.className = "text-xs text-center font-medium p-2.5 rounded-xl bg-emerald-950/50 border border-emerald-800 text-emerald-400";
+            } else {
+                settingsStatus.className = "text-xs text-center font-medium p-2.5 rounded-xl bg-red-950/50 border border-red-800 text-red-400";
+            }
+        }
+    </script>
 </body>
 </html>

@@ -1,507 +1,580 @@
 /**
-====================================================================
-ANTI-SCAM MESSENGER v4.0 - ПРОФИЛИ + СТАТУСЫ + ПЕЧАТЬ
-====================================================================
-*/
+ * CipherTalk (КипяТок) Backend
+ * Файл: server.js
+ * Назначение: Главный сервер авторизации, маршрутизации, синхронизации мульти-девайсов 
+ * и хранения зашифрованной переписки в папке 'server-data'.
+ */
 
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
-const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
 const cors = require('cors');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-const PORT = process.env.PORT || 3000;
-
-// ========== ХРАНИЛИЩЕ ==========
-const DATA_DIR = path.join(__dirname, 'server-data');
-const UPLOADS_DIR = path.join(DATA_DIR, 'encrypted_media');
-const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
-const DB_FILE = path.join(DATA_DIR, 'antiscam.db');
-
-[DATA_DIR, UPLOADS_DIR, AVATARS_DIR].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-});
-
-const SMS_CONFIG = { demoMode: true, apiId: 'YOUR_SMS_RU_KEY' };
-
 app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json());
 
-// Multer для медиа
-const mediaStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-  filename: (req, file, cb) => cb(null, crypto.randomBytes(24).toString('hex'))
-});
-const uploadMedia = multer({ storage: mediaStorage, limits: { fileSize: 15 * 1024 * 1024 } });
-
-// Multer для аватарок
-const avatarStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, AVATARS_DIR),
-  filename: (req, file, cb) => cb(null, req.userPhone + '_' + Date.now() + path.extname(file.originalname))
-});
-const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
-
-// ========== БАЗА ДАННЫХ ==========
-const db = new sqlite3.Database(DB_FILE, (err) => {
-  if (err) console.error('[-] Ошибка БД:', err.message);
-  else {
-    console.log('[+] БД подключена');
-    createTables();
-  }
-});
-
-function createTables() {
-  db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-      phone TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      bio TEXT DEFAULT '',
-      avatar_url TEXT,
-      registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
-    db.run(`CREATE TABLE IF NOT EXISTS otp_codes (
-      phone TEXT PRIMARY KEY,
-      code TEXT NOT NULL,
-      expires_at INTEGER NOT NULL
-    )`);
-    
-    db.run(`CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      sender_phone TEXT NOT NULL,
-      receiver_phone TEXT NOT NULL,
-      encrypted_text TEXT NOT NULL,
-      media_url TEXT,
-      media_type TEXT,
-      timestamp INTEGER NOT NULL
-    )`);
-    
-    // 🔑 Ключи шифрования
-    db.run(`CREATE TABLE IF NOT EXISTS chat_keys (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      owner_phone TEXT NOT NULL,
-      contact_phone TEXT NOT NULL,
-      chat_key TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(owner_phone, contact_phone)
-    )`);
-    
-    // 📱 Сессии устройств
-    db.run(`CREATE TABLE IF NOT EXISTS user_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone TEXT NOT NULL,
-      device_id TEXT NOT NULL,
-      device_name TEXT,
-      token TEXT UNIQUE NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (phone) REFERENCES users(phone)
-    )`);
-    
-    //  Активность пользователя (last_seen)
-    db.run(`CREATE TABLE IF NOT EXISTS user_activity (
-      phone TEXT PRIMARY KEY,
-      last_seen INTEGER NOT NULL,
-      is_online INTEGER DEFAULT 0
-    )`);
-  });
+// Путь к папке для хранения зашифрованных историй переписок и данных пользователей
+const DATA_DIR = path.join(__dirname, 'server-data');
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// ========== СЕССИИ И СТАТУСЫ ==========
-const activeSessions = new Map();
-const onlineClients = new Map(); // phone -> Set of ws
-const userStatus = new Map();    // phone -> { typing: bool, uploading: bool, lastSeen: timestamp }
+// Хранение данных в памяти с дублированием на диск
+const usersFile = path.join(DATA_DIR, 'users.json');
+let users = new Map(); // userId -> user object
 
-function requireAuth(req, res, next) {
-  const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Токен отсутствует' });
-  
-  db.get(`SELECT phone, device_id FROM user_sessions WHERE token = ?`, [token], (err, session) => {
-    if (err || !session) return res.status(403).json({ error: 'Сессия недействительна' });
-    req.userPhone = session.phone;
-    req.deviceId = session.device_id;
-    req.token = token;
-    db.run(`UPDATE user_sessions SET last_active = CURRENT_TIMESTAMP WHERE token = ?`, [token]);
-    next();
-  });
-}
-
-// Обновить last_seen
-function updateLastSeen(phone) {
-  const now = Date.now();
-  db.run(`INSERT OR REPLACE INTO user_activity (phone, last_seen, is_online) VALUES (?, ?, 1)`, [phone, now]);
-  userStatus.set(phone, { ...userStatus.get(phone), lastSeen: now });
-}
-
-// ========== СМС ==========
-async function sendVerificationSms(phone, code) {
-  console.log(`\n${'='.repeat(60)}\n СМС ДЛЯ +7${phone}: ${code}\n${'='.repeat(60)}\n`);
-  if (SMS_CONFIG.demoMode) return true;
-  try {
-    const res = await fetch(`https://sms.ru/sms/send?api_id=${SMS_CONFIG.apiId}&to=7${phone}&msg=${encodeURIComponent(`Код Anti-Scam: ${code}`)}&json=1`);
-    return (await res.json()).status === "OK";
-  } catch (e) { return false; }
-}
-
-// ========== REST API ==========
-
-app.post('/api/auth/request-otp', (req, res) => {
-  const { phone } = req.body;
-  if (!phone || phone.length !== 10 || !/^\d+$/.test(phone)) {
-    return res.status(400).json({ error: 'Введите 10 цифр' });
-  }
-  const code = Math.floor(1000 + Math.random() * 9000).toString();
-  const expiresAt = Date.now() + 5 * 60 * 1000;
-  db.run(`INSERT OR REPLACE INTO otp_codes (phone, code, expires_at) VALUES (?, ?, ?)`,
-    [phone, code, expiresAt], async (err) => {
-      if (err) return res.status(500).json({ error: 'Ошибка БД' });
-      await sendVerificationSms(phone, code);
-      res.json({ message: 'Код отправлен' });
-    });
-});
-
-app.post('/api/auth/verify-otp', (req, res) => {
-  const { phone, code, deviceId, deviceName } = req.body;
-  if (!phone || !code) return res.status(400).json({ error: 'Укажите телефон и код' });
-  
-  db.get(`SELECT * FROM otp_codes WHERE phone = ?`, [phone], (err, row) => {
-    if (err || !row) return res.status(400).json({ error: 'Код не запрошен' });
-    if (Date.now() > row.expires_at) {
-      db.run(`DELETE FROM otp_codes WHERE phone = ?`, [phone]);
-      return res.status(400).json({ error: 'Код истёк' });
-    }
-    if (row.code !== code) return res.status(400).json({ error: 'Неверный код' });
-    
-    db.run(`DELETE FROM otp_codes WHERE phone = ?`, [phone]);
-    db.get(`SELECT phone, name, avatar_url, bio FROM users WHERE phone = ?`, [phone], (err, user) => {
-      if (user) {
-        const token = crypto.randomBytes(32).toString('hex');
-        db.run(`INSERT INTO user_sessions (phone, device_id, device_name, token) VALUES (?, ?, ?, ?)`,
-          [phone, deviceId || 'web_' + Date.now(), deviceName || 'Веб-браузер', token], (err) => {
-            if (err) return res.status(500).json({ error: 'Ошибка создания сессии' });
-            activeSessions.set(token, { phone, deviceId });
-            res.json({ status: 'login_success', token, user, deviceId });
-          });
-      } else {
-        res.json({ status: 'need_registration', phone });
-      }
-    });
-  });
-});
-
-app.post('/api/auth/register', async (req, res) => {
-  const { phone, name, password, deviceId, deviceName } = req.body;
-  if (!phone || !name || !password || password.length < 6) {
-    return res.status(400).json({ error: 'Все поля обязательны, пароль мин. 6 символов' });
-  }
-  try {
-    const hash = await bcrypt.hash(password, 12);
-    db.run(`INSERT INTO users (phone, name, password_hash) VALUES (?, ?, ?)`,
-      [phone, name, hash], (err) => {
-        if (err) return res.status(400).json({ error: 'Номер занят' });
-        const token = crypto.randomBytes(32).toString('hex');
-        db.run(`INSERT INTO user_sessions (phone, device_id, device_name, token) VALUES (?, ?, ?, ?)`,
-          [phone, deviceId || 'web_' + Date.now(), deviceName || 'Веб-браузер', token], (err2) => {
-            if (err2) return res.status(500).json({ error: 'Ошибка сессии' });
-            activeSessions.set(token, { phone, deviceId });
-            res.status(201).json({ token, user: { phone, name, avatar_url: null, bio: '' }, deviceId });
-          });
-      });
-  } catch (e) { res.status(500).json({ error: 'Ошибка сервера' }); }
-});
-
-app.post('/api/auth/login-password', async (req, res) => {
-  const { phone, password, deviceId, deviceName } = req.body;
-  db.get(`SELECT * FROM users WHERE phone = ?`, [phone], async (err, user) => {
-    if (err || !user) return res.status(400).json({ error: 'Пользователь не найден' });
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.status(401).json({ error: 'Неверный пароль' });
-    
-    const token = crypto.randomBytes(32).toString('hex');
-    db.run(`INSERT INTO user_sessions (phone, device_id, device_name, token) VALUES (?, ?, ?, ?)`,
-      [phone, deviceId || 'web_' + Date.now(), deviceName || 'Веб-браузер', token], (err) => {
-        if (err) return res.status(500).json({ error: 'Ошибка сессии' });
-        activeSessions.set(token, { phone, deviceId });
-        res.json({ token, user: { phone: user.phone, name: user.name, avatar_url: user.avatar_url, bio: user.bio }, deviceId });
-      });
-  });
-});
-
-// Получить свои сессии
-app.get('/api/auth/sessions', requireAuth, (req, res) => {
-  db.all(`SELECT device_id, device_name, created_at, last_active FROM user_sessions 
-          WHERE phone = ? ORDER BY last_active DESC`, [req.userPhone], (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Ошибка' });
-    res.json(rows);
-  });
-});
-
-// Удалить сессию
-app.delete('/api/auth/sessions/:deviceId', requireAuth, (req, res) => {
-  const { deviceId } = req.params;
-  db.run(`DELETE FROM user_sessions WHERE phone = ? AND device_id = ?`, 
-    [req.userPhone, deviceId], (err) => {
-      if (err) return res.status(500).json({ error: 'Ошибка' });
-      res.json({ message: 'Сессия удалена' });
-    });
-});
-
-//  ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (для просмотра)
-app.get('/api/users/:phone/profile', requireAuth, (req, res) => {
-  const targetPhone = req.params.phone;
-  db.get(`SELECT phone, name, bio, avatar_url, registered_at FROM users WHERE phone = ?`, 
-    [targetPhone], (err, row) => {
-      if (err || !row) return res.status(404).json({ error: 'Не найден' });
-      
-      // Получаем last_seen из таблицы активности
-      db.get(`SELECT last_seen FROM user_activity WHERE phone = ?`, [targetPhone], (err2, act) => {
-        const isOnline = onlineClients.has(targetPhone);
-        res.json({
-          ...row,
-          lastSeen: act ? act.last_seen : null,
-          isOnline
-        });
-      });
-    });
-});
-
-// Поиск пользователя
-app.get('/api/users/find/:phone', requireAuth, (req, res) => {
-  db.get(`SELECT phone, name, avatar_url FROM users WHERE phone = ?`, [req.params.phone], (err, row) => {
-    if (err || !row) return res.status(404).json({ error: 'Не найден' });
-    res.json(row);
-  });
-});
-
-app.get('/api/messages/history/:contactPhone', requireAuth, (req, res) => {
-  db.all(`SELECT * FROM messages WHERE (sender_phone = ? AND receiver_phone = ?) OR (sender_phone = ? AND receiver_phone = ?) ORDER BY timestamp ASC`,
-    [req.userPhone, req.params.contactPhone, req.params.contactPhone, req.userPhone],
-    (err, rows) => err ? res.status(500).json({ error: 'Ошибка' }) : res.json(rows));
-});
-
-app.post('/api/media/upload', requireAuth, uploadMedia.single('media'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
-  res.json({ mediaUrl: `/api/media/download/${req.file.filename}` });
-});
-
-app.get('/api/media/download/:filename', requireAuth, (req, res) => {
-  const filePath = path.join(UPLOADS_DIR, req.params.filename);
-  fs.existsSync(filePath) ? res.sendFile(filePath) : res.status(404).json({ error: 'Не найдено' });
-});
-
-// 🔑 Ключи
-app.post('/api/keys/save', requireAuth, (req, res) => {
-  const { contactPhone, chatKey } = req.body;
-  db.run(`INSERT OR REPLACE INTO chat_keys (owner_phone, contact_phone, chat_key) VALUES (?, ?, ?)`,
-    [req.userPhone, contactPhone, chatKey], (err) => {
-      if (err) return res.status(500).json({ error: 'Ошибка' });
-      res.json({ message: 'Ключ сохранён' });
-    });
-});
-
-app.get('/api/keys/all', requireAuth, (req, res) => {
-  db.all(`SELECT contact_phone, chat_key FROM chat_keys WHERE owner_phone = ?`, 
-    [req.userPhone], (err, rows) => {
-      if (err) return res.status(500).json({ error: 'Ошибка' });
-      res.json(rows);
-    });
-});
-
-// 👤 Профиль текущего пользователя
-app.get('/api/profile', requireAuth, (req, res) => {
-  db.get(`SELECT phone, name, avatar_url, bio FROM users WHERE phone = ?`, [req.userPhone],
-    (err, row) => err || !row ? res.status(404).json({ error: 'Не найден' }) : res.json(row));
-});
-
-// Обновить профиль
-app.post('/api/profile/update', requireAuth, (req, res) => {
-  const { name, bio } = req.body;
-  if (!name) return res.status(400).json({ error: 'Имя обязательно' });
-  db.run(`UPDATE users SET name = ?, bio = ? WHERE phone = ?`, [name, bio || '', req.userPhone],
-    (err) => err ? res.status(500).json({ error: 'Ошибка' }) : res.json({ message: 'Профиль обновлён' }));
-});
-
-// Загрузить аватар
-app.post('/api/profile/avatar', requireAuth, uploadAvatar.single('avatar'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
-  const avatarUrl = `/api/avatars/${req.file.filename}`;
-  db.run(`UPDATE users SET avatar_url = ? WHERE phone = ?`, [avatarUrl, req.userPhone],
-    (err) => err ? res.status(500).json({ error: 'Ошибка' }) : res.json({ avatarUrl }));
-});
-
-app.get('/api/avatars/:filename', (req, res) => {
-  const filePath = path.join(AVATARS_DIR, req.params.filename);
-  fs.existsSync(filePath) ? res.sendFile(filePath) : res.status(404).json({ error: 'Не найдено' });
-});
-
-// ========== WEBSOCKET ==========
-wss.on('connection', (ws) => {
-  let sessionInfo = null;
-
-  ws.on('message', async (message) => {
+// Загрузка пользователей при старте
+if (fs.existsSync(usersFile)) {
     try {
-      const data = JSON.parse(message);
-
-      if (data.type === 'auth') {
-        const token = data.token;
-        db.get(`SELECT phone, device_id FROM user_sessions WHERE token = ?`, [token], (err, session) => {
-          if (session) {
-            sessionInfo = session;
-            if (!onlineClients.has(session.phone)) {
-              onlineClients.set(session.phone, new Set());
-            }
-            onlineClients.get(session.phone).add(ws);
-            
-            // Обновляем статус онлайн
-            updateLastSeen(session.phone);
-            userStatus.set(session.phone, { typing: false, uploading: false, lastSeen: Date.now() });
-            
-            ws.send(JSON.stringify({ type: 'auth_success' }));
-            console.log(`[+] WS: +7${session.phone} (${session.device_id}) онлайн`);
-            
-            // Оповещаем всех, кто имеет чат с этим пользователем
-            broadcastPresence(session.phone, true);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', error: 'Неверный токен' }));
-            ws.close();
-          }
-        });
-        return;
-      }
-
-      if (!sessionInfo) {
-        ws.send(JSON.stringify({ type: 'error', error: 'Требуется авторизация' }));
-        return;
-      }
-
-      // Обновляем last_seen при любой активности
-      updateLastSeen(sessionInfo.phone);
-
-      // 📝 СТАТУС "ПЕЧАТАЕТ"
-      if (data.type === 'typing') {
-        const { receiverPhone, isTyping } = data;
-        const status = userStatus.get(sessionInfo.phone) || { typing: false, uploading: false, lastSeen: Date.now() };
-        status.typing = isTyping;
-        userStatus.set(sessionInfo.phone, status);
-        
-        if (onlineClients.has(receiverPhone)) {
-          onlineClients.get(receiverPhone).forEach(client => {
-            client.send(JSON.stringify({
-              type: 'user_typing',
-              fromPhone: sessionInfo.phone,
-              isTyping
-            }));
-          });
+        const raw = fs.readFileSync(usersFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        for (const u of parsed) {
+            // Гарантируем наличие массива чатов для каждого пользователя
+            if (!u.chats) u.chats = [];
+            users.set(u.id, u);
         }
-        return;
-      }
-
-      // 📸 СТАТУС "ОТПРАВЛЯЕТ ФОТО"
-      if (data.type === 'uploading_photo') {
-        const { receiverPhone, isUploading } = data;
-        const status = userStatus.get(sessionInfo.phone) || { typing: false, uploading: false, lastSeen: Date.now() };
-        status.uploading = isUploading;
-        userStatus.set(sessionInfo.phone, status);
-        
-        if (onlineClients.has(receiverPhone)) {
-          onlineClients.get(receiverPhone).forEach(client => {
-            client.send(JSON.stringify({
-              type: 'user_uploading',
-              fromPhone: sessionInfo.phone,
-              isUploading
-            }));
-          });
-        }
-        return;
-      }
-
-      // 💬 Сообщение
-      if (data.type === 'message') {
-        const { receiverPhone, encryptedText, mediaUrl, mediaType } = data;
-        const messageId = crypto.randomUUID();
-        const timestamp = Date.now();
-
-        db.run(`INSERT INTO messages (id, sender_phone, receiver_phone, encrypted_text, media_url, media_type, timestamp) 
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [messageId, sessionInfo.phone, receiverPhone, encryptedText, mediaUrl, mediaType || 'text', timestamp],
-          (err) => {
-            if (err) {
-              ws.send(JSON.stringify({ type: 'error', error: 'Ошибка сохранения' }));
-              return;
-            }
-            const payload = {
-              type: 'new_message',
-              id: messageId,
-              senderPhone: sessionInfo.phone,
-              receiverPhone,
-              encryptedText,
-              mediaUrl,
-              mediaType: mediaType || 'text',
-              timestamp
-            };
-            if (onlineClients.has(receiverPhone)) {
-              onlineClients.get(receiverPhone).forEach(client => client.send(JSON.stringify(payload)));
-            }
-            ws.send(JSON.stringify({ type: 'msg_delivered', messageId }));
-          });
-      }
-
     } catch (e) {
-      ws.send(JSON.stringify({ type: 'error', error: 'Неверный формат' }));
+        console.error("Ошибка чтения пользователей с диска:", e);
     }
-  });
-
-  ws.on('close', () => {
-    if (sessionInfo) {
-      if (onlineClients.has(sessionInfo.phone)) {
-        onlineClients.get(sessionInfo.phone).delete(ws);
-        if (onlineClients.get(sessionInfo.phone).size === 0) {
-          onlineClients.delete(sessionInfo.phone);
-          
-          // Обновляем last_seen и статус оффлайн
-          db.run(`UPDATE user_activity SET last_seen = ?, is_online = 0 WHERE phone = ?`, 
-            [Date.now(), sessionInfo.phone]);
-          const status = userStatus.get(sessionInfo.phone) || {};
-          status.lastSeen = Date.now();
-          userStatus.set(sessionInfo.phone, status);
-          
-          broadcastPresence(sessionInfo.phone, false);
-        }
-      }
-      console.log(`[-] WS: +7${sessionInfo.phone} оффлайн`);
-    }
-  });
-});
-
-// Оповестить о смене статуса (онлайн/оффлайн)
-function broadcastPresence(phone, isOnline) {
-  const payload = {
-    type: 'presence',
-    phone,
-    isOnline,
-    lastSeen: Date.now()
-  };
-  // Отправляем всем, кто онлайн (они сами решат, показывать или нет)
-  onlineClients.forEach((clients, clientPhone) => {
-    if (clientPhone !== phone) {
-      clients.forEach(client => client.send(JSON.stringify(payload)));
-    }
-  });
 }
 
-// ========== ЗАПУСК ==========
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`🚀 ANTI-SCAM v4.0 ЗАПУЩЕН!`);
-  console.log(`📱 Профили | ⏰ Статусы | ️ Печать | 📸 Загрузка фото`);
-  console.log(`${'='.repeat(60)}\n`);
+function saveUsersToDisk() {
+    try {
+        const list = Array.from(users.values());
+        fs.writeFileSync(usersFile, JSON.stringify(list, null, 2), 'utf8');
+    } catch (e) {
+        console.error("Ошибка сохранения пользователей на диск:", e);
+    }
+}
+
+const verificationCodes = new Map(); // phone -> code
+const sessions = new Map();         // token -> userId
+
+// Мульти-девайсы: храним массив соединений для каждого userId
+// userId -> Set of WebSockets
+const activeConnections = new Map(); 
+
+// --- REST API ЭНДПОИНТЫ ---
+
+/**
+ * 1. Запрос кода авторизации (Эмуляция SMS через консоль)
+ */
+app.post('/api/auth/request-code', (req, res) => {
+    const { phone } = req.body;
+    if (!phone) {
+        return res.status(400).json({ error: 'Номер телефона обязателен' });
+    }
+
+    // Очистка номера телефона от лишних символов
+    const cleanPhone = phone.replace(/[\s()\-+]/g, '');
+
+    // Генерация 4-значного кода
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    verificationCodes.set(cleanPhone, code);
+
+    // Вывод кода в лог сервера по вашему формату
+    console.log(`\n========================================`);
+    console.log(`+${cleanPhone} - код: ${code}`);
+    console.log(`========================================\n`);
+
+    res.json({ success: true, message: 'Код отправлен (проверьте консоль сервера)' });
+});
+
+/**
+ * 2. Подтверждение кода и авторизация
+ */
+app.post('/api/auth/verify-code', (req, res) => {
+    const { phone, code, name } = req.body;
+    if (!phone || !code) {
+        return res.status(400).json({ error: 'Заполните все поля' });
+    }
+
+    const cleanPhone = phone.replace(/[\s()\-+]/g, '');
+    const savedCode = verificationCodes.get(cleanPhone);
+
+    if (savedCode !== code) {
+        return res.status(400).json({ error: 'Неверный код подтверждения' });
+    }
+
+    // Удаляем код после успешной авторизации
+    verificationCodes.delete(cleanPhone);
+
+    // Поиск или создание пользователя
+    let userId = null;
+    for (const [id, user] of users.entries()) {
+        if (user.phone.replace(/[\s()\-+]/g, '') === cleanPhone) {
+            userId = id;
+            break;
+        }
+    }
+
+    if (!userId) {
+        userId = 'usr_' + crypto.randomBytes(8).toString('hex');
+        const newUser = {
+            id: userId,
+            phone: '+' + cleanPhone,
+            name: name || `Пользователь ${cleanPhone.slice(-4)}`,
+            username: '', 
+            bio: 'Привет! Я использую КипяТок.',
+            avatarColor: 'bg-blue-600',
+            chats: [], // Список IDs пользователей, с которыми открыты чаты
+            status: 'online'
+        };
+        users.set(userId, newUser);
+        saveUsersToDisk();
+    }
+
+    // Генерация сессионного токена
+    const token = 'tok_' + crypto.randomBytes(32).toString('hex');
+    sessions.set(token, userId);
+
+    res.json({
+        success: true,
+        token,
+        user: users.get(userId)
+    });
+});
+
+/**
+ * 3. Поиск пользователя по номеру телефона, имени или username
+ * Доступен для глобального поиска
+ */
+app.get('/api/users/search', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Нет авторизации' });
+
+    const token = authHeader.replace('Bearer ', '');
+    const currentUserId = sessions.get(token);
+    if (!currentUserId) return res.status(401).json({ error: 'Неверный токен сессии' });
+
+    const query = req.query.q ? req.query.q.trim() : '';
+    if (!query) return res.json([]);
+
+    // Очищаем поисковый запрос от символов форматирования телефона и @
+    const cleanQuery = query.toLowerCase().replace(/[\s()\-+@]/g, '');
+
+    const foundUsers = [];
+    for (const [id, user] of users.entries()) {
+        if (id === currentUserId) continue;
+
+        const cleanUserPhone = user.phone.replace(/[\s()\-+]/g, '');
+        const userUsername = user.username ? user.username.toLowerCase().replace('@', '') : '';
+        const userNameNormalized = user.name.toLowerCase();
+
+        const isPhoneMatch = cleanQuery.length > 0 && cleanUserPhone.includes(cleanQuery);
+        const isUsernameMatch = cleanQuery.length > 0 && userUsername.includes(cleanQuery);
+        const isNameMatch = userNameNormalized.includes(query.toLowerCase());
+
+        if (isPhoneMatch || isUsernameMatch || isNameMatch) {
+            foundUsers.push({
+                id: user.id,
+                name: user.name,
+                phone: user.phone,
+                username: user.username,
+                bio: user.bio,
+                avatarColor: user.avatarColor || 'bg-blue-600',
+                status: activeConnections.has(user.id) ? 'online' : 'offline'
+            });
+        }
+    }
+
+    res.json(foundUsers);
+});
+
+/**
+ * 4. Инициализация/добавление нового чата в личный список
+ */
+app.post('/api/chats/add', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Нет авторизации' });
+
+    const token = authHeader.replace('Bearer ', '');
+    const currentUserId = sessions.get(token);
+    if (!currentUserId) return res.status(401).json({ error: 'Неверный токен сессии' });
+
+    const { partnerId } = req.body;
+    if (!partnerId) return res.status(400).json({ error: 'Укажите ID собеседника' });
+
+    const currentUser = users.get(currentUserId);
+    const partnerUser = users.get(partnerId);
+
+    if (!currentUser || !partnerUser) {
+        return res.status(404).json({ error: 'Один из пользователей не найден' });
+    }
+
+    // Добавляем друг друга в список чатов, если их там ещё нет
+    if (!currentUser.chats) currentUser.chats = [];
+    if (!partnerUser.chats) partnerUser.chats = [];
+
+    let updated = false;
+    if (!currentUser.chats.includes(partnerId)) {
+        currentUser.chats.push(partnerId);
+        updated = true;
+    }
+    if (!partnerUser.chats.includes(currentUserId)) {
+        partnerUser.chats.push(currentUserId);
+        updated = true;
+    }
+
+    if (updated) {
+        users.set(currentUserId, currentUser);
+        users.set(partnerId, partnerUser);
+        saveUsersToDisk();
+    }
+
+    res.json({ success: true });
+});
+
+/**
+ * 5. Получение списка чатов текущего пользователя (Только те, кого он добавил/нашел)
+ */
+app.get('/api/chats', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Нет авторизации' });
+
+    const token = authHeader.replace('Bearer ', '');
+    const currentUserId = sessions.get(token);
+    if (!currentUserId) return res.status(401).json({ error: 'Неверный токен сессии' });
+
+    const currentUser = users.get(currentUserId);
+    if (!currentUser) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const myChats = currentUser.chats || [];
+    const list = [];
+
+    for (const partnerId of myChats) {
+        const partner = users.get(partnerId);
+        if (partner) {
+            list.push({
+                id: partner.id,
+                name: partner.name,
+                phone: partner.phone,
+                username: partner.username,
+                bio: partner.bio,
+                avatarColor: partner.avatarColor || 'bg-blue-600',
+                status: activeConnections.has(partner.id) ? 'online' : 'offline'
+            });
+        }
+    }
+
+    res.json(list);
+});
+
+/**
+ * 6. Обновление профиля пользователя с валидацией уникальности username
+ */
+app.post('/api/profile/update', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Нет авторизации' });
+
+    const token = authHeader.replace('Bearer ', '');
+    const currentUserId = sessions.get(token);
+    if (!currentUserId) return res.status(401).json({ error: 'Неверный токен сессии' });
+
+    const { name, username, bio, avatarColor } = req.body;
+    const user = users.get(currentUserId);
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    // Проверка уникальности username
+    if (username) {
+        const cleanUsername = username.trim().toLowerCase().replace('@', '');
+        if (cleanUsername.length > 0) {
+            if (cleanUsername.length < 3) {
+                return res.status(400).json({ error: 'Username должен быть не менее 3 символов' });
+            }
+            for (const [id, u] of users.entries()) {
+                if (id !== currentUserId && u.username && u.username.toLowerCase().replace('@', '') === cleanUsername) {
+                    return res.status(400).json({ error: 'Этот @username уже занят другим пользователем' });
+                }
+            }
+            user.username = '@' + cleanUsername;
+        } else {
+            user.username = '';
+        }
+    } else {
+        user.username = '';
+    }
+
+    if (name) user.name = name.trim();
+    if (bio !== undefined) user.bio = bio.trim();
+    if (avatarColor) user.avatarColor = avatarColor;
+
+    users.set(currentUserId, user);
+    saveUsersToDisk();
+
+    // Отправляем обновления на все открытые вкладки/устройства пользователя
+    sendToUserDevices(currentUserId, {
+        type: 'profile_updated',
+        user
+    });
+
+    res.json({ success: true, user });
+});
+
+/**
+ * 7. Загрузка истории переписки (в зашифрованном виде)
+ */
+app.get('/api/chats/history', (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Нет авторизации' });
+
+    const token = authHeader.replace('Bearer ', '');
+    const currentUserId = sessions.get(token);
+    if (!currentUserId) return res.status(401).json({ error: 'Неверный токен сессии' });
+
+    const withUserId = req.query.userId;
+    if (!withUserId) return res.status(400).json({ error: 'Не указан ID собеседника' });
+
+    const chatKey = getChatKey(currentUserId, withUserId);
+    const chatFile = path.join(DATA_DIR, `chat_${chatKey}.json`);
+
+    if (fs.existsSync(chatFile)) {
+        try {
+            const data = fs.readFileSync(chatFile, 'utf8');
+            return res.json(JSON.parse(data));
+        } catch (e) {
+            console.error("Ошибка чтения файла переписки:", e);
+        }
+    }
+
+    res.json([]);
+});
+
+// --- WEBSOCKET ОБРАБОТКА И СИНХРОНИЗАЦИЯ ---
+
+const server = http.createServer(app);
+const wsn = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+    wsn.handleUpgrade(request, socket, head, (ws) => {
+        wsn.emit('connection', ws, request);
+    });
+});
+
+wsn.on('connection', (ws, request) => {
+    let authenticatedUserId = null;
+
+    ws.on('message', (messageBytes) => {
+        try {
+            const data = JSON.parse(messageBytes.toString());
+            
+            if (data.type === 'auth') {
+                const token = data.token;
+                const userId = sessions.get(token);
+                if (userId) {
+                    authenticatedUserId = userId;
+                    
+                    if (!activeConnections.has(userId)) {
+                        activeConnections.set(userId, new Set());
+                    }
+                    activeConnections.get(userId).add(ws);
+                    
+                    const user = users.get(userId);
+                    if (user) {
+                        user.status = 'online';
+                        users.set(userId, user);
+                    }
+
+                    ws.send(JSON.stringify({ type: 'auth_success', userId, user }));
+                    broadcastUserStatus(userId, 'online');
+                } else {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Неверный токен сессии' }));
+                    ws.close();
+                }
+                return;
+            }
+
+            if (!authenticatedUserId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Требуется авторизация' }));
+                return;
+            }
+
+            switch (data.type) {
+                case 'key_exchange_init': {
+                    const { recipientId, initiatorPublicKey } = data;
+                    sendToUserDevices(recipientId, {
+                        type: 'key_exchange_request',
+                        senderId: authenticatedUserId,
+                        initiatorPublicKey
+                    });
+                    break;
+                }
+
+                case 'key_exchange_accept': {
+                    const { recipientId, recipientPublicKey } = data;
+                    sendToUserDevices(recipientId, {
+                        type: 'key_exchange_complete',
+                        senderId: authenticatedUserId,
+                        recipientPublicKey
+                    });
+                    break;
+                }
+
+                case 'secure_message': {
+                    const { recipientId, encryptedPayload, iv } = data;
+                    const timestamp = Date.now();
+                    const messageId = 'msg_' + crypto.randomBytes(12).toString('hex');
+
+                    const messageObj = {
+                        id: messageId,
+                        senderId: authenticatedUserId,
+                        recipientId,
+                        encryptedPayload,
+                        iv,
+                        timestamp
+                    };
+
+                    saveMessageToHistory(authenticatedUserId, recipientId, messageObj);
+
+                    // 1. Доставка зашифрованного пакета получателю
+                    sendToUserDevices(recipientId, {
+                        type: 'secure_message',
+                        id: messageId,
+                        senderId: authenticatedUserId,
+                        encryptedPayload,
+                        iv,
+                        timestamp
+                    });
+
+                    // 2. Доставка на другие устройства этого же отправителя (Синхронизация)
+                    sendToUserDevices(authenticatedUserId, {
+                        type: 'secure_message_sync',
+                        id: messageId,
+                        senderId: authenticatedUserId,
+                        recipientId,
+                        encryptedPayload,
+                        iv,
+                        timestamp
+                    }, ws);
+                    
+                    break;
+                }
+
+                case 'typing': {
+                    const { recipientId, isTyping } = data;
+                    sendToUserDevices(recipientId, {
+                        type: 'typing',
+                        senderId: authenticatedUserId,
+                        isTyping
+                    });
+                    break;
+                }
+            }
+
+        } catch (err) {
+            console.error('Ошибка обработки WS сообщения:', err);
+        }
+    });
+
+    ws.on('close', () => {
+        if (authenticatedUserId) {
+            const devices = activeConnections.get(authenticatedUserId);
+            if (devices) {
+                devices.delete(ws);
+                if (devices.size === 0) {
+                    activeConnections.delete(authenticatedUserId);
+                    const user = users.get(authenticatedUserId);
+                    if (user) {
+                        user.status = 'offline';
+                        users.set(authenticatedUserId, user);
+                    }
+                    broadcastUserStatus(authenticatedUserId, 'offline');
+                }
+            }
+        }
+    });
+});
+
+function sendToUserDevices(userId, payload, excludeWs = null) {
+    const devices = activeConnections.get(userId);
+    if (devices) {
+        const rawPayload = JSON.stringify(payload);
+        devices.forEach(ws => {
+            if (ws !== excludeWs && ws.readyState === WebSocket.OPEN) {
+                ws.send(rawPayload);
+            }
+        });
+    }
+}
+
+function broadcastUserStatus(userId, status) {
+    const payload = JSON.stringify({
+        type: 'user_status_change',
+        userId,
+        status
+    });
+    for (const [id, devices] of activeConnections.entries()) {
+        if (id !== userId) {
+            devices.forEach(ws => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(payload);
+                }
+            });
+        }
+    }
+}
+
+function getChatKey(id1, id2) {
+    return [id1, id2].sort().join('_');
+}
+
+function saveMessageToHistory(user1, user2, messageObj) {
+    const chatKey = getChatKey(user1, user2);
+    const chatFile = path.join(DATA_DIR, `chat_${chatKey}.json`);
+    
+    let history = [];
+    if (fs.existsSync(chatFile)) {
+        try {
+            history = JSON.parse(fs.readFileSync(chatFile, 'utf8'));
+        } catch (e) {
+            console.error("Ошибка разбора истории при сохранении:", e);
+        }
+    }
+
+    history.push(messageObj);
+    
+    // Храним последние 500 сообщений в истории
+    if (history.length > 500) {
+        history.shift();
+    }
+
+    try {
+        fs.writeFileSync(chatFile, JSON.stringify(history, null, 2), 'utf8');
+    } catch (e) {
+        console.error("Не удалось записать сообщение в файл истории:", e);
+    }
+
+    // Убеждаемся, что чат зафиксирован у обоих пользователей как активный
+    const u1 = users.get(user1);
+    const u2 = users.get(user2);
+    let diskUpdateNeeded = false;
+
+    if (u1 && !u1.chats.includes(user2)) {
+        u1.chats.push(user2);
+        users.set(user1, u1);
+        diskUpdateNeeded = true;
+    }
+    if (u2 && !u2.chats.includes(user1)) {
+        u2.chats.push(user1);
+        users.set(user2, u2);
+        diskUpdateNeeded = true;
+    }
+
+    if (diskUpdateNeeded) {
+        saveUsersToDisk();
+    }
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`================================================================`);
+    console.log(`  CipherTalk (КипяТок) Бэкенд запущен!`);
+    console.log(`  Все зашифрованные данные сохраняются в папку: server-data/`);
+    console.log(`  Порт: ${PORT}`);
+    console.log(`  Адрес сервера: https://ciphertalk-server.cloudpub.ru/`);
+    console.log(`================================================================`);
 });
