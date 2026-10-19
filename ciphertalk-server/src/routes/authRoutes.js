@@ -3,19 +3,19 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const authMiddleware = require('../middleware/auth');
 
-// Отправка кода
-router.post('/send-code', authMiddleware.optional, authController.sendCode);
+// Контроллер — синглтон: методы передаём с сохранением this, иначе
+// внутри обработчика this === undefined.
+const c = authController;
 
-// Проверка кода
-router.post('/verify-code', authController.verifyCode);
+// Публичные
+router.post('/send-code', c.sendCode.bind(c));
+router.post('/verify-code', c.verifyCode.bind(c));
+router.post('/register', c.register.bind(c));
+router.post('/login', c.login.bind(c));
+router.get('/check-username', c.checkUsername.bind(c));
 
-// Регистрация
-router.post('/register', authController.register);
-
-// Вход
-router.post('/login', authController.login);
-
-// Проверка username
-router.get('/check-username', authController.checkUsername);
+// Требуют сессию
+router.get('/me', authMiddleware.authenticate, c.me.bind(c));
+router.post('/logout', authMiddleware.authenticate, c.logout.bind(c));
 
 module.exports = router;

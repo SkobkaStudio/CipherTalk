@@ -13,13 +13,15 @@ const storage = multer.diskStorage({
   destination: config.uploadsPath,
   filename: (req, file, cb) => {
     const uniqueName = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
-    cb(null, uniqueName + path.extname(file.originalname));
+    // Оставляем только безопасное расширение
+    const ext = path.extname(file.originalname || '').replace(/[^a-zA-Z0-9.]/g, '').slice(0, 16);
+    cb(null, uniqueName + ext);
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: config.maxFileSize }
+  limits: { fileSize: config.maxFileSize, files: 1 }
 });
 
 class UploadMiddleware {
@@ -27,18 +29,17 @@ class UploadMiddleware {
     return upload.single(fieldName);
   }
 
-  array(fieldName, maxCount) {
-    return upload.array(fieldName, maxCount);
-  }
-
   handleError(err, req, res, next) {
     if (err instanceof multer.MulterError) {
-      if (err.code === 'FILE_TOO_LARGE') {
-        return res.status(413).json({ error: 'Файл слишком большой' });
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: `Файл слишком большой (максимум ${Math.floor(config.maxFileSize / (1024 * 1024))} МБ)`
+        });
       }
       return res.status(400).json({ error: err.message });
     }
     if (err) {
+      console.error('Upload error:', err);
       return res.status(500).json({ error: 'Ошибка загрузки файла' });
     }
     next();

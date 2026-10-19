@@ -1,6 +1,14 @@
 const fs = require('fs');
 const config = require('../config');
 
+const DEFAULT_COUNTERS = {
+  users: 0,
+  chats: 0,
+  messages: 0,
+  files: 0,
+  sessions: 0
+};
+
 class Database {
   constructor() {
     this.data = {
@@ -10,17 +18,24 @@ class Database {
       chat_members: [],
       messages: [],
       files: [],
-      counters: { users: 0, chats: 0, messages: 0, files: 0 }
+      sessions: [],
+      counters: { ...DEFAULT_COUNTERS }
     };
     this.saveInterval = null;
+    this.saveTimeout = null;
+    this.dirty = false;
   }
 
   load() {
     try {
       if (fs.existsSync(config.dbFile)) {
-        this.data = JSON.parse(fs.readFileSync(config.dbFile, 'utf8'));
-        console.log('✅ База данных загружена');
-        return true;
+        const raw = fs.readFileSync(config.dbFile, 'utf8');
+        if (raw.trim()) {
+          this.data = JSON.parse(raw);
+          this.migrate();
+          console.log('✅ База данных загружена');
+          return true;
+        }
       }
       return false;
     } catch (e) {
@@ -29,9 +44,45 @@ class Database {
     }
   }
 
+  // Страховка от старых/неполных файлов БД
+  migrate() {
+    const collections = [
+      'users', 'verification_codes', 'chats', 'chat_members',
+      'messages', 'files', 'sessions'
+    ];
+    collections.forEach(name => {
+      if (!Array.isArray(this.data[name])) this.data[name] = [];
+    });
+    if (!this.data.counters || typeof this.data.counters !== 'object') {
+      this.data.counters = { ...DEFAULT_COUNTERS };
+    }
+    Object.keys(DEFAULT_COUNTERS).forEach(key => {
+      if (typeof this.data.counters[key] !== 'number') this.data.counters[key] = 0;
+    });
+    // Счётчики не должны быть меньше уже существующих записей
+    collections
+      .filter(name => name !== 'verification_codes')
+      .forEach(name => {
+        const coll = this.data[name];
+        const maxId = coll.reduce((max, item) => {
+          const id = item && typeof item.id === 'number' ? item.id : 0;
+          return id > max ? id : max;
+        }, 0);
+        if (maxId > this.data.counters[name]) this.data.counters[name] = maxId;
+      });
+  }
+
+  /**
+   * Атомарное сохранение: пишем во временный файл и переименовываем.
+   * Обрыв на записи не может оставить битый JSON.
+   */
   save() {
     try {
-      fs.writeFileSync(config.dbFile, JSON.stringify(this.data, null, 2));
+      const json = JSON.stringify(this.data, null, 2);
+      const tmp = config.dbFile + '.tmp';
+      fs.writeFileSync(tmp, json, { mode: 0o600 });
+      fs.renameSync(tmp, config.dbFile);
+      this.dirty = false;
       return true;
     } catch (e) {
       console.error('Ошибка сохранения БД:', e);
@@ -39,9 +90,24 @@ class Database {
     }
   }
 
+  /**
+   * Помечаем данные изменёнными: сохраняемся почти сразу (debounce),
+   * чтобы падение процесса не теряло сообщения.
+   */
+  markDirty() {
+    this.dirty = true;
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+    this.saveTimeout = setTimeout(() => {
+      this.saveTimeout = null;
+      this.save();
+    }, config.saveDebounce);
+  }
+
   startAutoSave() {
     if (this.saveInterval) clearInterval(this.saveInterval);
-    this.saveInterval = setInterval(() => this.save(), config.saveInterval);
+    this.saveInterval = setInterval(() => {
+      if (this.dirty) this.save();
+    }, config.saveInterval);
   }
 
   stopAutoSave() {
@@ -49,6 +115,15 @@ class Database {
       clearInterval(this.saveInterval);
       this.saveInterval = null;
     }
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+  }
+
+  flush() {
+    this.stopAutoSave();
+    if (this.dirty) this.save();
   }
 
   // Геттеры для коллекций
@@ -58,6 +133,7 @@ class Database {
   get chatMembers() { return this.data.chat_members; }
   get messages() { return this.data.messages; }
   get files() { return this.data.files; }
+  get sessions() { return this.data.sessions; }
   get counters() { return this.data.counters; }
 
   // Методы для работы с пользователями
@@ -69,14 +145,9 @@ class Database {
     return this.data.users.find(u => u.phone === phone);
   }
 
-  findUserByUsername(username) {
-    const clean = username.replace(/^@/, '').toLowerCase();
-    return this.data.users.find(u => (u.username || '').toLowerCase() === clean);
-  }
-
   isUsernameTaken(username, excludeUserId = null) {
-    const clean = username.replace(/^@/, '').toLowerCase();
-    return this.data.users.some(u => 
+    const clean = String(username).replace(/^@/, '').toLowerCase();
+    return this.data.users.some(u =>
       u.id !== excludeUserId && (u.username || '').toLowerCase() === clean
     );
   }
@@ -90,17 +161,8 @@ class Database {
     return this.data.chat_members.filter(m => m.chat_id === chatId);
   }
 
-  getChatMessages(chatId, limit = 50) {
-    return this.data.messages
-      .filter(m => m.chat_id === chatId)
-      .slice(-limit);
-  }
-
-  getUserChats(userId) {
-    return this.data.chat_members
-      .filter(cm => cm.user_id === userId)
-      .map(cm => this.findChatById(cm.chat_id))
-      .filter(Boolean);
+  isChatMember(chatId, userId) {
+    return this.data.chat_members.some(m => m.chat_id === chatId && m.user_id === userId);
   }
 
   // Методы для работы с сообщениями
@@ -108,23 +170,56 @@ class Database {
     return this.data.messages.find(m => m.id === id);
   }
 
+  addMessage(message) {
+    this.data.messages.push(message);
+    this.markDirty();
+    return message;
+  }
+
+  deleteMessage(id) {
+    const before = this.data.messages.length;
+    this.data.messages = this.data.messages.filter(m => m.id !== id);
+    const removed = this.data.messages.length !== before;
+    if (removed) this.markDirty();
+    return removed;
+  }
+
   // Методы для работы с кодами верификации
-  findVerificationCode(phone, code) {
+  findVerificationCode(phone) {
     const now = Date.now();
-    return this.data.verification_codes.find(
-      c => c.phone === phone && c.code === code && c.expires_at > now
+    return this.data.verification_codes.filter(
+      c => c.phone === phone && c.expires_at > now
     );
   }
 
   deleteVerificationCode(phone) {
+    const before = this.data.verification_codes.length;
     this.data.verification_codes = this.data.verification_codes.filter(
       c => c.phone !== phone
     );
+    if (this.data.verification_codes.length !== before) this.markDirty();
+  }
+
+  // Сессии (ключ — хеш токена). Присваивание геттеру не работает,
+  // поэтому удаление делаем здесь на this.data.
+  deleteSessionByHash(hash) {
+    const before = this.data.sessions.length;
+    this.data.sessions = this.data.sessions.filter(s => s.token_hash !== hash);
+    const removed = this.data.sessions.length !== before;
+    if (removed) this.markDirty();
+    return removed;
+  }
+
+  purgeExpiredSessions(now = Date.now()) {
+    const before = this.data.sessions.length;
+    this.data.sessions = this.data.sessions.filter(s => !s.isExpired(now));
+    if (this.data.sessions.length !== before) this.markDirty();
   }
 
   // Генерация ID
   nextId(type) {
     this.data.counters[type] = (this.data.counters[type] || 0) + 1;
+    this.markDirty();
     return this.data.counters[type];
   }
 }

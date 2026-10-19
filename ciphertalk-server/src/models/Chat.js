@@ -8,10 +8,6 @@ class Chat {
     this.created_at = data.created_at || Date.now();
   }
 
-  isPrivate() { return this.type === 'private'; }
-  isGroup() { return this.type === 'group'; }
-  isSaved() { return this.type === 'saved'; }
-
   toJSON() {
     return {
       id: this.id,

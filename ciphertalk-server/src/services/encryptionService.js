@@ -1,32 +1,132 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const config = require('../config');
 
+const PREFIX = 'CTV1'; // формат: CTV1.<iv>.<tag>.<ciphertext> (все base64)
+const SALT = 'CipherTalk-at-rest';
+
+/**
+ * Шифрование данных на диске: AES-256-GCM (96-bit IV, auth tag 128-bit).
+ * Ключ берётся из ENCRYPTION_KEY (scrypt), иначе генерируется при первом
+ * запуске и лежит в отдельном файле <db>.key с правами 600 — дамп БД без
+ * ключа ничего не расшифрует.
+ *
+ * Клиентское E2EE (ECDH + AES-256-GCM в браузере) не затрагивается:
+ * сервер оборачивает уже зашифрованное клиентом тело, наружу отдаёт исходный вид.
+ */
 class EncryptionService {
-  hashPassword(password, salt) {
-    if (!salt) salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return `${salt}:${hash}`;
+  constructor() {
+    this._key = null;
+  }
+
+  getKey() {
+    if (this._key) return this._key;
+
+    if (config.encryptionKey) {
+      this._key = crypto.scryptSync(String(config.encryptionKey), SALT, 32);
+      return this._key;
+    }
+
+    const keyFile = config.dbFile + '.key';
+    try {
+      if (fs.existsSync(keyFile)) {
+        const hex = fs.readFileSync(keyFile, 'utf8').trim();
+        if (/^[0-9a-f]{64}$/i.test(hex)) {
+          this._key = Buffer.from(hex, 'hex');
+          return this._key;
+        }
+      }
+      const key = crypto.randomBytes(32);
+      fs.writeFileSync(keyFile, key.toString('hex'), { mode: 0o600 });
+      this._key = key;
+      return this._key;
+    } catch (e) {
+      console.error('Не удалось прочитать/создать ключ шифрования:', e.message);
+      throw e;
+    }
+  }
+
+  encryptMessage(message, key = this.getKey()) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const ciphertext = Buffer.concat([cipher.update(String(message), 'utf8'), cipher.final()]);
+    return [
+      PREFIX,
+      iv.toString('base64'),
+      cipher.getAuthTag().toString('base64'),
+      ciphertext.toString('base64')
+    ].join('.');
+  }
+
+  /**
+   * Возвращает исходную строку, если данные не шифровались (старый формат),
+   * null — если расшифровать не удалось (чужой ключ / повреждение).
+   */
+  decryptMessage(payload, key = this.getKey()) {
+    if (typeof payload !== 'string' || payload.indexOf(PREFIX + '.') !== 0) {
+      return payload;
+    }
+    try {
+      const parts = payload.split('.');
+      if (parts.length !== 4) return null;
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[1], 'base64'));
+      decipher.setAuthTag(Buffer.from(parts[2], 'base64'));
+      return Buffer.concat([
+        decipher.update(Buffer.from(parts[3], 'base64')),
+        decipher.final()
+      ]).toString('utf8');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  isEncrypted(payload) {
+    return typeof payload === 'string' && payload.indexOf(PREFIX + '.') === 0;
+  }
+
+  // Одинаковый вход -> одинаковый вывод, без утечки времени сравнения
+  safeCompare(a, b) {
+    const bufA = Buffer.from(String(a || ''));
+    const bufB = Buffer.from(String(b || ''));
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  }
+
+  hashPassword(password, iterations = 100000) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512').toString('hex');
+    return `pbkdf2-sha512$${iterations}$${salt}$${hash}`;
   }
 
   verifyPassword(password, stored) {
     if (!stored) return false;
-    const [salt, hash] = stored.split(':');
-    const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return hash === testHash;
+
+    let salt, hash, iterations;
+    if (stored.startsWith('pbkdf2-sha512$')) {
+      const parts = stored.split('$');
+      if (parts.length !== 4) return false;
+      iterations = parseInt(parts[1], 10);
+      salt = parts[2];
+      hash = parts[3];
+    } else {
+      // легаси-формат "salt:hash" (10000 итераций)
+      const legacy = stored.split(':');
+      if (legacy.length !== 2) return false;
+      salt = legacy[0];
+      hash = legacy[1];
+      iterations = 10000;
+    }
+
+    const test = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512').toString('hex');
+    return this.safeCompare(test, hash);
   }
 
-  generateSalt() {
-    return crypto.randomBytes(16).toString('hex');
+  generateToken() {
+    return crypto.randomBytes(32).toString('base64url');
   }
 
-  // Для будущего использования (E2E шифрование)
-  encryptMessage(message, publicKey) {
-    // Здесь будет реализация шифрования
-    return message;
-  }
-
-  decryptMessage(encrypted, privateKey) {
-    // Здесь будет реализация дешифрования
-    return encrypted;
+  hashToken(token) {
+    return crypto.createHash('sha256').update(String(token)).digest('hex');
   }
 }
 

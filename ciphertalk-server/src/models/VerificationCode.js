@@ -1,27 +1,20 @@
 class VerificationCode {
   constructor(data) {
     this.phone = data.phone;
-    this.code = data.code || this.generateCode();
+    // код хранится в БД в зашифрованном виде (AES-256-GCM)
+    this.code = data.code;
+    this.attempts = data.attempts || 0;
     this.expires_at = data.expires_at || Date.now() + 5 * 60 * 1000;
-  }
-
-  generateCode() {
-    return String(Math.floor(1000 + Math.random() * 9000));
-  }
-
-  isValid() {
-    return Date.now() < this.expires_at;
-  }
-
-  isExpired() {
-    return !this.isValid();
+    this.created_at = data.created_at || Date.now();
   }
 
   toJSON() {
     return {
       phone: this.phone,
       code: this.code,
-      expires_at: this.expires_at
+      attempts: this.attempts,
+      expires_at: this.expires_at,
+      created_at: this.created_at
     };
   }
 }

@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CipherTalk — КипяТок</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-primary: #17212b;
+  --bg-secondary: #0e1621;
+  --bg-chat: #0e1621;
+  --bg-message-in: #182533;
+  --bg-message-out: #2b5278;
+  --text-primary: #f5f5f5;
+  --text-secondary: #7e919e;
+  --accent: #5eb5f7;
+  --accent-hover: #4a9de0;
+  --border: #1e2c3a;
+  --hover: #202d3b;
+  --danger: #e53935;
+  --success: #4caf50;
+  --online: #4caf50;
+  --sidebar-width: 380px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+#login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: linear-gradient(135deg, #0e1621 0%, #17212b 100%);
+  padding: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.login-box {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 32px 24px;
+  width: 440px;
+  max-width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+.login-logo {
+  width: 90px;
+  height: 90px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, var(--accent), #3a7bd5);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 38px;
+}
+
+.login-box h1 {
+  font-size: 24px;
+  margin-bottom: 6px;
+  background: linear-gradient(135deg, var(--accent), #89d4ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.login-box .subtitle {
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.steps-progress {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: all 0.3s;
+}
+
+.step-dot.active { background: var(--accent); transform: scale(1.2); }
+.step-dot.done { background: var(--success); }
+
+.step-title { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+
+.step-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  min-height: 32px;
+}
+
+.input-group {
+  margin-bottom: 12px;
+  text-align: left;
+  position: relative;
+}
+
+.input-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input-group label .required { color: var(--danger); }
+
+.input-group input {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg-primary);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 15px;
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+.input-group input:focus { border-color: var(--accent); }
+.input-group input.error { border-color: var(--danger); }
+.input-group input.success { border-color: var(--success); }
+
+.input-hint { font-size: 12px; margin-top: 5px; min-height: 16px; }
+.input-hint.error { color: var(--danger); }
+.input-hint.success { color: var(--success); }
+.input-hint.info { color: var(--text-secondary); }
+
+.username-preview {
+  display: inline-block;
+  padding: 3px 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 4px;
+}
+
+.row { display: flex; gap: 10px; }
+.row .input-group { flex: 1; }
+
+.btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 8px;
+}
+
+.btn:hover { background: var(--accent-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  background: transparent;
+  border: 2px solid var(--border);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover { background: var(--hover); }
+
+#app { display: none; height: 100vh; position: relative; z-index: 1; }
+.app-container { display: flex; height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  min-height: 56px;
+}
+
+.menu-btn {
+  width: 38px;
+  height: 38px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.menu-btn:hover { background: var(--hover); }
+
+.search-box { flex: 1; position: relative; }
+
+.search-box input {
+  width: 100%;
+  padding: 9px 14px 9px 34px;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+
+.search-box::before {
+  content: '🔍';
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+}
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 10px;
+  position: relative;
+}
+
+.chat-item:hover { background: var(--hover); }
+.chat-item.active { background: var(--accent); }
+.chat-item.active .chat-time,
+.chat-item.active .chat-preview { color: rgba(255,255,255,0.8); }
+
+.chat-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5eb5f7, #3a7bd5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.chat-avatar.online::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 11px;
+  height: 11px;
+  background: var(--online);
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+}
+
+.chat-info { flex: 1; min-width: 0; }
+
+.chat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+.chat-name {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; }
+.chat-bottom { display: flex; justify-content: space-between; align-items: center; }
+
+.chat-preview {
+  font-size: 14px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-chat);
+  background-image: 
+    radial-gradient(circle at 20% 50%, rgba(94,181,247,0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 50%, rgba(58,123,213,0.03) 0%, transparent 50%);
+  min-width: 0;
+}
+
+.chat-header {
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+}
+
+.chat-header-info { flex: 1; min-width: 0; }
+.chat-header-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-header-status { font-size: 13px; color: var(--text-secondary); }
+.chat-header-status.online { color: var(--accent); }
+.chat-header-actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.message {
+  max-width: 75%;
+  padding: 7px 11px;
+  border-radius: 12px;
+  position: relative;
+  word-wrap: break-word;
+  animation: msgIn 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  transition: background-color 0.15s ease;
+}
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.in {
+  background: var(--bg-message-in);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.message.out {
+  background: var(--bg-message-out);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+/* Telegram-подобные «хвостики» у последнего сообщения в группе */
+.message.in + .message.out,
+.message.out + .message.in { margin-top: 8px; }
+
+.message.in:last-child::after,
+.message.out:last-child::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 9px;
+  height: 14px;
+}
+
+.message.in:last-child::after {
+  left: -6px;
+  background: radial-gradient(circle at 100% 0, transparent 9px, var(--bg-message-in) 9px);
+}
+
+.message.out:last-child::after {
+  right: -6px;
+  background: radial-gradient(circle at 0 0, transparent 9px, var(--bg-message-out) 9px);
+}
+
+/* Атмосферный снежный слой поверх интерфейса, но под меню/модалками.
+   pointer-events:none — клики проходят сквозь. */
+#snow-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #snow-canvas { display: none; }
+  .message { animation: none; }
+}
+
+.message-sender {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+
+.message-text { font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+
+.message-meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.message.out .message-meta { color: rgba(255,255,255,0.6); }
+.message-edited { font-style: italic; }
+
+.message-actions {
+  position: absolute;
+  top: -7px;
+  right: 7px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  padding: 2px;
+  display: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.message:hover .message-actions { display: flex; }
+
+.msg-action-btn {
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.msg-action-btn:hover { background: var(--hover); color: var(--text-primary); }
+
+.date-separator { text-align: center; margin: 14px 0; }
+
+.date-separator span {
+  background: rgba(0,0,0,0.3);
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ==================== ПАНЕЛЬ ВВОДА ==================== */
+.input-area {
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 60px;
+}
+
+.attach-btn {
+  width: 40px;
+  height: 40px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.attach-btn:hover { background: var(--hover); }
+
+.attach-btn.recording {
+  color: var(--danger);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.message-input {
+  flex: 1;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: 20px;
+  padding: 10px 16px;
+  color: var(--text-primary);
+  font-size: 15px;
+  resize: none;
+  max-height: 120px;
+  min-height: 40px;
+  outline: none;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.send-btn {
+  width: 40px;
+  height: 40px;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.send-btn:active { transform: scale(0.92); }
+.send-btn.sending-pop {
+  animation: sendPop 0.28s ease;
+}
+@keyframes sendPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  padding: 20px;
+}
+
+.empty-state-icon { font-size: 70px; margin-bottom: 14px; opacity: 0.5; }
+.empty-state h2 { font-size: 20px; margin-bottom: 6px; color: var(--text-primary); }
+
+.encryption-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--success);
+  background: rgba(76,175,80,0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-overlay.show { display: flex; }
+
+.modal {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 28px 24px;
+  width: 440px;
+  max-width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal h2 { margin-bottom: 18px; font-size: 20px; }
+
+.modal-close {
+  float: right;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 22px;
+  cursor: pointer;
+  margin-top: -6px;
+}
+
+.side-menu {
+  position: fixed;
+  top: 0; left: -300px; bottom: 0;
+  width: 280px;
+  background: var(--bg-secondary);
+  z-index: 999;
+  transition: left 0.3s;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 4px 0 16px rgba(0,0,0,0.3);
+}
+
+.side-menu.open { left: 0; }
+
+.side-menu-header {
+  padding: 18px;
+  background: linear-gradient(135deg, var(--accent), #3a7bd5);
+}
+
+.side-menu-avatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.side-menu-name { font-size: 17px; font-weight: 600; }
+.side-menu-username { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.side-menu-phone { font-size: 12px; opacity: 0.7; margin-top: 3px; }
+
+.side-menu-items { flex: 1; padding: 6px 0; overflow-y: auto; }
+
+.side-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: var(--text-primary);
+  border: none;
+  background: none;
+  width: 100%;
+  font-size: 14px;
+  text-align: left;
+}
+
+.side-menu-item:hover { background: var(--hover); }
+.side-menu-item .icon { font-size: 18px; width: 26px; text-align: center; }
+.side-menu-divider { height: 1px; background: var(--border); margin: 6px 0; }
+
+.menu-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 998;
+  display: none;
+}
+
+.menu-backdrop.show { display: block; }
+
+.search-results { max-height: 350px; overflow-y: auto; }
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.search-result-item:hover { background: var(--hover); }
+
+.typing-indicator { display: flex; gap: 3px; padding: 3px 0; }
+
+.typing-indicator span {
+  width: 5px;
+  height: 5px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  animation: typing 1.4s infinite;
+}
+
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+/* ==================== МОБИЛЬНАЯ АДАПТАЦИЯ ==================== */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+    position: absolute;
+    z-index: 10;
+    left: 0;
+    right: 0;
+  }
+  
+  .chat-area {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    display: none;
+  }
+  
+  .app-container.chat-open .sidebar { display: none; }
+  .app-container.chat-open .chat-area { display: flex; }
+  
+  .back-btn { display: block !important; }
+  
+  .message { max-width: 85%; }
+  
+  .input-area {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  
+  .attach-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+  
+  .message-input {
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+  
+  .send-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+  
+  .side-menu { width: 260px; left: -260px; }
+  
+  .login-box { padding: 24px 20px; }
+  .login-logo { width: 80px; height: 80px; font-size: 34px; }
+  .login-box h1 { font-size: 22px; }
+  
+  .row { flex-direction: column; gap: 0; }
+}
+
+.back-btn { display: none; }
+
+.toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 18px;
+  z-index: 2000;
+  animation: slideIn 0.3s;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  max-width: 90%;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-50%) translateY(100%); opacity: 0; }
+  to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+.toast.success { border-left: 4px solid var(--success); }
+.toast.error { border-left: 4px solid var(--danger); }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.password-toggle {
+  position: absolute;
+  right: 10px;
+  top: 36px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* Медиа сообщения */
+.media-message {
+  max-width: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 4px 0;
+}
+
+.voice-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 20px;
+  min-width: 180px;
+}
+
+.voice-play-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.voice-waveform {
+  flex: 1;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.voice-bar {
+  flex: 1;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+.voice-duration {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 35px;
+}
+
+.video-circle {
+  position: relative;
+  width: min(220px, 62vw);
+  height: min(220px, 62vw);
+  border-radius: 50%;
+  overflow: hidden;
+  background: #000;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+.video-circle video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-circle .video-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.video-circle.playing .video-play { opacity: 0; }
+
+.video-circle .video-duration {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 7px;
+  border-radius: 9px;
+  pointer-events: none;
+}
+
+.image-message {
+  max-width: 260px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 4px 0;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.image-message img {
+  display: block;
+  max-width: 260px;
+  max-height: 320px;
+  width: auto;
+  cursor: zoom-in;
+}
+
+.media-loading {
+  padding: 18px 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.file-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  max-width: 260px;
+  cursor: pointer;
+  margin: 4px 0;
+}
+
+.file-icon { font-size: 26px; flex-shrink: 0; }
+.file-info { min-width: 0; }
+.file-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-size { font-size: 11px; color: var(--text-secondary); }
+
+.voice-message audio {
+  width: 190px;
+  height: 32px;
+}
+
+.attach-btn.active {
+  color: var(--accent);
+  background: var(--hover);
+}
+
+.attach-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Recording indicator */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(229, 57, 53, 0.1);
+  border-radius: 20px;
+  flex: 1;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--danger);
+  border-radius: 50%;
+  animation: pulse 1s infinite;
+}
+
+.recording-time {
+  font-size: 14px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.recording-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ==================== ТЕМЫ ==================== */
+/* Пресеты переопределяют CSS-переменные. Тёмная — базовая. */
+html[data-theme="dark"] { /* базовые значения из :root */ }
+
+html[data-theme="cyberpunk"] {
+  --bg-primary: #0d0221;
+  --bg-secondary: #180b2e;
+  --bg-chat: #0d0221;
+  --bg-message-in: #241046;
+  --bg-message-out: #ff2e97;
+  --text-primary: #f6f2ff;
+  --text-secondary: #a98fd6;
+  --accent: #00f5d4;
+  --accent-hover: #00d6b9;
+  --border: #33165c;
+  --hover: #241046;
+  --online: #f9f871;
+}
+
+html[data-theme="neon"] {
+  --bg-primary: #05070d;
+  --bg-secondary: #0a0f1c;
+  --bg-chat: #05070d;
+  --bg-message-in: #11203a;
+  --bg-message-out: #00b4ff;
+  --text-primary: #eaf6ff;
+  --text-secondary: #6f9bc0;
+  --accent: #39ff14;
+  --accent-hover: #2ee010;
+  --border: #12294a;
+  --hover: #11203a;
+  --online: #39ff14;
+}
+
+html[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f2f4f7;
+  --bg-chat: #e7ecf2;
+  --bg-message-in: #ffffff;
+  --bg-message-out: #4a9de0;
+  --text-primary: #16202c;
+  --text-secondary: #6b7a89;
+  --accent: #2b7fd4;
+  --accent-hover: #1f6bb8;
+  --border: #d6dde5;
+  --hover: #e6ebf1;
+  --online: #28a745;
+}
+
+/* ==================== ФОН ЧАТА ==================== */
+.chat-area[data-bg="aurora"] {
+  background-image:
+    linear-gradient(135deg, rgba(94,181,247,0.10), rgba(58,213,155,0.10)),
+    radial-gradient(circle at 25% 20%, rgba(94,181,247,0.16), transparent 55%),
+    radial-gradient(circle at 80% 75%, rgba(155,89,182,0.16), transparent 55%);
+}
+.chat-area[data-bg="sunset"] {
+  background-image: linear-gradient(135deg, rgba(255,94,98,0.14), rgba(255,153,102,0.14), rgba(255,205,102,0.14));
+}
+.chat-area[data-bg="forest"] {
+  background-image: linear-gradient(135deg, rgba(46,204,113,0.14), rgba(26,188,156,0.14));
+}
+.chat-area[data-bg="grid"] {
+  background-image:
+    linear-gradient(rgba(94,181,247,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94,181,247,0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* ==================== GLASSMORPHISM ==================== */
+html[data-glass="on"] .sidebar,
+html[data-glass="on"] .chat-header,
+html[data-glass="on"] .input-area,
+html[data-glass="on"] .side-menu {
+  background: rgba(20, 30, 44, 0.55) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+}
+html[data-glass="on"][data-theme="light"] .sidebar,
+html[data-glass="on"][data-theme="light"] .chat-header,
+html[data-glass="on"][data-theme="light"] .input-area,
+html[data-glass="on"][data-theme="light"] .side-menu {
+  background: rgba(255, 255, 255, 0.6) !important;
+}
+html[data-glass="on"] .login-box {
+  background: rgba(20, 30, 44, 0.6) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* ==================== SIDEBAR: ПУЛЬСАЦИЯ ОНЛАЙН ==================== */
+.chat-avatar.online::after {
+  animation: onlinePulse 2s ease-in-out infinite;
+}
+@keyframes onlinePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76,175,80,0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(76,175,80,0); }
+}
+
+.chat-avatar.online {
+  box-shadow: 0 0 0 2px rgba(76,175,80,0.25);
+}
+
+/* Плавное появление строк списка контактов */
+.chat-item {
+  animation: rowIn 0.28s ease backwards;
+}
+@keyframes rowIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ==================== АНИМАЦИЯ ОТПРАВКИ СООБЩЕНИЯ ==================== */
+.message.sending {
+  opacity: 0.55;
+  transform: translateY(4px) scale(0.98);
+}
+.message.sent-pop {
+  animation: sentPop 0.32s cubic-bezier(0.2, 0.8, 0.3, 1.4);
+}
+@keyframes sentPop {
+  0% { transform: scale(0.96) translateY(6px); opacity: 0.6; }
+  60% { transform: scale(1.02); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Печатная машинка: мигающий курсор */
+.typewriter-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: caretBlink 0.8s step-end infinite;
+}
+@keyframes caretBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Плавные переходы экранов */
+.login-step { animation: stepFade 0.32s ease; }
+@keyframes stepFade {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.login-step.leaving { animation: stepOut 0.2s ease forwards; }
+@keyframes stepOut {
+  to { opacity: 0; transform: translateY(-12px); }
+}
+
+/* ==================== НАСТРОЙКИ ВНЕШНЕГО ВИДА ==================== */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.theme-swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.theme-swatch:hover { transform: translateY(-1px); }
+.theme-swatch.active { border-color: var(--accent); }
+.theme-swatch .dots { display: flex; gap: 3px; }
+.theme-swatch .dots i {
+  width: 12px; height: 12px; border-radius: 50%; display: inline-block;
+}
+.bg-grid, .timer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.bg-swatch {
+  height: 46px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--bg-chat);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.bg-swatch.active { border-color: var(--accent); }
+.bg-swatch span {
+  position: absolute; bottom: 3px; right: 6px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.bg-swatch[data-preview="aurora"] {
+  background: linear-gradient(135deg, rgba(94,181,247,0.35), rgba(58,213,155,0.35)), #0e1621;
+}
+.bg-swatch[data-preview="sunset"] {
+  background: linear-gradient(135deg, rgba(255,94,98,0.4), rgba(255,153,102,0.4), rgba(255,205,102,0.4)), #0e1621;
+}
+.bg-swatch[data-preview="forest"] {
+  background: linear-gradient(135deg, rgba(46,204,113,0.4), rgba(26,188,156,0.4)), #0e1621;
+}
+.bg-swatch[data-preview="grid"] {
+  background-image:
+    linear-gradient(rgba(94,181,247,0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94,181,247,0.35) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; font-size: 14px;
+}
+.switch {
+  width: 44px; height: 24px; border-radius: 12px;
+  background: var(--border); position: relative; cursor: pointer;
+  transition: background 0.2s; flex-shrink: 0;
+}
+.switch.on { background: var(--accent); }
+.switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  transition: transform 0.2s;
+}
+.switch.on::after { transform: translateX(20px); }
+.settings-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-secondary); margin: 16px 0 8px;
+}
+</style>
+</head>
+<body>
+
+<!-- ==================== ЭКРАН ВХОДА ==================== -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🔐</div>
+    <h1>CipherTalk</h1>
+    <p class="subtitle">Защищённый мессенджер с шифрованием AES-256</p>
+    
+    <div class="steps-progress" id="steps-progress">
+      <div class="step-dot active" data-step="1"></div>
+      <div class="step-dot" data-step="2"></div>
+      <div class="step-dot" data-step="3"></div>
+      <div class="step-dot" data-step="4"></div>
+      <div class="step-dot" data-step="5"></div>
+    </div>
+
+    <div class="login-step" id="step-1">
+      <div class="step-title">Ваш номер телефона</div>
+      <div class="step-description">Введите номер для входа или регистрации</div>
+      <div class="input-group">
+        <label>Номер телефона</label>
+        <input type="tel" id="phone-input" placeholder="+7 (999) 123-45-67" value="+7">
+      </div>
+      <button class="btn" id="send-code-btn" onclick="step1Next()">Далее</button>
+    </div>
+
+    <div class="login-step" id="step-2" style="display:none">
+      <div class="step-title">Код подтверждения</div>
+      <div class="step-description" id="step-2-desc">Код отправлен на ваш номер</div>
+      <div class="input-group">
+        <label>4-значный код</label>
+        <input type="text" id="code-input" placeholder="1234" maxlength="4" autofocus>
+        <div class="input-hint info">Код отображается в консоли сервера</div>
+      </div>
+      <button class="btn" onclick="step2Next()">Подтвердить</button>
+      <button class="btn btn-secondary" onclick="goToStep(1)">← Изменить номер</button>
+    </div>
+
+    <div class="login-step" id="step-3-register" style="display:none">
+      <div class="step-title">Как вас зовут?</div>
+      <div class="step-description">Так вас будут видеть другие пользователи</div>
+      <div class="row">
+        <div class="input-group">
+          <label>Имя <span class="required">*</span></label>
+          <input type="text" id="firstname-input" placeholder="Иван">
+        </div>
+        <div class="input-group">
+          <label>Фамилия</label>
+          <input type="text" id="lastname-input" placeholder="Иванов">
+        </div>
+      </div>
+      <button class="btn" onclick="step3RegNext()">Далее</button>
+      <button class="btn btn-secondary" onclick="goToStep(1)">← Назад</button>
+    </div>
+
+    <div class="login-step" id="step-3-login" style="display:none">
+      <div class="step-title">С возвращением, <span id="welcome-name"></span>!</div>
+      <div class="step-description">Введите ваш пароль для входа</div>
+      <div class="input-group">
+        <label>Пароль</label>
+        <input type="password" id="password-input" placeholder="Ваш пароль">
+        <button class="password-toggle" onclick="togglePassword('password-input', this)">👁️</button>
+      </div>
+      <button class="btn" onclick="step3LoginNext()">Войти</button>
+      <button class="btn btn-secondary" onclick="goToStep(1)">← Назад</button>
+    </div>
+
+    <div class="login-step" id="step-4" style="display:none">
+      <div class="step-title">Придумайте username</div>
+      <div class="step-description">Так другие смогут вас найти. Только латиница, цифры и _</div>
+      <div class="input-group">
+        <label>Username</label>
+        <input type="text" id="username-input" placeholder="ivan_ivanov" oninput="checkUsername()">
+        <div class="input-hint info" id="username-hint">Минимум 3 символа</div>
+      </div>
+      <button class="btn" id="username-next-btn" onclick="step4Next()" disabled>Далее</button>
+      <button class="btn btn-secondary" onclick="goToStep(3)">← Назад</button>
+    </div>
+
+    <div class="login-step" id="step-5" style="display:none">
+      <div class="step-title">Придумайте пароль</div>
+      <div class="step-description">Минимум 6 символов. Он понадобится для входа</div>
+      <div class="input-group">
+        <label>Пароль</label>
+        <input type="password" id="new-password-input" placeholder="Минимум 6 символов" oninput="checkPasswordStrength()">
+        <button class="password-toggle" onclick="togglePassword('new-password-input', this)">👁️</button>
+      </div>
+      <div class="input-group">
+        <label>Повторите пароль</label>
+        <input type="password" id="confirm-password-input" placeholder="Повторите пароль">
+        <button class="password-toggle" onclick="togglePassword('confirm-password-input', this)">👁️</button>
+      </div>
+      <button class="btn" onclick="step5Next()">Завершить регистрацию</button>
+      <button class="btn btn-secondary" onclick="goToStep(4)">← Назад</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== ОСНОВНОЕ ПРИЛОЖЕНИЕ ==================== -->
+<div id="app">
+  <div class="app-container" id="app-container">
+    
+    <div class="menu-backdrop" id="menu-backdrop" onclick="toggleMenu()"></div>
+    <div class="side-menu" id="side-menu">
+      <div class="side-menu-header">
+        <div class="side-menu-avatar" id="menu-avatar">U</div>
+        <div class="side-menu-name" id="menu-name">Пользователь</div>
+        <div class="side-menu-username" id="menu-username">@username</div>
+        <div class="side-menu-phone" id="menu-phone">+7...</div>
+      </div>
+      <div class="side-menu-items">
+        <button class="side-menu-item" onclick="openNewGroup()">
+          <span class="icon">👥</span> Новая группа
+        </button>
+        <button class="side-menu-item" onclick="openSearch()">
+          <span class="icon">🔍</span> Найти пользователя
+        </button>
+        <button class="side-menu-item" onclick="openSavedMessages()">
+          <span class="icon">⭐</span> Избранное
+        </button>
+        <div class="side-menu-divider"></div>
+        <button class="side-menu-item" onclick="openSettings()">
+          <span class="icon">⚙️</span> Настройки
+        </button>
+        <button class="side-menu-item" onclick="showEncryptionInfo()">
+          <span class="icon">🔐</span> О шифровании
+        </button>
+        <div class="side-menu-divider"></div>
+        <button class="side-menu-item" onclick="logout()" style="color: var(--danger)">
+          <span class="icon">🚪</span> Выйти
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <button class="menu-btn" onclick="toggleMenu()">☰</button>
+        <div class="search-box">
+          <input type="text" placeholder="Поиск" id="sidebar-search" oninput="searchChats(this.value)">
+        </div>
+      </div>
+      <div class="chat-list" id="chat-list"></div>
+    </div>
+
+    <div class="chat-area" id="chat-area">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-state-icon">💬</div>
+        <h2>CipherTalk</h2>
+        <p>Выберите чат для начала общения</p>
+        <div class="encryption-badge" style="margin-top: 14px">
+          🔒 Сквозное шифрование AES-256
+        </div>
+      </div>
+
+      <div id="active-chat" style="display:none; flex-direction:column; height:100%">
+        <div class="chat-header">
+          <button class="menu-btn back-btn" onclick="closeChat()">←</button>
+          <div class="chat-avatar" id="chat-header-avatar">U</div>
+          <div class="chat-header-info">
+            <div class="chat-header-name" id="chat-header-name">Чат</div>
+            <div class="chat-header-status" id="chat-header-status">в сети</div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="menu-btn" onclick="showChatInfo()" title="Инфо">ℹ️</button>
+          </div>
+        </div>
+
+        <div class="messages-container" id="messages-container"></div>
+
+        <div class="input-area" id="input-area">
+          <button class="attach-btn" id="attach-btn" onclick="attachFile()" title="Прикрепить">📎</button>
+          <textarea class="message-input" id="message-input" placeholder="Сообщение..." rows="1"
+            oninput="autoResize(this); handleTyping()" 
+            onkeydown="handleKeyDown(event)"></textarea>
+          <button class="attach-btn" id="voice-btn" onclick="toggleVoiceRecording()" title="Голосовое">🎤</button>
+          <button class="attach-btn" id="video-btn" onclick="toggleVideoRecording()" title="Видеосообщение">📹</button>
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<div id="toast-container"></div>
+
+<canvas id="snow-canvas" aria-hidden="true"></canvas>
+
+<script src="/app.js"></script>
+</body>
+</html>

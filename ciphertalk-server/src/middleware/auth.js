@@ -1,51 +1,27 @@
-const { getDatabase } = require('../db/database');
+const sessionService = require('../services/sessionService');
 
 class AuthMiddleware {
-  constructor() {
-    this.db = getDatabase();
-  }
-
-  // Простая проверка (для будущего использования с JWT)
+  /**
+   * Проверка Bearer-токена сессии. userId из тела запроса больше не
+   * используется как доказательство личности (это позволяло IDOR).
+   */
   authenticate(req, res, next) {
-    const token = req.headers.authorization?.split(' ')[1];
-    
-    if (!token) {
+    const header = req.headers.authorization || '';
+    const [scheme, token] = header.split(' ');
+
+    if (!token || scheme.toLowerCase() !== 'bearer') {
       return res.status(401).json({ error: 'Требуется авторизация' });
     }
 
-    // Здесь будет проверка JWT
-    // Пока пропускаем
-    next();
-  }
-
-  // Проверка userId в запросе
-  requireUserId(req, res, next) {
-    const userId = parseInt(req.body.userId || req.query.userId);
-    
-    if (!userId) {
-      return res.status(401).json({ error: 'Требуется userId' });
+    const auth = sessionService.verify(token);
+    if (!auth) {
+      return res.status(401).json({ error: 'Сессия недействительна или истекла' });
     }
 
-    const user = this.db.findUserById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    req.user = user;
-    req.userId = userId;
-    next();
-  }
-
-  // Для тестов (отключает проверку)
-  optional(req, res, next) {
-    const userId = parseInt(req.body.userId || req.query.userId);
-    if (userId) {
-      const user = this.db.findUserById(userId);
-      if (user) {
-        req.user = user;
-        req.userId = userId;
-      }
-    }
+    req.user = auth.user;
+    req.userId = auth.user.id;
+    req.session = auth.session;
+    req.token = token;
     next();
   }
 }

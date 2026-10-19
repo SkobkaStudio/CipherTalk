@@ -3,16 +3,15 @@ const router = express.Router();
 const chatController = require('../controllers/chatController');
 const authMiddleware = require('../middleware/auth');
 
-// Получить чаты пользователя
-router.get('/chats/:userId', authMiddleware.optional, chatController.getUserChats);
+const c = chatController;
 
-// Получить сообщения чата
-router.get('/messages/:chatId', chatController.getMessages);
+// Все операции с чатами — только для авторизованных
+router.get('/chats', authMiddleware.authenticate, c.getUserChats.bind(c));
+router.get('/chats/:userId', authMiddleware.authenticate, c.getUserChats.bind(c));
 
-// Создать группу
-router.post('/create-group', authMiddleware.optional, chatController.createGroup);
+router.get('/messages/:chatId', authMiddleware.authenticate, c.getMessages.bind(c));
 
-// Добавить участника
-router.post('/add-member', authMiddleware.optional, chatController.addMember);
+router.post('/create-group', authMiddleware.authenticate, c.createGroup.bind(c));
+router.post('/add-member', authMiddleware.authenticate, c.addMember.bind(c));
 
 module.exports = router;

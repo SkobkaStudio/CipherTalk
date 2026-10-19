@@ -3,14 +3,13 @@ const router = express.Router();
 const profileController = require('../controllers/profileController');
 const authMiddleware = require('../middleware/auth');
 
-// Обновление профиля
-router.post('/update-profile', authMiddleware.optional, profileController.updateProfile);
+const c = profileController;
 
-// Получение профиля
-router.get('/profile/:userId', profileController.getProfile);
-router.get('/profile', profileController.getProfile);
+router.post('/update-profile', authMiddleware.authenticate, c.updateProfile.bind(c));
 
-// Поиск пользователей
-router.get('/search-users', profileController.searchUsers);
+router.get('/profile/:userId', authMiddleware.authenticate, c.getProfile.bind(c));
+router.get('/profile', authMiddleware.authenticate, c.getProfile.bind(c));
+
+router.get('/search-users', authMiddleware.authenticate, c.searchUsers.bind(c));
 
 module.exports = router;

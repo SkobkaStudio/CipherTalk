@@ -1,0 +1,8 @@
+node_modules/
+.env
+*.key
+ciphertalk-server/ciphertalk-db.json
+ciphertalk-server/uploads/*
+!ciphertalk-server/uploads/.gitkeep
+*.log
+.DS_Store

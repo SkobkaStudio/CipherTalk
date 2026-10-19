@@ -11,10 +11,6 @@ class Message {
     this.created_at = data.created_at || Date.now();
   }
 
-  isText() { return this.type === 'text'; }
-  isFile() { return this.type === 'file'; }
-  isVoice() { return this.type === 'voice'; }
-
   toJSON() {
     return {
       id: this.id,

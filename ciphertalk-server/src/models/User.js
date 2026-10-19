@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const encryptionService = require('../services/encryptionService');
 
 class User {
   constructor(data) {
@@ -16,17 +16,13 @@ class User {
     this.created_at = data.created_at || Date.now();
   }
 
-  static hashPassword(password, salt) {
-    if (!salt) salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return `${salt}:${hash}`;
+  // Единый источник хеширования паролей (AES-независимо, PBKDF2-SHA512)
+  static hashPassword(password) {
+    return encryptionService.hashPassword(password);
   }
 
   static verifyPassword(password, stored) {
-    if (!stored) return false;
-    const [salt, hash] = stored.split(':');
-    const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return hash === testHash;
+    return encryptionService.verifyPassword(password, stored);
   }
 
   setPassword(password) {
@@ -54,9 +50,7 @@ class User {
   }
 
   toSafeJSON() {
-    const data = this.toJSON();
-    delete data.password_hash;
-    return data;
+    return this.toJSON();
   }
 }
 
