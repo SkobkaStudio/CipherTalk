@@ -11,5 +11,6 @@ router.get('/profile/:userId', authMiddleware.authenticate, c.getProfile.bind(c)
 router.get('/profile', authMiddleware.authenticate, c.getProfile.bind(c));
 
 router.get('/search-users', authMiddleware.authenticate, c.searchUsers.bind(c));
+router.get('/users/search', authMiddleware.authenticate, c.searchUsers.bind(c));
 
 module.exports = router;

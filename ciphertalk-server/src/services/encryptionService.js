@@ -8,11 +8,7 @@ const SALT = 'CipherTalk-at-rest';
 /**
  * Шифрование данных на диске: AES-256-GCM (96-bit IV, auth tag 128-bit).
  * Ключ берётся из ENCRYPTION_KEY (scrypt), иначе генерируется при первом
- * запуске и лежит в отдельном файле <db>.key с правами 600 — дамп БД без
- * ключа ничего не расшифрует.
- *
- * Клиентское E2EE (ECDH + AES-256-GCM в браузере) не затрагивается:
- * сервер оборачивает уже зашифрованное клиентом тело, наружу отдаёт исходный вид.
+ * запуске и лежит в отдельном файле <db>.key с правами 600.
  */
 class EncryptionService {
   constructor() {
@@ -58,10 +54,6 @@ class EncryptionService {
     ].join('.');
   }
 
-  /**
-   * Возвращает исходную строку, если данные не шифровались (старый формат),
-   * null — если расшифровать не удалось (чужой ключ / повреждение).
-   */
   decryptMessage(payload, key = this.getKey()) {
     if (typeof payload !== 'string' || payload.indexOf(PREFIX + '.') !== 0) {
       return payload;
@@ -84,7 +76,6 @@ class EncryptionService {
     return typeof payload === 'string' && payload.indexOf(PREFIX + '.') === 0;
   }
 
-  // Одинаковый вход -> одинаковый вывод, без утечки времени сравнения
   safeCompare(a, b) {
     const bufA = Buffer.from(String(a || ''));
     const bufB = Buffer.from(String(b || ''));
@@ -109,7 +100,6 @@ class EncryptionService {
       salt = parts[2];
       hash = parts[3];
     } else {
-      // легаси-формат "salt:hash" (10000 итераций)
       const legacy = stored.split(':');
       if (legacy.length !== 2) return false;
       salt = legacy[0];

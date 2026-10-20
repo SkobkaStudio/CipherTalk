@@ -89,7 +89,7 @@ class ProfileController {
   // Поиск пользователей (кроме себя)
   searchUsers(req, res) {
     try {
-      const query = String(req.query.query || req.query.q || '').trim();
+      const query = String(req.query.query || req.query.q || req.query.search || '').trim();
       if (!query) return res.json([]);
 
       const q = query.toLowerCase().replace(/^@/, '');
@@ -98,9 +98,10 @@ class ProfileController {
         .filter(u => u.id !== req.userId && (
           (u.name || '').toLowerCase().includes(q) ||
           (u.phone || '').toLowerCase().includes(q) ||
-          (u.username || '').toLowerCase().includes(q)
+          (u.username || '').toLowerCase().includes(q) ||
+          (u.email || '').toLowerCase().includes(q)
         ))
-        .slice(0, 30)
+        .slice(0, 50)
         .map(u => u.toSafeJSON());
 
       res.json(users);

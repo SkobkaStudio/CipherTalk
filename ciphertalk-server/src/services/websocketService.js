@@ -269,18 +269,19 @@ class WebSocketService {
     if (!content) {
       return this.sendError(ws, 'bad_request', 'Пустое сообщение');
     }
-    if (content.length > config.maxMessageLength) {
+    if (content.length > config.maxMessageLength * 10) {
       return this.sendError(ws, 'too_large', 'Слишком большое сообщение');
     }
 
     const type = ALLOWED_MESSAGE_TYPES.has(msg.msgType) ? msg.msgType : 'text';
     const now = Date.now();
+    const iv = typeof msg.iv === 'string' ? msg.iv.slice(0, 1024) : '';
     const message = new Message({
       id: this.db.nextId('messages'),
       chat_id: chatId,
       sender_id: currentUserId,
-      encrypted_content: encryptionService.encryptMessage(content), // at-rest AES-256-GCM
-      iv: typeof msg.iv === 'string' ? msg.iv.slice(0, 512) : '',
+      encrypted_content: content,
+      iv: iv,
       type,
       reply_to: Number.isInteger(msg.replyTo) ? msg.replyTo : null,
       forwarded_from: Number.isInteger(msg.forwardedFrom) ? msg.forwardedFrom : null,
@@ -299,6 +300,7 @@ class WebSocketService {
         senderId: message.sender_id,
         senderName: sender?.name || '',
         content,
+        ciphertext: content,
         iv: message.iv,
         type: message.type,
         replyTo: message.reply_to,
@@ -336,11 +338,12 @@ class WebSocketService {
     }
 
     const content = typeof msg.content === 'string' ? msg.content : '';
-    if (!content || content.length > config.maxMessageLength) {
+    if (!content || content.length > config.maxMessageLength * 10) {
       return this.sendError(ws, 'bad_request', 'Некорректный текст');
     }
 
-    message.encrypted_content = encryptionService.encryptMessage(content);
+    message.encrypted_content = content;
+    if (typeof msg.iv === 'string') message.iv = msg.iv.slice(0, 1024);
     message.edited = 1;
     this.db.markDirty();
 
@@ -348,6 +351,8 @@ class WebSocketService {
       type: 'message_edited',
       messageId,
       content,
+      ciphertext: content,
+      iv: message.iv,
       chatId: message.chat_id
     });
   }
@@ -433,13 +438,16 @@ class WebSocketService {
         }
         const sender = this.db.findUserById(m.sender_id);
         const content = encryptionService.decryptMessage(m.encrypted_content);
+        const outContent = content === null ? m.encrypted_content : content;
         return {
           id: m.id,
           chat_id: m.chat_id,
           sender_id: m.sender_id,
           sender_name: sender?.name || '',
           sender_avatar: sender?.avatar || '',
-          encrypted_content: content === null ? '' : content,
+          encrypted_content: outContent,
+          content: outContent,
+          ciphertext: outContent,
           iv: m.iv,
           type: m.type,
           reply_to: m.reply_to,
@@ -724,9 +732,9 @@ class WebSocketService {
   getChatWithDetails(chat, members) {
     const chatMessages = this.db.messages.filter(m => m.chat_id === chat.id);
     const lastMsg = chatMessages[chatMessages.length - 1];
-    const lastContent = lastMsg ? encryptionService.decryptMessage(lastMsg.encrypted_content) : null;
+    const lastContent = lastMsg ? (lastMsg.deleted_for_all ? '' : (encryptionService.decryptMessage(lastMsg.encrypted_content) || lastMsg.encrypted_content)) : '';
     return {
-      ...chat.toJSON ? chat.toJSON() : chat,
+      ...(chat.toJSON ? chat.toJSON() : chat),
       members,
       last_message: lastContent === null ? '' : lastContent,
       last_message_type: lastMsg?.type || null,
