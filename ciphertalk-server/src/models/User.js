@@ -9,6 +9,7 @@ class User {
     this.name = data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim();
     this.username = data.username || '';
     this.avatar = data.avatar || '';
+    this.bio = data.bio || '';
     this.public_key = data.public_key || '';
     this.password_hash = data.password_hash || '';
     this.online = data.online || 0;
@@ -42,6 +43,7 @@ class User {
       name: this.name,
       username: this.username,
       avatar: this.avatar,
+      bio: this.bio || '',
       public_key: this.public_key,
       online: this.online,
       last_seen: this.last_seen,

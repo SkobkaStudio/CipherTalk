@@ -10,7 +10,7 @@ class ProfileController {
   // Обновление профиля (только своего — userId берётся из сессии)
   updateProfile(req, res) {
     try {
-      const { firstName, lastName, username, avatar, publicKey, oldPassword, newPassword } = req.body;
+      const { firstName, lastName, name, username, avatar, bio, publicKey, oldPassword, newPassword } = req.body;
       const user = this.db.findUserById(req.userId);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -18,7 +18,9 @@ class ProfileController {
 
       if (firstName !== undefined) user.first_name = String(firstName).trim().slice(0, 60);
       if (lastName !== undefined) user.last_name = String(lastName).trim().slice(0, 60);
-      if (firstName !== undefined || lastName !== undefined) {
+      if (name !== undefined) {
+        user.name = String(name).trim().slice(0, 120);
+      } else if (firstName !== undefined || lastName !== undefined) {
         user.name = user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name;
       }
 
@@ -27,7 +29,14 @@ class ProfileController {
         if (this.db.isUsernameTaken(clean, req.userId)) {
           return res.status(400).json({ error: 'Username занят' });
         }
+        if (clean && !/^[a-z0-9_]{3,32}$/.test(clean)) {
+          return res.status(400).json({ error: 'Username некорректный (3-32, латиница/цифры/_)' });
+        }
         user.username = clean;
+      }
+
+      if (bio !== undefined) {
+        user.bio = String(bio).trim().slice(0, 500);
       }
 
       if (avatar !== undefined) {
@@ -80,17 +89,18 @@ class ProfileController {
   // Поиск пользователей (кроме себя)
   searchUsers(req, res) {
     try {
-      const query = String(req.query.query || '').trim();
+      const query = String(req.query.query || req.query.q || '').trim();
       if (!query) return res.json([]);
 
       const q = query.toLowerCase().replace(/^@/, '');
+      if (q.length < 1) return res.json([]);
       const users = this.db.users
         .filter(u => u.id !== req.userId && (
           (u.name || '').toLowerCase().includes(q) ||
           (u.phone || '').toLowerCase().includes(q) ||
           (u.username || '').toLowerCase().includes(q)
         ))
-        .slice(0, 20)
+        .slice(0, 30)
         .map(u => u.toSafeJSON());
 
       res.json(users);

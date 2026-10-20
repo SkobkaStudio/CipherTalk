@@ -7,7 +7,10 @@ class Message {
     this.iv = data.iv || '';
     this.type = data.type || 'text';
     this.reply_to = data.reply_to || null;
+    this.forwarded_from = data.forwarded_from || null;
     this.edited = data.edited || 0;
+    this.deleted_for_all = data.deleted_for_all || 0;
+    this.deleted_by = Array.isArray(data.deleted_by) ? data.deleted_by : [];
     this.created_at = data.created_at || Date.now();
   }
 
@@ -20,7 +23,10 @@ class Message {
       iv: this.iv,
       type: this.type,
       reply_to: this.reply_to,
+      forwarded_from: this.forwarded_from,
       edited: this.edited,
+      deleted_for_all: this.deleted_for_all,
+      deleted_by: this.deleted_by || [],
       created_at: this.created_at
     };
   }

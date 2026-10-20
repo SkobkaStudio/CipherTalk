@@ -70,6 +70,26 @@ class Database {
         }, 0);
         if (maxId > this.data.counters[name]) this.data.counters[name] = maxId;
       });
+    // Migrate messages to have new fields
+    if (Array.isArray(this.data.messages)) {
+      this.data.messages.forEach(m => {
+        if (!m.deleted_by) m.deleted_by = [];
+        if (m.deleted_for_all === undefined) m.deleted_for_all = 0;
+        if (!m.reactions) m.reactions = {};
+      });
+    }
+    if (Array.isArray(this.data.users)) {
+      this.data.users.forEach(u => {
+        if (u.bio === undefined) u.bio = '';
+      });
+    }
+    if (Array.isArray(this.data.chats)) {
+      this.data.chats.forEach(c => {
+        if (c.description === undefined) c.description = '';
+        if (c.is_pinned === undefined) c.is_pinned = false;
+        if (c.is_channel === undefined) c.is_channel = c.type === 'channel';
+      });
+    }
   }
 
   /**

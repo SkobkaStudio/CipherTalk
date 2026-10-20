@@ -73,13 +73,20 @@ class WebSocketService {
       'get_public_key': () => this.handleGetPublicKey(ws, msg),
       'start_chat': () => this.handleStartChat(ws, msg),
       'create_group': () => this.handleCreateGroup(ws, msg),
+      'create_channel': () => this.handleCreateChannel(ws, msg),
       'send_message': () => this.handleSendMessage(ws, msg),
       'edit_message': () => this.handleEditMessage(ws, msg),
       'delete_message': () => this.handleDeleteMessage(ws, msg),
       'get_messages': () => this.handleGetMessages(ws, msg),
       'typing': () => this.handleTyping(ws, msg),
       'add_member': () => this.handleAddMember(ws, msg),
-      'set_public_key': () => this.handleSetPublicKey(ws, msg)
+      'remove_member': () => this.handleRemoveMember(ws, msg),
+      'set_public_key': () => this.handleSetPublicKey(ws, msg),
+      'forward_message': () => this.handleForwardMessage(ws, msg),
+      'pin_message': () => this.handlePinMessage(ws, msg),
+      'unpin_message': () => this.handlePinMessage(ws, msg, true),
+      'react_message': () => this.handleReactMessage(ws, msg),
+      'read_messages': () => this.handleReadMessages(ws, msg)
     };
 
     const handler = handlers[msg.type];
@@ -195,7 +202,7 @@ class WebSocketService {
   handleCreateGroup(ws, msg) {
     const currentUserId = ws.userId;
     const membersInput = Array.isArray(msg.members)
-      ? msg.members.map(Number).filter(id => Number.isInteger(id) && this.db.findUserById(id))
+      ? msg.members.map(Number).filter(id => Number.isInteger(id) && this.db.findUserById(id) && id !== currentUserId)
       : [];
 
     const chatId = this.db.nextId('chats');
@@ -204,14 +211,42 @@ class WebSocketService {
       type: msg.groupType === 'supergroup' ? 'supergroup' : 'group',
       name: String(msg.name || 'Группа').slice(0, 100),
       avatar: typeof msg.avatar === 'string' ? msg.avatar.slice(0, 2 * 1024 * 1024) : '',
+      description: typeof msg.description === 'string' ? msg.description.slice(0, 500) : '',
       owner_id: currentUserId
     });
     this.db.chats.push(chat);
     this.db.chatMembers.push({ chat_id: chatId, user_id: currentUserId, role: 'owner', joined_at: Date.now() });
 
     membersInput.forEach(uid => {
-      this.db.chatMembers.push({ chat_id: chatId, user_id: uid, role: 'member', joined_at: Date.now() });
+      if (!this.db.isChatMember(chatId, uid)) {
+        this.db.chatMembers.push({ chat_id: chatId, user_id: uid, role: 'member', joined_at: Date.now() });
+      }
     });
+    this.db.markDirty();
+
+    const members = this.getChatMembersWithDetails(chatId);
+    const notification = {
+      type: 'new_chat',
+      chat: this.getChatWithDetails(chat, members)
+    };
+    members.forEach(m => presenceService.sendToUser(m.id, notification));
+    this.send(ws, { type: 'group_created', chat: this.getChatWithDetails(chat, members) });
+  }
+
+  handleCreateChannel(ws, msg) {
+    const currentUserId = ws.userId;
+    const chatId = this.db.nextId('chats');
+    const chat = new Chat({
+      id: chatId,
+      type: 'channel',
+      name: String(msg.name || 'Канал').slice(0, 100),
+      avatar: typeof msg.avatar === 'string' ? msg.avatar.slice(0, 2 * 1024 * 1024) : '',
+      description: typeof msg.description === 'string' ? msg.description.slice(0, 1000) : '',
+      owner_id: currentUserId,
+      is_channel: true
+    });
+    this.db.chats.push(chat);
+    this.db.chatMembers.push({ chat_id: chatId, user_id: currentUserId, role: 'owner', joined_at: Date.now() });
     this.db.markDirty();
 
     const members = this.getChatMembersWithDetails(chatId);
@@ -248,6 +283,7 @@ class WebSocketService {
       iv: typeof msg.iv === 'string' ? msg.iv.slice(0, 512) : '',
       type,
       reply_to: Number.isInteger(msg.replyTo) ? msg.replyTo : null,
+      forwarded_from: Number.isInteger(msg.forwardedFrom) ? msg.forwardedFrom : null,
       created_at: now
     });
     this.db.addMessage(message);
@@ -266,7 +302,9 @@ class WebSocketService {
         iv: message.iv,
         type: message.type,
         replyTo: message.reply_to,
-        edited: 0,
+        forwardedFrom: message.forwarded_from,
+        edited: message.edited,
+        deletedForAll: message.deleted_for_all,
         createdAt: message.created_at
       }
     });
@@ -318,22 +356,50 @@ class WebSocketService {
     const currentUserId = ws.userId;
     const messageId = Number(msg.messageId);
     const message = this.db.findMessageById(messageId);
+    const forAll = msg.forAll !== false;
 
-    if (!message || message.sender_id !== currentUserId) {
-      return this.sendError(ws, 'forbidden', 'Можно удалять только свои сообщения');
-    }
-    if (!message.chat_id || !this.db.isChatMember(message.chat_id, currentUserId)) {
+    if (!message || !message.chat_id || !this.db.isChatMember(message.chat_id, currentUserId)) {
       return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
     }
 
     const chatId = message.chat_id;
-    this.db.deleteMessage(messageId); // раньше присваивание геттеру молча не работало
+    if (forAll && message.sender_id !== currentUserId) {
+      const cm = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === currentUserId);
+      if (!cm || (cm.role !== 'owner' && cm.role !== 'admin')) {
+        return this.sendError(ws, 'forbidden', 'Можно удалять у всех только свои или админ может?');
+      }
+    }
 
-    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
-      type: 'message_deleted',
-      messageId,
-      chatId
-    });
+    if (forAll && message.sender_id === currentUserId) {
+      message.deleted_for_all = 1;
+      this.db.markDirty();
+      presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+        type: 'message_deleted',
+        messageId,
+        chatId,
+        forAll: true
+      });
+    } else if (forAll) {
+      message.deleted_for_all = 1;
+      this.db.markDirty();
+      presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+        type: 'message_deleted',
+        messageId,
+        chatId,
+        forAll: true
+      });
+    } else {
+      if (message.sender_id !== currentUserId) {
+        return this.sendError(ws, 'forbidden', 'Можно удалять только свои сообщения');
+      }
+      this.db.deleteMessage(messageId);
+      presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+        type: 'message_deleted',
+        messageId,
+        chatId,
+        forAll: false
+      });
+    }
   }
 
   handleGetMessages(ws, msg) {
@@ -342,11 +408,29 @@ class WebSocketService {
       return this.sendError(ws, 'forbidden', 'Вы не участник этого чата');
     }
 
-    const limit = Math.min(Math.max(parseInt(msg.limit, 10) || 50, 1), 200);
+    const limit = Math.min(Math.max(parseInt(msg.limit, 10) || 50, 1), 500);
     const chatMessages = this.db.messages
       .filter(m => m.chat_id === chatId)
       .slice(-limit)
       .map(m => {
+        if (m.deleted_for_all) {
+          return {
+            id: m.id,
+            chat_id: m.chat_id,
+            sender_id: m.sender_id,
+            sender_name: '',
+            sender_avatar: '',
+            encrypted_content: 'Сообщение удалено',
+            iv: '',
+            type: 'text',
+            reply_to: m.reply_to,
+            forwarded_from: m.forwarded_from,
+            edited: 0,
+            deleted_for_all: 1,
+            reactions: m.reactions || {},
+            created_at: m.created_at
+          };
+        }
         const sender = this.db.findUserById(m.sender_id);
         const content = encryptionService.decryptMessage(m.encrypted_content);
         return {
@@ -359,7 +443,10 @@ class WebSocketService {
           iv: m.iv,
           type: m.type,
           reply_to: m.reply_to,
+          forwarded_from: m.forwarded_from,
           edited: m.edited,
+          deleted_for_all: m.deleted_for_all || 0,
+          reactions: m.reactions || {},
           created_at: m.created_at
         };
       });
@@ -384,12 +471,23 @@ class WebSocketService {
     });
   }
 
+  checkRole(chatId, userId) {
+    const cm = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === userId);
+    return cm?.role || 'member';
+  }
+
   handleAddMember(ws, msg) {
     const chatId = Number(msg.chatId);
     const userId = Number(msg.userId);
+    const currentUserId = ws.userId;
 
-    if (!this.db.isChatMember(chatId, ws.userId)) {
+    if (!this.db.isChatMember(chatId, currentUserId)) {
       return this.sendError(ws, 'forbidden', 'Вы не участник этого чата');
+    }
+    const myRole = this.checkRole(chatId, currentUserId);
+    const chat = this.db.findChatById(chatId);
+    if (chat && chat.type === 'channel' && myRole !== 'owner' && myRole !== 'admin') {
+      return this.sendError(ws, 'forbidden', 'Только админы могут добавлять подписчиков');
     }
     if (!this.db.findUserById(userId)) {
       return this.sendError(ws, 'not_found', 'Пользователь не найден');
@@ -413,6 +511,26 @@ class WebSocketService {
     });
   }
 
+  handleRemoveMember(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const userId = Number(msg.userId);
+    const currentUserId = ws.userId;
+    if (!this.db.isChatMember(chatId, currentUserId)) return this.sendError(ws, 'forbidden', 'Нет доступа');
+    const myRole = this.checkRole(chatId, currentUserId);
+    const targetRole = this.checkRole(chatId, userId);
+    if (myRole !== 'owner' && myRole !== 'admin') return this.sendError(ws, 'forbidden', 'Недостаточно прав');
+    if (targetRole === 'owner') return this.sendError(ws, 'forbidden', 'Нельзя удалить владельца');
+    this.db.chatMembers = this.db.chatMembers.filter(m => !(m.chat_id === chatId && m.user_id === userId));
+    this.db.markDirty();
+    const members = this.getChatMembersWithDetails(chatId);
+    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+      type: 'member_removed',
+      chatId,
+      userId,
+      members
+    });
+  }
+
   handleSetPublicKey(ws, msg) {
     const user = this.db.findUserById(ws.userId);
     if (!user) return;
@@ -421,6 +539,102 @@ class WebSocketService {
     }
     user.public_key = msg.publicKey;
     this.db.markDirty();
+  }
+
+  handleForwardMessage(ws, msg) {
+    const currentUserId = ws.userId;
+    const fromChatId = Number(msg.fromChatId);
+    const toChatId = Number(msg.toChatId);
+    const messageId = Number(msg.messageId);
+    if (!this.db.isChatMember(fromChatId, currentUserId) || !this.db.isChatMember(toChatId, currentUserId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+    const orig = this.db.findMessageById(messageId);
+    if (!orig || orig.chat_id !== fromChatId) {
+      return this.sendError(ws, 'not_found', 'Сообщение не найдено');
+    }
+    const content = encryptionService.decryptMessage(orig.encrypted_content);
+    if (content === null) {
+      return this.sendError(ws, 'error', 'Не удалось расшифровать');
+    }
+    const now = Date.now();
+    const message = new Message({
+      id: this.db.nextId('messages'),
+      chat_id: toChatId,
+      sender_id: currentUserId,
+      encrypted_content: encryptionService.encryptMessage(content),
+      iv: orig.iv,
+      type: orig.type,
+      forwarded_from: orig.id,
+      reply_to: null,
+      created_at: now
+    });
+    this.db.addMessage(message);
+    const sender = this.db.findUserById(currentUserId);
+    const members = this.getChatMemberIds(toChatId);
+    presenceService.sendToChatMembers(members, {
+      type: 'new_message',
+      message: {
+        id: message.id,
+        chatId: message.chat_id,
+        senderId: message.sender_id,
+        senderName: sender?.name || '',
+        content,
+        iv: message.iv,
+        type: message.type,
+        replyTo: null,
+        forwardedFrom: orig.id,
+        edited: 0,
+        createdAt: message.created_at
+      }
+    });
+  }
+
+  handlePinMessage(ws, msg, unpin = false) {
+    const chatId = Number(msg.chatId);
+    const currentUserId = ws.userId;
+    if (!this.db.isChatMember(chatId, currentUserId)) return this.sendError(ws, 'forbidden', 'Нет доступа');
+    const chat = this.db.findChatById(chatId);
+    if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
+    const myRole = this.checkRole(chatId, currentUserId);
+    if (myRole !== 'owner' && myRole !== 'admin') return this.sendError(ws, 'forbidden', 'Только админ/владелец');
+    chat.is_pinned = !unpin;
+    this.db.markDirty();
+    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+      type: 'chat_pinned',
+      chatId,
+      isPinned: chat.is_pinned
+    });
+  }
+
+  handleReactMessage(ws, msg) {
+    const messageId = Number(msg.messageId);
+    const reaction = String(msg.reaction || '👍').slice(0, 8);
+    const message = this.db.findMessageById(messageId);
+    if (!message || !message.chat_id) return this.sendError(ws, 'not_found', 'Сообщение не найдено');
+    if (!this.db.isChatMember(message.chat_id, ws.userId)) return this.sendError(ws, 'forbidden', 'Нет доступа');
+    if (!message.reactions) message.reactions = {};
+    if (!message.reactions[reaction]) message.reactions[reaction] = [];
+    const idx = message.reactions[reaction].indexOf(ws.userId);
+    if (idx >= 0) {
+      message.reactions[reaction].splice(idx, 1);
+      if (message.reactions[reaction].length === 0) delete message.reactions[reaction];
+    } else {
+      message.reactions[reaction].push(ws.userId);
+    }
+    this.db.markDirty();
+    presenceService.sendToChatMembers(this.getChatMemberIds(message.chat_id), {
+      type: 'message_reaction',
+      messageId,
+      chatId: message.chat_id,
+      reactions: message.reactions,
+      userId: ws.userId,
+      reaction
+    });
+  }
+
+  handleReadMessages(ws, msg) {
+    // stub for future read receipts
   }
 
   // ==================== LIFECYCLE ====================

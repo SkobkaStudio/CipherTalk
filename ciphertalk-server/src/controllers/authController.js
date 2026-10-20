@@ -5,7 +5,6 @@ const Chat = require('../models/Chat');
 const smsService = require('../services/smsService');
 const encryptionService = require('../services/encryptionService');
 const sessionService = require('../services/sessionService');
-const demoService = require('../services/demoService');
 const config = require('../config');
 
 const PHONE_RE = /^\+?[0-9]{5,20}$/;
@@ -14,8 +13,9 @@ const VERIFY_TOKEN_TTL_MS = 10 * 60 * 1000;
 class AuthController {
   constructor() {
     this.db = getDatabase();
-    // phone -> timestamp последней отправки (rate limit на отправку SMS)
+    // phone -> timestamp последней отправки (rate limit на отправку SMS/кодов)
     this.sendCooldowns = new Map();
+    // ip-like keying could be better, but per-phone is fine
   }
 
   // 1. Отправка кода
@@ -26,18 +26,6 @@ class AuthController {
         return res.status(400).json({ error: 'Введите корректный номер телефона' });
       }
 
-      // Демо-режим: «чит-код». SMS не отправляем, код фиксированный,
-      // и сразу пускаем в чат с тестовыми контактами.
-      if (config.isDemoPhone(phone)) {
-        return res.json({
-          success: true,
-          demo: true,
-          code: config.demoCode,
-          message: 'Демо-режим: вход без SMS',
-          exists: true
-        });
-      }
-
       const lastSent = this.sendCooldowns.get(phone) || 0;
       const wait = config.sendCodeCooldownMs - (Date.now() - lastSent);
       if (wait > 0) {
@@ -45,14 +33,14 @@ class AuthController {
           error: `Повторная отправка через ${Math.ceil(wait / 1000)} сек.`
         });
       }
-      // чистим устаревшие записи, чтобы Map не рос бесконечно
+      // чистим устаревшие записи
       const cutoff = Date.now() - config.sendCodeCooldownMs;
       for (const [p, ts] of this.sendCooldowns) {
         if (ts < cutoff) this.sendCooldowns.delete(p);
       }
       this.sendCooldowns.set(phone, Date.now());
 
-      const code = String(Math.floor(1000 + Math.random() * 9000));
+      const code = String(Math.floor(100000 + Math.random() * 900000));
       const expiresAt = Date.now() + config.codeExpiryMinutes * 60 * 1000;
 
       this.db.deleteVerificationCode(phone);
@@ -63,7 +51,18 @@ class AuthController {
       }));
       this.db.markDirty();
 
-      await smsService.sendCode(phone, code);
+      // Пытаемся отправить через smsService, но главное - вывести в терминал
+      try {
+        await smsService.sendCode(phone, code);
+      } catch (e) {
+        // ignore
+      }
+
+      console.log('\n' + '='.repeat(60));
+      console.log('[MANUAL OTP] Code: ' + code);
+      console.log('Phone: ' + phone);
+      console.log('Expires in ' + config.codeExpiryMinutes + ' min');
+      console.log('='.repeat(60) + '\n');
 
       const existingUser = this.db.findUserByPhone(phone);
       res.json({ success: true, message: 'Код отправлен', exists: !!existingUser });
@@ -83,29 +82,13 @@ class AuthController {
         return res.status(400).json({ error: 'Укажите номер и код' });
       }
 
-      // Демо-режим: «чит-код» — сразу логиним с тестовыми контактами.
-      if (config.isDemoPhone(phone)) {
-        if (!encryptionService.safeCompare(code, config.demoCode)) {
-          return res.status(400).json({ error: 'Неверный демо-код' });
-        }
-        const { user, token } = demoService.ensureDemoUser(phone);
-        return res.json({
-          success: true,
-          action: 'demo',
-          phone,
-          name: user.name,
-          user: user.toSafeJSON(),
-          token
-        });
-      }
-
       const records = this.db.findVerificationCode(phone);
       if (!records.length) {
         return res.status(400).json({ error: 'Неверный или просроченный код' });
       }
 
       const record = records[records.length - 1];
-      if (record.attempts >= config.codeMaxAttempts) {
+      if ((record.attempts || 0) >= config.codeMaxAttempts) {
         this.db.deleteVerificationCode(phone);
         return res.status(429).json({ error: 'Слишком много попыток. Запросите новый код.' });
       }

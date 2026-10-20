@@ -749,10 +749,10 @@ function connectWebSocket() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (e) => {
     ws = null;
     if (authToken && currentUser) {
-      wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+      wsReconnectTimer = setTimeout(connectWebSocket, 1500);
     }
   };
 

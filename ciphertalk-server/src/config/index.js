@@ -10,12 +10,7 @@ function resolveFromRoot(p) {
 }
 
 // Жёсткий лимит вложения (можно только уменьшить через MAX_FILE_SIZE)
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-
-// Демо-номера: сравниваем по цифрам, чтобы "+7 903..." и "7903..." совпадали.
-function normalizePhone(p) {
-  return String(p || '').replace(/\D/g, '');
-}
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 module.exports = {
   serverRoot: SERVER_ROOT,
@@ -29,8 +24,8 @@ module.exports = {
     parseInt(process.env.MAX_FILE_SIZE, 10) || MAX_UPLOAD_BYTES,
     MAX_UPLOAD_BYTES
   ),
-  maxJsonBody: 2 * 1024 * 1024,
-  wsMaxPayload: 512 * 1024,
+  maxJsonBody: 10 * 1024 * 1024,
+  wsMaxPayload: 1024 * 1024,
   maxMessageLength: 100 * 1000,
 
   saveInterval: parseInt(process.env.SAVE_INTERVAL, 10) || 10000,
@@ -47,17 +42,5 @@ module.exports = {
 
   // Ключ AES-256-GCM для шифрования данных на диске.
   // Если не задан — генерируется при первом запуске и хранится в БД.
-  encryptionKey: process.env.ENCRYPTION_KEY || '',
-
-  // Демо-режим: «чит-код». Любой номер из DEMO_PHONES (список через запятую)
-  // пропускает SMS и сразу пускает в чат с тестовыми контактами (Алиса, Боб).
-  // Включён по умолчанию, отключается переменной DEMO_MODE=0 (для продакшена).
-  demoMode: process.env.DEMO_MODE !== '0',
-  demoPhone: process.env.DEMO_PHONE || '1234567,79039952506',
-  demoCode: process.env.DEMO_CODE || '0000'
+  encryptionKey: process.env.ENCRYPTION_KEY || ''
 };
-
-// Список демо-номеров (нормализованные цифры) и проверка телефона на демо-режим.
-module.exports.demoPhones = module.exports.demoPhone.split(',').map(normalizePhone).filter(Boolean);
-module.exports.isDemoPhone = (phone) =>
-  module.exports.demoMode && module.exports.demoPhones.includes(normalizePhone(phone));
