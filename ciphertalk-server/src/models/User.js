@@ -3,7 +3,8 @@ const encryptionService = require('../services/encryptionService');
 class User {
   constructor(data) {
     this.id = data.id;
-    this.phone = data.phone;
+    this.phone = data.phone || '';
+    this.email = data.email || '';
     this.first_name = data.first_name || '';
     this.last_name = data.last_name || '';
     this.name = data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim();
@@ -38,6 +39,7 @@ class User {
     return {
       id: this.id,
       phone: this.phone,
+      email: this.email || '',
       first_name: this.first_name,
       last_name: this.last_name,
       name: this.name,
