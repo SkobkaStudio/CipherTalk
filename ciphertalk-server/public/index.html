@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CipherTalk — КипяТок</title>
+<link rel="stylesheet" href="/features.css">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -1445,6 +1446,9 @@ html[data-glass="on"] .login-box {
         <button class="side-menu-item" data-action="openSavedMessages">
           <span class="icon">⭐</span> Избранное
         </button>
+        <button class="side-menu-item" data-action="openProfileEditor">
+          <span class="icon">🧑</span> Мой профиль
+        </button>
         <div class="side-menu-divider"></div>
         <button class="side-menu-item" data-action="openSettings">
           <span class="icon">⚙️</span> Настройки
@@ -1466,6 +1470,7 @@ html[data-glass="on"] .login-box {
           <input type="text" placeholder="Поиск" id="sidebar-search" data-action="searchChats">
         </div>
       </div>
+      <div class="folder-bar" id="folder-bar"></div>
       <div class="chat-list" id="chat-list"></div>
     </div>
 
@@ -1491,11 +1496,20 @@ html[data-glass="on"] .login-box {
             <div class="chat-header-status" id="chat-header-status">в сети</div>
           </div>
           <div class="chat-header-actions">
+            <button class="menu-btn" data-action="openPinnedModal" title="Закреплённые">📌</button>
             <button class="menu-btn" data-action="showChatInfo" title="Инфо">ℹ️</button>
           </div>
         </div>
 
         <div class="messages-container" id="messages-container"></div>
+
+        <div class="reply-bar" id="reply-bar" style="display:none">
+          <div class="rb-info">
+            <div class="rb-title" id="reply-bar-title">Ответ</div>
+            <div class="rb-text" id="reply-bar-text"></div>
+          </div>
+          <button class="rb-close" data-action="cancelReply" title="Отменить">✕</button>
+        </div>
 
         <div class="input-area" id="input-area">
           <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить">📎</button>
@@ -1530,6 +1544,8 @@ html[data-glass="on"] .login-box {
 
 <canvas id="snow-canvas" aria-hidden="true"></canvas>
 
+<script src="/e2ee.js"></script>
 <script src="/app.js"></script>
+<script src="/chat-features.js"></script>
 </body>
 </html>

@@ -16,8 +16,7 @@ let authToken = localStorage.getItem('ciphertalk_token') || '';
 let chats = [];
 let currentChatId = null;
 let messages = {};          // chatId -> [normalized message]
-let cryptoKeys = {};        // chatId -> CryptoKey
-let keyPairs = {};          // userId -> { publicKey, privateKey }
+// E2EE-состояние живёт в обще модуле /e2ee.js, здесь только кэш
 let onlineUsers = new Set();
 let typingTimeout = null;
 let usernameCheckTimeout = null;
@@ -133,8 +132,8 @@ function setStylePreset(id) {
   showToast(`Стиль «${preset.name}» применён ✨`, 'success');
 }
 
-function setCustomBg(event) {
-  const file = event.target.files && event.target.files[0];
+function setCustomBg(el) {
+  const file = el && el.files && el.files[0];
   if (!file) return;
   if (file.size > 3 * 1024 * 1024) { showToast('Файл больше 3 МБ', 'error'); return; }
   const reader = new FileReader();
@@ -274,10 +273,12 @@ function maybeLockApp() {
 async function resetE2EE() {
   if (!confirm('Сбросить ключи шифрования? Старые сообщения станут нечитаемыми на этом устройстве.')) return;
   try {
-    const kp = await generateKeyPair();
-    keyPairs[currentUser.id] = kp;
-    localStorage.setItem('ciphertalk_keys', JSON.stringify(kp));
-    cryptoKeys = {};
+    identity = await E2EE.generateIdentity();
+    localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
+    localStorage.removeItem(SESSIONS_KEY);
+    chatKeys = {};
+    groupKeyBlobs = {};
+    localStorage.removeItem(GROUP_KEYS_KEY);
     await publishOwnPublicKey();
     showToast('🔑 Ключи шифрования пересозданы', 'success');
     if (currentChatId) renderMessages(currentChatId);
@@ -438,6 +439,8 @@ function normalizeChat(chat) {
     role: chat.role || 'member',
     members: Array.isArray(chat.members) ? chat.members.map(normalizeUser) : [],
     last_message: chat.last_message || '',
+    last_message_iv: chat.last_message_iv || '',
+    last_message_header: chat.last_message_header || '',
     last_message_type: chat.last_message_type || null,
     last_message_time: chat.last_message_time || 0,
     last_sender_id: chat.last_sender_id || 0,
@@ -454,9 +457,14 @@ function normalizeMessage(m) {
     sender_avatar: m.sender_avatar ?? '',
     encrypted_content: m.encrypted_content ?? m.content ?? '',
     iv: m.iv || '',
+    header: m.header || m.last_message_header || '',
     type: m.type || 'text',
     reply_to: m.reply_to ?? m.replyTo ?? null,
     edited: m.edited || 0,
+    deleted_for_all: m.deleted_for_all || m.deletedForAll || 0,
+    forwarded_from: m.forwarded_from ?? m.forwardedFrom ?? null,
+    reactions: m.reactions || {},
+    pinned: m.pinned || 0,
     created_at: Number(m.created_at ?? m.createdAt ?? Date.now())
   };
 }
@@ -507,92 +515,300 @@ async function api(path, options = {}) {
 }
 
 // ==================== КРИПТОГРАФИЯ ====================
+// ==================== E2EE (общий модуль /e2ee.js) ====================
+const E2EE = window.CipherTalkE2EE;
+
+const IDENTITY_KEY = 'ciphertalk_identity';
+const SESSIONS_KEY = 'ciphertalk_sessions';
+const GROUP_KEYS_KEY = 'ciphertalk_group_keys';
+
+let identity = null;         // { publicKey, privateKey } в base64
+let chatKeys = {};           // chatId -> { kind: 'direct'|'group', session?, groupKey? }
+let groupKeyBlobs = {};      // chatId -> { version, wrapped, createdBy }
+
 function assertWebCrypto() {
   if (!window.crypto || !window.crypto.subtle) {
     throw new Error('WebCrypto недоступен: откройте сайт по HTTPS или через localhost');
   }
+  if (!E2EE) throw new Error('Модуль шифрования /e2ee.js не загружен');
 }
 
-async function generateKeyPair() {
-  assertWebCrypto();
-  const keyPair = await crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
-  );
-  const publicKey = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
-  const privateKey = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
-  return { publicKey, privateKey };
-}
-
-async function getOrCreateLocalKeyPair() {
-  const saved = localStorage.getItem('ciphertalk_keys');
+async function getOrCreateIdentity() {
+  const saved = localStorage.getItem(IDENTITY_KEY);
   if (saved) {
     try {
-      const kp = JSON.parse(saved);
-      if (kp && kp.publicKey && kp.privateKey) return kp;
-    } catch (e) { /* ignore */ }
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.publicKey && parsed.privateKey) return parsed;
+    } catch (e) { /* пересоздадим */ }
   }
-  return generateKeyPair();
+  const created = await E2EE.generateIdentity();
+  localStorage.setItem(IDENTITY_KEY, JSON.stringify(created));
+  return created;
 }
 
-async function importPublicKey(jwk) {
-  return crypto.subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+async function ensureLocalIdentity() {
+  if (!identity) identity = await getOrCreateIdentity();
+  return identity;
 }
 
-async function importPrivateKey(jwk) {
-  return crypto.subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
-}
-
-async function deriveSharedKey(privateKeyJwk, publicKeyJwk) {
-  const privateKey = await importPrivateKey(privateKeyJwk);
-  const publicKey = await importPublicKey(publicKeyJwk);
-  const sharedBits = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: publicKey }, privateKey, 256
-  );
-  const keyMaterial = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(16), info: new TextEncoder().encode('CipherTalk') },
-    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-  );
-}
-
-async function encryptMessage(text, aesKey) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv }, aesKey, new TextEncoder().encode(text)
-  );
-  return { content: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
-}
-
-async function decryptMessage(encryptedContent, ivBase64, aesKey) {
+function loadSessionMap() {
   try {
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: new Uint8Array(base64ToArrayBuffer(ivBase64)) },
-      aesKey, base64ToArrayBuffer(encryptedContent)
-    );
-    return new TextDecoder().decode(decrypted);
+    return JSON.parse(localStorage.getItem(SESSIONS_KEY)) || {};
   } catch (e) {
-    return '🔒 [Ошибка расшифровки]';
+    return {};
   }
 }
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+function saveSession(chatId, session) {
+  const all = loadSessionMap();
+  all[chatId] = E2EE.serializeSession(session);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(all));
 }
 
-function base64ToArrayBuffer(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
+function loadSession(chatId) {
+  const all = loadSessionMap();
+  return all[chatId] ? E2EE.deserializeSession(all[chatId]) : null;
 }
+
+function loadGroupKeyBlobs() {
+  try {
+    return JSON.parse(localStorage.getItem(GROUP_KEYS_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveGroupKeyBlobs() {
+  localStorage.setItem(GROUP_KEYS_KEY, JSON.stringify(groupKeyBlobs));
+}
+
+// Ожидание группового ключа от сервера
+const pendingGroupKeys = new Map();
+
+function requestGroupKey(chatId) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingGroupKeys.delete(chatId);
+      reject(new Error('Сервер не прислал ключ группы'));
+    }, 6000);
+    pendingGroupKeys.set(chatId, { resolve, reject, timer });
+    sendWs({ type: 'get_group_key', chatId });
+  });
+}
+
+function resolveGroupKey(chatId, payload) {
+  const entry = pendingGroupKeys.get(chatId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingGroupKeys.delete(chatId);
+  entry.resolve(payload);
+}
+
+// ==================== КЛЮЧИ ЧАТОВ ====================
+
+async function getChatKey(chatId, chat) {
+  if (chatKeys[chatId]) return chatKeys[chatId];
+  if (!chat) throw new Error('Чат не найден');
+  const me = await ensureLocalIdentity();
+
+  if (chat.type === 'private' || chat.type === 'saved') {
+    let peerKey = null;
+    if (chat.type === 'saved') {
+      // «Избранное»: шифруем сами с собой (ECDH с собственным ключом)
+      peerKey = me.publicKey;
+    } else {
+      const other = chat.members?.find(m => m.id !== currentUser.id) || chat.members?.[0];
+      if (!other) throw new Error('Не найден собеседник');
+      peerKey = other.public_key;
+      if (!peerKey) {
+        const fetched = await waitForPublicKey(other.id);
+        peerKey = fetched;
+        other.public_key = fetched;
+      }
+    }
+    if (!peerKey) throw new Error('У собеседника ещё нет ключа шифрования');
+
+    let session = loadSession(chatId);
+    if (!session || session.peerPublicKey !== peerKey) {
+      session = await E2EE.createDirectSession(me, peerKey);
+      saveSession(chatId, session);
+    }
+    chatKeys[chatId] = { kind: 'direct', session };
+    return chatKeys[chatId];
+  }
+
+  const groupKey = await ensureGroupKey(chat);
+  chatKeys[chatId] = { kind: 'group', groupKey };
+  return chatKeys[chatId];
+}
+
+async function ensureGroupKey(chat) {
+  const chatId = chat.id;
+  if (chatKeys[chatId] && chatKeys[chatId].kind === 'group') return chatKeys[chatId].groupKey;
+
+  let state = groupKeyBlobs[chatId];
+  if (!state || !state.mine) {
+    state = await requestGroupKey(chatId);
+  }
+  if (!state || !state.mine) throw new Error('Ключ группы ещё не создан');
+
+  const me = await ensureLocalIdentity();
+  const creatorId = Number(state.createdBy) || 0;
+  const creator = chat.members?.find(m => m.id === creatorId);
+  const creatorKey = creator?.public_key || (creatorId === currentUser.id ? me.publicKey : null);
+  if (!creatorKey) throw new Error('Нет публичного ключа создателя группы');
+
+  const groupKey = await E2EE.unwrapGroupKey(state.mine, me, creatorKey);
+  chatKeys[chatId] = { kind: 'group', groupKey };
+  return groupKey;
+}
+
+// Создаёт и публикует групповой ключ (вызывается создателем группы/канала)
+async function publishGroupKey(chat, groupKeyBytes, version) {
+  const me = await ensureLocalIdentity();
+  const wrapped = {};
+  for (const member of chat.members || []) {
+    if (!member.public_key) continue;
+    wrapped[member.id] = await E2EE.wrapGroupKey(groupKeyBytes, me, member.public_key);
+  }
+  if (!wrapped[currentUser.id]) {
+    wrapped[currentUser.id] = await E2EE.wrapGroupKey(groupKeyBytes, me, me.publicKey);
+  }
+  const ver = version || 1;
+  groupKeyBlobs[chat.id] = {
+    version: ver,
+    wrapped,
+    mine: wrapped[currentUser.id],
+    createdBy: currentUser.id
+  };
+  saveGroupKeyBlobs();
+  chatKeys[chat.id] = { kind: 'group', groupKey: groupKeyBytes };
+  sendWs({ type: 'set_group_key', chatId: chat.id, version: ver, wrapped });
+  return wrapped;
+}
+
+// Добавляет участника в группу: ключ группы заворачивается лично для него
+async function shareGroupKeyWithMember(chat, member) {
+  const me = await ensureLocalIdentity();
+  if (!member.public_key) throw new Error('У участника нет публичного ключа');
+  const groupKey = await ensureGroupKey(chat);
+  const state = groupKeyBlobs[chat.id] || {};
+  const blob = await E2EE.wrapGroupKey(groupKey, me, member.public_key);
+  const wrapped = { ...(state.wrapped || {}), [member.id]: blob };
+  const version = (state.version || 1) + 1;
+  groupKeyBlobs[chat.id] = {
+    version,
+    wrapped,
+    mine: state.mine || blob,
+    createdBy: state.createdBy || currentUser.id
+  };
+  saveGroupKeyBlobs();
+  sendWs({ type: 'set_group_key', chatId: chat.id, version, wrapped });
+  return blob;
+}
+
+// Сохраняет полученный от сервера групповой ключ (только мой зашифрованный блоб)
+function storeGroupKeyState(chatId, version, wrapped, createdBy) {
+  const mine = wrapped && wrapped[currentUser.id];
+  if (!mine) return null;
+  groupKeyBlobs[chatId] = { version, wrapped, mine, createdBy };
+  saveGroupKeyBlobs();
+  delete chatKeys[chatId];
+  return groupKeyBlobs[chatId];
+}
+
+// ==================== ШИФРОВАНИЕ СООБЩЕНИЙ ====================
+
+async function encryptChatText(chatKey, text, chatId) {
+  if (!chatKey) throw new Error('Нет ключа чата');
+  if (chatKey.kind === 'group') {
+    return E2EE.encryptGroup(chatKey.groupKey, text, String(chatId), 1);
+  }
+  const envelope = await E2EE.encryptDirect(chatKey.session, text, String(chatId));
+  saveSession(chatId, chatKey.session);
+  return envelope;
+}
+
+// Кэш только что отправленных сообщений: подстраховка для расшифровки
+// собственных сообщений (echo от сервера) без обращения к ratchet.
+const sentPlaintext = new Map();
+
+function rememberSent(content, text) {
+  sentPlaintext.set(content, text);
+  if (sentPlaintext.size > 200) {
+    const oldest = sentPlaintext.keys().next().value;
+    sentPlaintext.delete(oldest);
+  }
+}
+
+async function decryptChatText(chatKey, message, chatId, isOwn = false) {
+  if (!chatKey) throw new Error('Нет ключа чата');
+  const payload = {
+    content: message.encrypted_content,
+    iv: message.iv,
+    header: message.header || ''
+  };
+  if (chatKey.kind === 'group') {
+    return E2EE.decryptGroup(chatKey.groupKey, payload, String(chatId));
+  }
+  if (isOwn) {
+    try {
+      const text = await E2EE.decryptDirectOwn(chatKey.session, payload, String(chatId));
+      saveSession(chatId, chatKey.session);
+      return text;
+    } catch (e) {
+      const cached = sentPlaintext.get(message.encrypted_content);
+      if (cached !== undefined) return cached;
+      throw e;
+    }
+  }
+  const text = await E2EE.decryptDirect(chatKey.session, payload, String(chatId));
+  saveSession(chatId, chatKey.session);
+  return text;
+}
+
+// ==================== ФАЙЛЫ И МЕДИА ====================
+
+function mediaKeyBytes(chatKey) {
+  return chatKey.kind === 'group'
+    ? chatKey.groupKey
+    : E2EE.sessionFileKey(chatKey.session);
+}
+
+async function encryptBlob(buffer, chatKey) {
+  const encrypted = await E2EE.encryptFile(mediaKeyBytes(chatKey), new Uint8Array(buffer));
+  const salt = E2EE.b64ToBytes(encrypted.salt);
+  const iv = E2EE.b64ToBytes(encrypted.iv);
+  const data = E2EE.b64ToBytes(encrypted.data);
+  const out = new Uint8Array(1 + salt.length + iv.length + data.length);
+  out[0] = salt.length;
+  out.set(salt, 1);
+  out.set(iv, 1 + salt.length);
+  out.set(data, 1 + salt.length + iv.length);
+  return out.buffer;
+}
+
+async function decryptBlob(buffer, chatKey) {
+  const all = new Uint8Array(buffer);
+  if (all.byteLength < 14) throw new Error('Повреждённый файл');
+  const saltLength = all[0];
+  const salt = all.slice(1, 1 + saltLength);
+  const iv = all.slice(1 + saltLength, 1 + saltLength + 12);
+  const data = all.slice(1 + saltLength + 12);
+  const plain = await E2EE.decryptFile(mediaKeyBytes(chatKey), {
+    salt: E2EE.bytesToB64(salt),
+    iv: E2EE.bytesToB64(iv),
+    data: E2EE.bytesToB64(data)
+  });
+  return plain.buffer;
+}
+
+// ==================== ПУБЛИЧНЫЙ КЛЮЧ ====================
 
 // Ожидание публичного ключа собеседника (если сервер ещё не прислал)
 const pendingPublicKeys = new Map(); // userId -> [{ resolve, reject, timer }]
 
-function waitForPublicKey(userId, timeoutMs = 4000) {
+function waitForPublicKey(userId, timeoutMs = 6000) {
   return new Promise((resolve, reject) => {
     const list = pendingPublicKeys.get(userId) || [];
     const entry = { resolve, reject };
@@ -613,91 +829,16 @@ function resolvePublicKeyWait(userId, publicKey) {
   pendingPublicKeys.delete(userId);
 }
 
-async function parsePublicKey(raw) {
-  if (!raw) return null;
-  // public_key может прийти как строка-JSON или уже объектом JWK
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw); } catch (e) { return null; }
-  }
-  return raw;
-}
-
-async function ensureLocalKeyPair() {
-  let kp = keyPairs[currentUser?.id];
-  if (!kp) {
-    kp = await getOrCreateLocalKeyPair();
-    if (currentUser) keyPairs[currentUser.id] = kp;
-  }
-  return kp;
-}
-
 // Публикует свой публичный ключ на сервер (чтобы собеседники могли шифровать)
 async function publishOwnPublicKey() {
-  const kp = await ensureLocalKeyPair();
-  if (!kp) return;
-  const mine = JSON.stringify(kp.publicKey);
+  const me = await ensureLocalIdentity();
+  if (!me) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'set_public_key', publicKey: mine }));
+    ws.send(JSON.stringify({ type: 'set_public_key', publicKey: me.publicKey }));
   }
-  // Дублируем через REST — на случай, если WS ещё не готов или ключ сменился
   try {
-    await api('/api/update-profile', { method: 'POST', body: { publicKey: mine } });
+    await api('/api/update-profile', { method: 'POST', body: { publicKey: me.publicKey } });
   } catch (e) { /* WS-путь достаточен */ }
-}
-
-async function getChatKey(chatId, chat) {
-  if (cryptoKeys[chatId]) return cryptoKeys[chatId];
-  if (!chat) throw new Error('Чат не найден');
-
-  if (chat.type === 'private') {
-    const other = chat.members?.find(m => m.id !== currentUser.id);
-    if (!other) throw new Error('Не найден собеседник');
-    const kp = await ensureLocalKeyPair();
-    if (!kp) throw new Error('Локальный ключ шифрования недоступен');
-
-    let otherKey = await parsePublicKey(other.public_key);
-    if (!otherKey) {
-      // Ждём публичный ключ собеседника (он мог ещё не выйти в сеть / сменить устройство)
-      const fetched = await waitForPublicKey(other.id);
-      otherKey = await parsePublicKey(fetched);
-      other.public_key = fetched;
-    }
-    if (!otherKey) throw new Error('У собеседника ещё нет ключа шифрования');
-
-    try {
-      const key = await deriveSharedKey(kp.privateKey, otherKey);
-      cryptoKeys[chatId] = key;
-      return key;
-    } catch (e) {
-      throw new Error('Не удалось согласовать ключ с собеседником');
-    }
-  }
-
-  // Группа/канал/Избранное: детерминированный общий ключ чата
-  // (групповой E2EE-секрет; смена ключа — при ротации участников)
-  const secret = 'CipherTalk-Group-' + chatId + (chat.group_secret || '');
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
-  const key = await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-  cryptoKeys[chatId] = key;
-  return key;
-}
-
-// Бинарные вложения: [12 байт IV][AES-GCM ciphertext]
-async function encryptBlob(buffer, aesKey) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, buffer);
-  const out = new Uint8Array(12 + ciphertext.byteLength);
-  out.set(iv, 0);
-  out.set(new Uint8Array(ciphertext), 12);
-  return out.buffer;
-}
-
-async function decryptBlob(buffer, aesKey) {
-  const all = new Uint8Array(buffer);
-  if (all.byteLength <= 12) throw new Error('Повреждённый файл');
-  const iv = all.slice(0, 12);
-  const ciphertext = all.slice(12);
-  return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
 }
 
 // ==================== ЛОГИН / РЕГИСТРАЦИЯ ====================
@@ -967,15 +1108,13 @@ function togglePassword(inputId, btn) {
   }
 }
 
-async function enterApp(data, kp) {
+async function enterApp(data) {
   currentUser = normalizeUser(data.user);
   if (data.token) {
     authToken = data.token;
     localStorage.setItem('ciphertalk_token', authToken);
   }
-  keyPairs[currentUser.id] = kp;
   localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
-  localStorage.setItem('ciphertalk_keys', JSON.stringify(kp));
   if (currentUser.hide_online) privacy.hideOnline = true;
   savePrivacy();
 
@@ -997,8 +1136,17 @@ function updateMenuProfile() {
   document.getElementById('menu-name').textContent = currentUser.name || 'Пользователь';
   document.getElementById('menu-username').textContent = '@' + (currentUser.username || 'username');
   document.getElementById('menu-phone').textContent = currentUser.phone || '';
-  document.getElementById('menu-avatar').textContent =
-    (currentUser.firstName || currentUser.name || 'U')[0].toUpperCase();
+  const avatarEl = document.getElementById('menu-avatar');
+  if (currentUser.avatar) {
+    avatarEl.innerHTML = `<img src="${escapeHtml(currentUser.avatar)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+  } else {
+    avatarEl.textContent = (currentUser.firstName || currentUser.name || 'U')[0].toUpperCase();
+  }
+}
+
+// Обновление профиля в интерфейсе
+function updateUserUI() {
+  updateMenuProfile();
 }
 
 function connectWebSocket() {
@@ -1055,7 +1203,33 @@ async function handleWSMessage(msg) {
     case 'new_chat':
       upsertChat(msg.chat);
       renderChatList();
+      if (msg.chat && msg.chat.type !== 'private' && msg.chat.type !== 'saved') {
+        const chat = getChatById(msg.chat.id);
+        if (chat && chat.owner_id === currentUser.id) {
+          createAndPublishGroupKey(chat).catch(() => {});
+        }
+      }
       break;
+
+    case 'group_created':
+    case 'channel_created': {
+      upsertChat(msg.chat);
+      renderChatList();
+      const chat = getChatById(msg.chat?.id);
+      if (chat) {
+        createAndPublishGroupKey(chat).catch(() => {});
+        openChat(chat.id);
+      }
+      break;
+    }
+
+    case 'group_key': {
+      const chatId = Number(msg.chatId);
+      const state = storeGroupKeyState(chatId, msg.version, msg.wrapped || {}, msg.createdBy);
+      resolveGroupKey(chatId, state);
+      if (currentChatId === chatId) renderMessages(chatId);
+      break;
+    }
 
     case 'chat_created': {
       if (!getChatById(msg.chatId)) {
@@ -1070,8 +1244,7 @@ async function handleWSMessage(msg) {
       const chat = getChatById(msg.chatId);
       if (chat) {
         chat.members = (msg.members || []).map(normalizeUser);
-        cryptoKeys[msg.chatId] = null;
-        delete cryptoKeys[msg.chatId];
+        delete chatKeys[msg.chatId];
         if (currentChatId === msg.chatId) updateChatHeader();
       }
       break;
@@ -1105,6 +1278,8 @@ async function handleWSMessage(msg) {
       const m = list && list.find(x => x.id === Number(msg.messageId));
       if (m) {
         m.encrypted_content = msg.content;
+        m.iv = msg.iv || m.iv;
+        m.header = msg.header || m.header;
         m.edited = 1;
         if (currentChatId === Number(msg.chatId)) renderMessages(Number(msg.chatId));
       }
@@ -1141,6 +1316,8 @@ async function handleWSMessage(msg) {
       const chat = getChatById(msg.chatId);
       if (chat) {
         chat.last_message = msg.lastMessage || '';
+        chat.last_message_iv = msg.lastMessageIv || '';
+        chat.last_message_header = msg.lastMessageHeader || '';
         chat.last_message_type = msg.lastMessageType || null;
         chat.last_message_time = msg.lastMessageTime || Date.now();
         chat.last_sender_id = msg.lastSenderId || 0;
@@ -1165,6 +1342,59 @@ async function handleWSMessage(msg) {
       updateOnlineStatuses();
       break;
 
+    case 'folders':
+      setFolders(msg.folders || []);
+      renderChatList();
+      break;
+
+    case 'folder_created':
+    case 'folder_updated': {
+      const list = folders.filter(f => f.id !== Number(msg.folder?.id));
+      list.push(msg.folder);
+      setFolders(list);
+      break;
+    }
+
+    case 'folder_deleted':
+      setFolders(folders.filter(f => f.id !== Number(msg.id)));
+      break;
+
+    case 'chat_folder_changed': {
+      const chat = getChatById(Number(msg.chatId));
+      if (chat) {
+        chat.folder_id = msg.folderId ?? null;
+        setFolders(folders.map(f => {
+          const ids = (f.chat_ids || []).filter(id => id !== chat.id);
+          if (Number(msg.folderId) === Number(f.id)) ids.push(chat.id);
+          return { ...f, chat_ids: ids };
+        }));
+        renderChatList();
+      }
+      break;
+    }
+
+    case 'message_pinned': {
+      const chatId = Number(msg.chatId);
+      const list = messages[chatId] || [];
+      const m = list.find(x => x.id === Number(msg.messageId));
+      if (m) {
+        m.pinned = msg.pinned ? 1 : 0;
+        if (currentChatId === chatId) renderMessages(chatId);
+      }
+      break;
+    }
+
+    case 'message_reaction': {
+      const chatId = Number(msg.chatId);
+      const list = messages[chatId] || [];
+      const m = list.find(x => x.id === Number(msg.messageId));
+      if (m) {
+        m.reactions = msg.reactions || {};
+        if (currentChatId === chatId) renderMessages(chatId);
+      }
+      break;
+    }
+
     case 'public_key':
       handlePublicKey(msg.userId, msg.publicKey);
       break;
@@ -1178,15 +1408,31 @@ async function handleWSMessage(msg) {
 function handlePublicKey(userId, publicKey) {
   resolvePublicKeyWait(Number(userId), publicKey);
   let changed = false;
+  const touchedGroups = [];
   chats.forEach(chat => {
     const member = chat.members?.find(m => m.id === Number(userId));
     if (member && publicKey && member.public_key !== publicKey) {
       member.public_key = publicKey;
-      delete cryptoKeys[chat.id];
+      delete chatKeys[chat.id];
       changed = true;
+      if (chat.type !== 'private' && chat.type !== 'saved' && chat.owner_id === currentUser.id) {
+        touchedGroups.push(chat);
+      }
     }
   });
   if (changed && currentChatId) renderMessages(currentChatId);
+  // Владелец группы доливает ключ участнику, чей публичный ключ появился позже
+  touchedGroups.forEach(chat => {
+    shareGroupKeyWithMember(chat, chat.members.find(m => m.id === Number(userId)))
+      .catch(() => {});
+  });
+}
+
+// Создаёт и публикует групповой ключ для новой группы/канала
+async function createAndPublishGroupKey(chat) {
+  const groupKey = E2EE.createGroupKey();
+  await publishGroupKey(chat, groupKey, 1);
+  return groupKey;
 }
 
 function upsertChat(rawChat) {
@@ -1213,7 +1459,14 @@ function rebuildOnlineSet() {
 
 function renderChatList(filter = '') {
   const container = document.getElementById('chat-list');
-  const filtered = chats.filter(c => !filter || getChatName(c).toLowerCase().includes(filter.toLowerCase()));
+  const folderId = typeof activeFolderId !== 'undefined' ? activeFolderId : null;
+  const filtered = chats.filter(c => {
+    if (folderId !== null) {
+      const folder = (folders || []).find(f => Number(f.id) === Number(folderId));
+      if (!folder || !(folder.chat_ids || []).includes(c.id)) return false;
+    }
+    return !filter || getChatName(c).toLowerCase().includes(filter.toLowerCase());
+  });
 
   container.innerHTML = filtered.map(chat => {
     const name = getChatName(chat);
@@ -1222,7 +1475,7 @@ function renderChatList(filter = '') {
     const time = chat.last_message_time ? formatTime(chat.last_message_time) : '';
     return `
       <div class="chat-item ${currentChatId === chat.id ? 'active' : ''}"
-           onclick="openChat(${chat.id})" data-chat-id="${chat.id}">
+           data-action="openChat" data-id="${chat.id}" data-chat-id="${chat.id}">
         <div class="chat-avatar ${isOnline ? 'online' : ''}">${escapeHtml(avatar)}</div>
         <div class="chat-info">
           <div class="chat-top">
@@ -1230,12 +1483,15 @@ function renderChatList(filter = '') {
             <span class="chat-time">${time}</span>
           </div>
           <div class="chat-bottom">
-            <span class="chat-preview">${chatPreview(chat)}</span>
+            <span class="chat-preview" data-preview-chat="${chat.id}">${chatPreview(chat)}</span>
           </div>
         </div>
       </div>
     `;
   }).join('');
+
+  // Расшифровываем превью последнего сообщения (сервер хранит только шифротекст)
+  filtered.forEach(chat => refreshChatPreview(chat));
 }
 
 function chatPreview(chat) {
@@ -1246,7 +1502,33 @@ function chatPreview(chat) {
     image: '🖼 Изображение',
     file: '📎 Файл'
   };
-  return labels[chat.last_message_type] || '🔒 Шифрованное сообщение';
+  return labels[chat.last_message_type] || '🔒 Загрузка…';
+}
+
+async function refreshChatPreview(chat) {
+  const el = document.querySelector(`.chat-preview[data-preview-chat="${chat.id}"]`);
+  if (!el || !chat.last_message) return;
+  const labels = {
+    voice: '🎤 Голосовое сообщение',
+    video: '📹 Видеосообщение',
+    image: '🖼 Изображение',
+    file: '📎 Файл'
+  };
+  if (labels[chat.last_message_type]) {
+    el.textContent = labels[chat.last_message_type];
+    return;
+  }
+  try {
+    const key = await getChatKey(chat.id, chat);
+    const text = await decryptChatText(key, {
+      encrypted_content: chat.last_message,
+      iv: chat.last_message_iv,
+      header: chat.last_message_header
+    }, chat.id, chat.last_sender_id === currentUser.id);
+    el.textContent = String(text).slice(0, 80);
+  } catch (e) {
+    el.textContent = '🔒 Зашифрованное сообщение';
+  }
 }
 
 function searchChats(query) {
@@ -1429,7 +1711,42 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     wrapper.appendChild(senderEl);
   }
 
-  wrapper.appendChild(await buildMessageContent(msg, key, animate));
+  // Превью ответа на сообщение
+  if (msg.reply_to) {
+    const original = (messages[chat?.id] || []).find(m => m.id === Number(msg.reply_to));
+    if (original) {
+      const preview = document.createElement('div');
+      preview.className = 'reply-preview';
+      let author = original.sender_name || 'Собеседник';
+      let text = '🔒';
+      try {
+        if (key) text = await decryptChatText(key, original, chat.id, original.sender_id === currentUser.id);
+      } catch (e) { text = '🔒'; }
+      preview.innerHTML = `<span class="rp-name">${escapeHtml(author)}</span><span class="rp-text">${escapeHtml(String(text).slice(0, 80))}</span>`;
+      preview.addEventListener('click', () => {
+        const el = document.querySelector(`.message[data-msg-id="${original.id}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      wrapper.appendChild(preview);
+    }
+  }
+
+  wrapper.appendChild(await buildMessageContent(msg, chat, key, animate));
+
+  // Реакции
+  if (msg.reactions && Object.keys(msg.reactions).length) {
+    const row = document.createElement('div');
+    row.className = 'message-reactions';
+    Object.entries(msg.reactions).forEach(([emoji, users]) => {
+      const chip = document.createElement('button');
+      chip.className = 'reaction-chip' + ((users || []).includes(currentUser.id) ? ' mine' : '');
+      chip.textContent = `${emoji} ${(users || []).length}`;
+      chip.title = `${(users || []).length}`;
+      chip.addEventListener('click', () => sendReaction(msg.id, emoji));
+      row.appendChild(chip);
+    });
+    wrapper.appendChild(row);
+  }
 
   const meta = document.createElement('div');
   meta.className = 'message-meta';
@@ -1474,14 +1791,32 @@ async function buildMessageElement(msg, chat, key, animate = false) {
   return wrapper;
 }
 
-async function buildMessageContent(msg, key, animate = false) {
+async function buildMessageContent(msg, chat, key, animate = false) {
+  const chatId = chat?.id ?? msg.chat_id;
+
+  if (msg.deleted_for_all) {
+    const div = document.createElement('div');
+    div.className = 'message-text message-deleted';
+    div.textContent = '🗑️ Сообщение удалено';
+    return div;
+  }
+
+  const isOwn = msg.sender_id === currentUser.id;
+
   if (msg.type === 'text' || !msg.type) {
     const div = document.createElement('div');
     div.className = 'message-text';
     const raw = msg.encrypted_content;
     if (!raw) return div;
-    const text = key ? await decryptMessage(raw, msg.iv, key) : '🔒 [Нет ключа шифрования]';
-    if (animate && text && !text.startsWith('🔒')) {
+    let text = '🔒 [Нет ключа шифрования]';
+    if (key) {
+      try {
+        text = await decryptChatText(key, msg, chatId, isOwn);
+      } catch (e) {
+        text = '⚠️ Не удалось расшифровать сообщение';
+      }
+    }
+    if (animate && text && !text.startsWith('🔒') && !text.startsWith('⚠️')) {
       typewriter(div, text);
     } else {
       div.innerHTML = formatMessageText(text);
@@ -1492,8 +1827,8 @@ async function buildMessageContent(msg, key, animate = false) {
   let payload = null;
   if (key && msg.encrypted_content) {
     try {
-      const decrypted = await decryptMessage(msg.encrypted_content, msg.iv, key);
-      if (decrypted && !decrypted.startsWith('🔒')) payload = JSON.parse(decrypted);
+      const decrypted = await decryptChatText(key, msg, chatId, isOwn);
+      if (decrypted && !decrypted.startsWith('🔒') && !decrypted.startsWith('⚠️')) payload = JSON.parse(decrypted);
     } catch (e) { payload = null; }
   }
 
@@ -1721,8 +2056,23 @@ async function sendMessage() {
     return;
   }
 
-  const { content, iv } = await encryptMessage(text, key);
-  const sent = sendWs({ type: 'send_message', chatId: currentChatId, content, iv, msgType: 'text' });
+  let envelope;
+  try {
+    envelope = await encryptChatText(key, text, currentChatId);
+  } catch (err) {
+    showToast('🔒 ' + err.message, 'error');
+    return;
+  }
+  rememberSent(envelope.content, text);
+  const sent = sendWs({
+    type: 'send_message',
+    chatId: currentChatId,
+    content: envelope.content,
+    iv: envelope.iv,
+    header: envelope.header,
+    msgType: 'text',
+    replyTo: replyContext?.messageId || null
+  });
   if (!sent) return;
 
   // Анимация «отправки»
@@ -1767,13 +2117,20 @@ async function editMessage(msgId) {
   catch (err) { return showToast('🔒 ' + err.message, 'error'); }
 
   let currentText = '';
-  try { currentText = await decryptMessage(msg.encrypted_content, msg.iv, key); } catch (e) { /* ignore */ }
+  try { currentText = await decryptChatText(key, msg, currentChatId); } catch (e) { /* ignore */ }
 
   const newText = prompt('Редактировать сообщение:', currentText);
   if (newText === null || newText === currentText || !newText.trim()) return;
 
-  const { content, iv } = await encryptMessage(newText.trim(), key);
-  sendWs({ type: 'edit_message', chatId: currentChatId, messageId: msgId, content, iv });
+  const envelope = await encryptChatText(key, newText.trim(), currentChatId);
+  sendWs({
+    type: 'edit_message',
+    chatId: currentChatId,
+    messageId: msgId,
+    content: envelope.content,
+    iv: envelope.iv,
+    header: envelope.header
+  });
 }
 
 function deleteMessage(msgId) {
@@ -2013,12 +2370,14 @@ async function sendMediaBlob(blob, kind, opts) {
     duration: opts.duration || 0
   };
 
-  const { content, iv } = await encryptMessage(JSON.stringify(payload), key);
+  const envelope = await encryptChatText(key, JSON.stringify(payload), chatId);
+  rememberSent(envelope.content, JSON.stringify(payload));
   const sent = sendWs({
     type: 'send_message',
     chatId,
-    content,
-    iv,
+    content: envelope.content,
+    iv: envelope.iv,
+    header: envelope.header,
     msgType: kind
   });
   if (!sent) throw new Error('Нет соединения с сервером');
@@ -2052,10 +2411,10 @@ function closeChat() {
 function openSearch() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>🔍 Найти пользователя</h2>
     <div class="input-group">
-      <input type="text" id="user-search-input" placeholder="Имя, номер или @username" oninput="searchUsers(this.value)">
+      <input type="text" id="user-search-input" placeholder="Имя, номер или @username" data-action="searchUsers">
     </div>
     <div class="search-results" id="search-results"></div>
   `);
@@ -2081,7 +2440,7 @@ async function searchUsers(query) {
         return;
       }
       container.innerHTML = data.map(u => `
-        <div class="search-result-item" onclick="startChat(${u.id})">
+        <div class="search-result-item" data-action="startChat" data-id="${u.id}">
           <div class="chat-avatar">${escapeHtml((u.name || 'U')[0].toUpperCase())}</div>
           <div>
             <div style="font-weight:600">${escapeHtml(u.name || 'Пользователь')}</div>
@@ -2103,13 +2462,13 @@ function startChat(userId) {
 function openNewGroup() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>👥 Новая группа</h2>
     <div class="input-group">
       <label>Название группы</label>
       <input type="text" id="group-name-input" placeholder="Моя группа">
     </div>
-    <button class="btn" onclick="createGroup()">Создать группу</button>
+    <button class="btn" data-action="createGroup">Создать группу</button>
   `);
 }
 
@@ -2126,7 +2485,7 @@ function createGroup() {
 function openNewChannel() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>📢 Новый канал</h2>
     <div class="input-group">
       <label>Название канала</label>
@@ -2136,7 +2495,7 @@ function openNewChannel() {
       <label>Описание</label>
       <input type="text" id="channel-desc-input" placeholder="О канала (необязательно)">
     </div>
-    <button class="btn" onclick="createChannel()">Создать канал</button>
+    <button class="btn" data-action="createChannel">Создать канал</button>
   `);
 }
 
@@ -2164,7 +2523,7 @@ function showChatInfo() {
   const chat = getChatById(currentChatId);
   if (!chat) return;
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>${escapeHtml(getChatName(chat))}</h2>
     <div style="text-align:center;margin-bottom:18px;">
       <div class="chat-avatar" style="width:70px;height:70px;font-size:28px;margin:0 auto 10px;">${escapeHtml(getChatAvatar(chat))}</div>
@@ -2179,7 +2538,7 @@ function showChatInfo() {
 function showEncryptionInfo() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>🔐 О шифровании</h2>
     <div style="line-height:1.7;font-size:13px;">
       <p><strong>CipherTalk</strong> использует сквозное шифрование:</p><br>
@@ -2213,19 +2572,19 @@ function showTypingIndicator(name) {
 function openSettings() {
   toggleMenu();
   const themeSwatches = THEMES.map(t => `
-    <button class="theme-swatch ${appearance.theme === t.id ? 'active' : ''}" data-theme="${t.id}" onclick="setTheme('${t.id}')">
+    <button class="theme-swatch ${appearance.theme === t.id ? 'active' : ''}" data-theme="${t.id}" data-action="setTheme" data-id="${t.id}">
       <span class="dots">${t.colors.map(c => `<i style="background:${c}"></i>`).join('')}</span>
       ${escapeHtml(t.name)}
     </button>`).join('');
 
   const bgSwatches = CHAT_BACKGROUNDS.map(b => `
     <div class="bg-swatch ${appearance.chatBg === b.id ? 'active' : ''}" data-bg="${b.id}"
-         data-preview="${b.id}" onclick="setChatBg('${b.id}')">
+         data-preview="${b.id}" data-action="setChatBg" data-id="${b.id}">
       <span>${escapeHtml(b.name)}</span>
     </div>`).join('');
 
   showModal(`
-    <button class="modal-close" onclick="closeModal()">×</button>
+    <button class="modal-close" data-action="closeModal">×</button>
     <h2>⚙️ Настройки</h2>
 
     <div class="settings-section-title">Профиль</div>
@@ -2243,7 +2602,7 @@ function openSettings() {
       <label>Username</label>
       <input type="text" id="settings-username" value="${escapeHtml(currentUser.username || '')}">
     </div>
-    <button class="btn" onclick="saveSettings()">Сохранить</button>
+    <button class="btn" data-action="saveSettings">Сохранить</button>
 
     <div class="settings-section-title">Тема оформления</div>
     <div class="theme-grid">${themeSwatches}</div>
@@ -2253,76 +2612,76 @@ function openSettings() {
     <div class="row" style="margin-top:10px">
       <label class="btn btn-secondary" style="cursor:pointer;text-align:center">
         🖼️ Свой фон
-        <input type="file" accept="image/*,image/gif" style="display:none" onchange="setCustomBg(event)">
+        <input type="file" accept="image/*,image/gif" style="display:none" data-action="setCustomBg">
       </label>
-      <button class="btn btn-secondary" onclick="clearCustomBg()" ${appearance.customBg ? '' : 'disabled'}>Убрать свой фон</button>
+      <button class="btn btn-secondary" data-action="clearCustomBg" ${appearance.customBg ? '' : 'disabled'}>Убрать свой фон</button>
     </div>
 
     <div class="settings-section-title">Стиль одним кликом</div>
     <div class="preset-row">
-      ${STYLE_PRESETS.map(p => `<button class="preset-chip ${appearance.theme === p.patch.theme && appearance.glass === p.patch.glass ? 'active' : ''}" data-preset="${p.id}" onclick="setStylePreset('${p.id}')">${escapeHtml(p.name)}</button>`).join('')}
+      ${STYLE_PRESETS.map(p => `<button class="preset-chip ${appearance.theme === p.patch.theme && appearance.glass === p.patch.glass ? 'active' : ''}" data-preset="${p.id}" data-action="setStylePreset" data-id="${p.id}">${escapeHtml(p.name)}</button>`).join('')}
     </div>
 
     <div class="settings-section-title">Эффекты стекла</div>
     <div class="switch-row">
       <span>Прозрачные панели (glassmorphism)</span>
-      <div class="switch ${appearance.glass ? 'on' : ''}" id="glass-switch" onclick="toggleGlass()"></div>
+      <div class="switch ${appearance.glass ? 'on' : ''}" id="glass-switch" data-action="toggleGlass"></div>
     </div>
     <div class="slider-row">
       <span>Сила размытия</span>
-      <input type="range" min="4" max="40" step="1" value="${appearance.blur}" oninput="setBlur(this.value)">
+      <input type="range" min="4" max="40" step="1" value="${appearance.blur}" data-action="setBlur">
       <span class="slider-value" id="blur-value">${appearance.blur}px</span>
     </div>
     <div class="slider-row">
       <span>Прозрачность панелей</span>
-      <input type="range" min="10" max="95" step="1" value="${appearance.bgOpacity}" oninput="setFloat('bgOpacity', this.value, 'opacity-value', '%')">
+      <input type="range" min="10" max="95" step="1" value="${appearance.bgOpacity}" data-action="setFloat" data-key="bgOpacity" data-target="opacity-value" data-unit="opacity-value">
       <span class="slider-value" id="opacity-value">${appearance.bgOpacity}%</span>
     </div>
     <div class="slider-row">
       <span>Насыщенность</span>
-      <input type="range" min="80" max="240" step="5" value="${appearance.saturate}" oninput="setFloat('saturate', this.value, 'saturate-value', '%')">
+      <input type="range" min="80" max="240" step="5" value="${appearance.saturate}" data-action="setFloat" data-key="saturate" data-target="saturate-value" data-unit="saturate-value">
       <span class="slider-value" id="saturate-value">${appearance.saturate}%</span>
     </div>
     <div class="slider-row">
       <span>Свечение (glow)</span>
-      <input type="range" min="0" max="30" step="1" value="${appearance.glow}" oninput="setFloat('glow', this.value, 'glow-value', 'px')">
+      <input type="range" min="0" max="30" step="1" value="${appearance.glow}" data-action="setFloat" data-key="glow" data-target="glow-value" data-unit="px">
       <span class="slider-value" id="glow-value">${appearance.glow}px</span>
     </div>
     <div class="slider-row">
       <span>Округление углов</span>
-      <input type="range" min="0" max="28" step="1" value="${appearance.roundness}" oninput="setFloat('roundness', this.value, 'round-value', 'px')">
+      <input type="range" min="0" max="28" step="1" value="${appearance.roundness}" data-action="setFloat" data-key="roundness" data-target="round-value" data-unit="px">
       <span class="slider-value" id="round-value">${appearance.roundness}px</span>
     </div>
     <div class="switch-row">
       <span>Снежинки на фоне</span>
-      <div class="switch ${appearance.snow ? 'on' : ''}" id="snow-switch" onclick="toggleSnow()"></div>
+      <div class="switch ${appearance.snow ? 'on' : ''}" id="snow-switch" data-action="toggleSnow"></div>
     </div>
     <div class="slider-row" style="align-items:center">
       <span>Анимации</span>
       <div class="anim-row">
-        <button class="anim-chip ${appearance.animLevel === 'off' ? 'active' : ''}" data-anim="off" onclick="setAnimLevel('off')">Выкл</button>
-        <button class="anim-chip ${appearance.animLevel === 'normal' ? 'active' : ''}" data-anim="normal" onclick="setAnimLevel('normal')">Обычные</button>
-        <button class="anim-chip ${appearance.animLevel === 'full' ? 'active' : ''}" data-anim="full" onclick="setAnimLevel('full')">Максимум</button>
+        <button class="anim-chip ${appearance.animLevel === 'off' ? 'active' : ''}" data-anim="off" data-action="setAnimLevel" data-id="off">Выкл</button>
+        <button class="anim-chip ${appearance.animLevel === 'normal' ? 'active' : ''}" data-anim="normal" data-action="setAnimLevel" data-id="normal">Обычные</button>
+        <button class="anim-chip ${appearance.animLevel === 'full' ? 'active' : ''}" data-anim="full" data-action="setAnimLevel" data-id="full">Максимум</button>
       </div>
     </div>
 
     <div class="settings-section-title">Приватность</div>
     <div class="switch-row">
       <span>Скрыть статус «в сети»</span>
-      <div class="switch ${privacy.hideOnline ? 'on' : ''}" id="hide-online-switch" onclick="toggleHideOnline()"></div>
+      <div class="switch ${privacy.hideOnline ? 'on' : ''}" id="hide-online-switch" data-action="toggleHideOnline"></div>
     </div>
     <div class="input-group">
       <label>PIN-код приложения (4-8 цифр)</label>
       <input type="password" id="settings-pin" placeholder="${privacy.pinHash ? 'PIN установлен — введите новый' : 'Не задан'}" inputmode="numeric" maxlength="8">
     </div>
     <div class="row">
-      <button class="btn" onclick="setPin()">Установить PIN</button>
-      <button class="btn btn-secondary" onclick="removePin()" ${privacy.pinHash ? '' : 'disabled'}>Снять PIN</button>
+      <button class="btn" data-action="setPin">Установить PIN</button>
+      <button class="btn btn-secondary" data-action="removePin" ${privacy.pinHash ? '' : 'disabled'}>Снять PIN</button>
     </div>
 
     <div class="settings-section-title">Шифрование</div>
     <div class="settings-hint">Ключи E2EE хранятся только на этом устройстве. Сброс сделает старые сообщения нечитаемыми здесь.</div>
-    <button class="btn btn-secondary" onclick="resetE2EE()">🔑 Сбросить ключи шифрования</button>
+    <button class="btn btn-secondary" data-action="resetE2EE">🔑 Сбросить ключи шифрования</button>
   `);
 }
 
@@ -2522,13 +2881,38 @@ const CLICK_ACTIONS = {
   toggleVoiceRecording: () => toggleVoiceRecording(),
   toggleVideoRecording: () => toggleVideoRecording(),
   sendMessage: () => sendMessage(),
-  unlockWithPin: () => unlockWithPin()
+  unlockWithPin: () => unlockWithPin(),
+  openChat: (el) => openChat(parseInt(el.dataset.id, 10)),
+  closeModal: () => closeModal(),
+  searchUsers: (el) => searchUsers(el.value),
+  startChat: (el) => startChat(parseInt(el.dataset.id, 10)),
+  createGroup: () => createGroup(),
+  createChannel: () => createChannel(),
+  setTheme: (el) => setTheme(el.dataset.id),
+  setChatBg: (el) => setChatBg(el.dataset.id),
+  saveSettings: () => saveSettings(),
+  clearCustomBg: () => clearCustomBg(),
+  setStylePreset: (el) => setStylePreset(el.dataset.id),
+  toggleGlass: () => toggleGlass(),
+  setBlur: (el) => setBlur(el.value),
+  setFloat: (el) => setFloat(el.dataset.key, el.value, el.dataset.target, el.dataset.unit),
+  toggleSnow: () => toggleSnow(),
+  setAnimLevel: (el) => setAnimLevel(el.dataset.id),
+  toggleHideOnline: () => toggleHideOnline(),
+  setPin: () => setPin(),
+  removePin: () => removePin(),
+  resetE2EE: () => resetE2EE()
+};
+
+const CHANGE_ACTIONS = {
+  setCustomBg: (el) => setCustomBg(el)
 };
 
 const INPUT_ACTIONS = {
   checkUsername: () => checkUsername(),
   checkPasswordStrength: () => checkPasswordStrength(),
   searchChats: (el) => searchChats(el.value),
+  searchUsers: (el) => searchUsers(el.value),
   messageInput: (el) => { autoResize(el); handleTyping(); }
 };
 
@@ -2548,6 +2932,13 @@ document.addEventListener('input', (e) => {
   if (handler) handler(el);
 });
 
+document.addEventListener('change', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const handler = CHANGE_ACTIONS[el.dataset.action];
+  if (handler) handler(el);
+});
+
 document.addEventListener('keydown', (e) => {
   const el = e.target.closest('[data-action="messageInput"]');
   if (el) handleKeyDown(e);
@@ -2558,14 +2949,14 @@ window.addEventListener('load', async () => {
   loadAppearance();
   snow.init();
   const savedUser = localStorage.getItem('ciphertalk_user');
-  const savedKeys = localStorage.getItem('ciphertalk_keys');
+  groupKeyBlobs = loadGroupKeyBlobs();
 
-  if (authToken && savedUser && savedKeys) {
+  if (authToken && savedUser) {
     try {
       const { ok, data } = await api('/api/me');
       if (ok && data.user) {
         currentUser = normalizeUser(data.user);
-        keyPairs[currentUser.id] = JSON.parse(savedKeys);
+        identity = await ensureLocalIdentity();
         localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
         if (currentUser.hide_online) {
           privacy.hideOnline = true;

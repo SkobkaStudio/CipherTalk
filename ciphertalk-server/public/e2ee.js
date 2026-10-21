@@ -29,6 +29,7 @@
   'use strict';
 
   const MAX_SKIP = 1000;
+  const MAX_SEND_KEYS = 300;
   const IV_BYTES = 12;
   const SALT_BYTES = 16;
   const KEY_BYTES = 32;
@@ -248,6 +249,17 @@
     const aad = textToBytes(`${context || ''}|${header}`);
     const encrypted = await encryptRaw(messageKey, textToBytes(plaintext), aad);
 
+    if (!session.sendChainKeys) session.sendChainKeys = {};
+    session.sendChainKeys[String(session.sendCount)] = bytesToB64(chainKey);
+    const chainIndexes = Object.keys(session.sendChainKeys);
+    if (chainIndexes.length > MAX_SEND_KEYS) {
+      chainIndexes
+        .map(Number)
+        .sort((a, b) => a - b)
+        .slice(0, chainIndexes.length - MAX_SEND_KEYS)
+        .forEach(i => delete session.sendChainKeys[String(i)]);
+    }
+
     session.sendChain = bytesToB64(nextChain);
     session.sendCount += 1;
     return { content: encrypted.data, iv: encrypted.iv, header };
@@ -302,6 +314,24 @@
     session.recvChain = nextRecvChain;
     session.recvCount = nextRecvCount;
     session.skipped = nextSkipped;
+    return bytesToText(plaintext);
+  }
+
+  // Расшифровка собственного сообщения: ключ цепочки отправки по индексу.
+  async function decryptDirectOwn(session, payload, context) {
+    if (!session || session.type !== 'direct') {
+      throw new Error('decryptDirectOwn: нет активной сессии');
+    }
+    const header = typeof payload.header === 'string' ? payload.header : JSON.stringify(payload.header);
+    const meta = JSON.parse(header);
+    const index = String(Number(meta.n));
+    const stored = session.sendChainKeys && session.sendChainKeys[index];
+    if (!stored) throw new Error('decryptDirectOwn: ключ отправки не найден');
+    const rawKey = await messageKeyFromChain(b64ToBytes(stored));
+    const salt = b64ToBytes(meta.s || '');
+    const messageKey = await hkdf(rawKey, salt, 'CT-v1|msg', KEY_BYTES);
+    const aad = textToBytes(`${context || ''}|${header}`);
+    const plaintext = await decryptRaw(messageKey, payload.iv, payload.content, aad);
     return bytesToText(plaintext);
   }
 
@@ -383,7 +413,8 @@
       recvChain: session.recvChain,
       sendCount: session.sendCount,
       recvCount: session.recvCount,
-      skipped: session.skipped || {}
+      skipped: session.skipped || {},
+      sendChainKeys: session.sendChainKeys || {}
     });
   }
 
@@ -400,12 +431,14 @@
       recvChain: data.recvChain,
       sendCount: data.sendCount || 0,
       recvCount: data.recvCount || 0,
-      skipped: data.skipped || {}
+      skipped: data.skipped || {},
+      sendChainKeys: data.sendChainKeys || {}
     };
   }
 
   return {
     MAX_SKIP,
+    MAX_SEND_KEYS,
     generateIdentity,
     importPublicKey,
     importPrivateKey,
@@ -413,6 +446,7 @@
     createDirectSession,
     encryptDirect,
     decryptDirect,
+    decryptDirectOwn,
     createGroupKey,
     wrapGroupKey,
     unwrapGroupKey,
