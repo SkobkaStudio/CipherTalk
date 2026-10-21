@@ -46,6 +46,22 @@ class ChatController {
         .filter(m => m.chat_id === chatId)
         .slice(-limit)
         .map(m => {
+          if (m.deleted_for_all) {
+            return {
+              id: m.id,
+              chat_id: m.chat_id,
+              sender_id: m.sender_id,
+              sender_name: '',
+              sender_avatar: '',
+              encrypted_content: 'Сообщение удалено',
+              iv: '',
+              type: 'text',
+              reply_to: m.reply_to,
+              edited: 0,
+              deleted_for_all: 1,
+              created_at: m.created_at
+            };
+          }
           const sender = this.db.findUserById(m.sender_id);
           const content = encryptionService.decryptMessage(m.encrypted_content);
           return {
@@ -59,6 +75,7 @@ class ChatController {
             type: m.type,
             reply_to: m.reply_to,
             edited: m.edited,
+            deleted_for_all: 0,
             created_at: m.created_at
           };
         });
@@ -161,12 +178,20 @@ class ChatController {
           username: u.username,
           avatar: u.avatar,
           public_key: u.public_key,
-          online: u.online,
+          online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
           role: m.role
         };
       })
       .filter(Boolean);
+  }
+
+  getLastReadMap(chatId) {
+    const out = {};
+    this.db.chatMembers
+      .filter(m => m.chat_id === chatId)
+      .forEach(m => { out[m.user_id] = m.last_read_message_id || 0; });
+    return out;
   }
 
   getChatWithDetails(chat) {
@@ -181,7 +206,8 @@ class ChatController {
       last_message: lastContent === null ? '' : lastContent,
       last_message_type: lastMsg?.type || null,
       last_message_time: lastMsg?.created_at || 0,
-      last_sender_id: lastMsg?.sender_id || 0
+      last_sender_id: lastMsg?.sender_id || 0,
+      last_read_by: this.getLastReadMap(chat.id)
     };
   }
 }

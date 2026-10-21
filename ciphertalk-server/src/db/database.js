@@ -1,5 +1,6 @@
 const fs = require('fs');
 const config = require('../config');
+const User = require('../models/User');
 
 const DEFAULT_COUNTERS = {
   users: 0,
@@ -81,6 +82,17 @@ class Database {
     if (Array.isArray(this.data.users)) {
       this.data.users.forEach(u => {
         if (u.bio === undefined) u.bio = '';
+        if (u.hide_online === undefined) u.hide_online = 0;
+        // JSON.parse лишает записи методов класса User — восстанавливаем прототип,
+        // иначе после рестарта ломаются verifyPassword()/toSafeJSON()/setPassword().
+        if (Object.getPrototypeOf(u) !== User.prototype) {
+          Object.setPrototypeOf(u, User.prototype);
+        }
+      });
+    }
+    if (Array.isArray(this.data.chat_members)) {
+      this.data.chat_members.forEach(cm => {
+        if (typeof cm.last_read_message_id !== 'number') cm.last_read_message_id = 0;
       });
     }
     if (Array.isArray(this.data.chats)) {

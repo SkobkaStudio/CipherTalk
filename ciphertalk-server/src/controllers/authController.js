@@ -104,7 +104,14 @@ class AuthController {
       const existingUser = this.db.findUserByPhone(phone);
 
       if (existingUser) {
-        return res.json({ success: true, action: 'login', phone, name: existingUser.name });
+        // Подтверждение владения номером: одноразовый login-токен
+        const loginToken = encryptionService.encryptMessage(JSON.stringify({
+          phone,
+          userId: existingUser.id,
+          scope: 'login',
+          exp: Date.now() + VERIFY_TOKEN_TTL_MS
+        }));
+        return res.json({ success: true, action: 'login', phone, name: existingUser.name, loginToken });
       }
 
       // Одноразовый токен-подтверждение, что номер реально проверен
@@ -226,6 +233,36 @@ class AuthController {
     res.json({ success: true, user: req.user.toSafeJSON() });
   }
 
+  // 5b. Вход по коду из SMS (passwordless; для аккаунтов без пароля и как второй фактор)
+  loginWithCode(req, res) {
+    try {
+      const phone = String(req.body.phone || '').trim();
+      const { loginToken, publicKey } = req.body;
+
+      const proof = this.consumeLoginProof(phone, loginToken);
+      if (!proof.ok) {
+        return res.status(403).json({ error: proof.error });
+      }
+
+      const user = this.db.findUserById(proof.userId);
+      if (!user || user.phone !== phone) {
+        return res.status(404).json({ error: 'Пользователь не найден' });
+      }
+
+      if (typeof publicKey === 'string' && publicKey.length <= 4096) {
+        user.public_key = publicKey;
+      }
+      this.db.markDirty();
+
+      const { token } = sessionService.create(user.id, { userAgent: req.headers['user-agent'] });
+      console.log(`\n✅ Вход по коду: ${user.name} (@${user.username})\n`);
+      res.json({ success: true, user: user.toSafeJSON(), token });
+    } catch (error) {
+      console.error('LoginWithCode error:', error);
+      res.status(500).json({ error: 'Ошибка входа' });
+    }
+  }
+
   // 6. Выход (инвалидация сессии)
   logout(req, res) {
     sessionService.revokeToken(req.token);
@@ -272,6 +309,25 @@ class AuthController {
       return { ok: false, error: 'Подтверждение номера просрочено, запросите код заново' };
     }
     return { ok: true };
+  }
+
+  consumeLoginProof(phone, loginToken) {
+    if (!loginToken) {
+      return { ok: false, error: 'Подтвердите номер телефона кодом из SMS' };
+    }
+    const raw = encryptionService.decryptMessage(String(loginToken));
+    if (!raw) return { ok: false, error: 'Токен входа недействителен' };
+
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      return { ok: false, error: 'Токен входа недействителен' };
+    }
+    if (data.scope !== 'login' || data.phone !== phone || data.exp < Date.now()) {
+      return { ok: false, error: 'Код входа просрочен, запросите новый' };
+    }
+    return { ok: true, userId: data.userId };
   }
 }
 

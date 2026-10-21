@@ -347,6 +347,17 @@ body {
 .chat-header-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-header-status { font-size: 13px; color: var(--text-secondary); }
 .chat-header-status.online { color: var(--accent); }
+.chat-header-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.enc-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 700; letter-spacing: .3px;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  text-transform: uppercase;
+}
+.enc-badge.secured { color: #34d399; background: rgba(52,211,153,.14); border: 1px solid rgba(52,211,153,.35); }
+.enc-badge.pending { color: #fbbf24; background: rgba(251,191,36,.14); border: 1px solid rgba(251,191,36,.35); animation: encPulse 1.6s ease-in-out infinite; }
+@keyframes encPulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.settings-hint { font-size: 12px; color: var(--text-secondary); margin: 4px 0 10px; line-height: 1.45; }
 .chat-header-actions { display: flex; gap: 2px; flex-shrink: 0; }
 
 .messages-container {
@@ -1043,6 +1054,33 @@ html[data-theme="neon"] {
   --online: #39ff14;
 }
 
+html[data-theme="amoled"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-chat: #000000;
+  --bg-message-in: #121212;
+  --bg-message-out: #1a3a5c;
+  --text-primary: #e8e8e8;
+  --text-secondary: #777777;
+  --accent: #ffffff;
+  --accent-hover: #cccccc;
+  --border: #1c1c1c;
+  --hover: #161616;
+  --online: #4caf50;
+}
+html[data-theme="amoled"] .chat-item.active { background: #1a3a5c; }
+html[data-theme="amoled"] .side-menu-header { background: linear-gradient(135deg, #1a3a5c, #0d2137); }
+html[data-theme="amoled"] .login-logo { background: linear-gradient(135deg, #1a3a5c, #0d2137); }
+html[data-theme="amoled"] .chat-avatar { background: linear-gradient(135deg, #1a3a5c, #0d2137); }
+html[data-theme="amoled"] .btn { background: #1a3a5c; }
+html[data-theme="amoled"] .btn:hover { background: #234b75; }
+html[data-theme="amoled"] .send-btn { background: #1a3a5c; }
+html[data-theme="amoled"] .voice-play-btn { background: #1a3a5c; }
+html[data-theme="amoled"] .switch.on { background: #1a3a5c; }
+html[data-theme="amoled"] .step-dot.active { background: #ffffff; }
+html[data-theme="amoled"] .login-box h1 { background: linear-gradient(135deg, #ffffff, #aaaaaa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+html[data-theme="amoled"] .message.out .message-meta { color: rgba(255,255,255,0.6); }
+
 html[data-theme="light"] {
   --bg-primary: #ffffff;
   --bg-secondary: #f2f4f7;
@@ -1084,8 +1122,8 @@ html[data-glass="on"] .chat-header,
 html[data-glass="on"] .input-area,
 html[data-glass="on"] .side-menu {
   background: rgba(20, 30, 44, 0.55) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 14px)) saturate(140%);
+  backdrop-filter: blur(var(--glass-blur, 14px)) saturate(140%);
 }
 html[data-glass="on"][data-theme="light"] .sidebar,
 html[data-glass="on"][data-theme="light"] .chat-header,
@@ -1093,10 +1131,16 @@ html[data-glass="on"][data-theme="light"] .input-area,
 html[data-glass="on"][data-theme="light"] .side-menu {
   background: rgba(255, 255, 255, 0.6) !important;
 }
+html[data-glass="on"][data-theme="amoled"] .sidebar,
+html[data-glass="on"][data-theme="amoled"] .chat-header,
+html[data-glass="on"][data-theme="amoled"] .input-area,
+html[data-glass="on"][data-theme="amoled"] .side-menu {
+  background: rgba(0, 0, 0, 0.6) !important;
+}
 html[data-glass="on"] .login-box {
   background: rgba(20, 30, 44, 0.6) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px)) saturate(140%);
+  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(140%);
 }
 
 /* ==================== SIDEBAR: ПУЛЬСАЦИЯ ОНЛАЙН ==================== */
@@ -1241,6 +1285,40 @@ html[data-glass="on"] .login-box {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-secondary); margin: 16px 0 8px;
 }
+
+/* Слайдер */
+.slider-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.slider-row .slider-value { font-size: 12px; color: var(--text-secondary); min-width: 36px; text-align: right; }
+
+/* PIN-код */
+.pin-input {
+  width: 100%; padding: 12px; text-align: center; font-size: 22px; letter-spacing: 8px;
+  background: var(--bg-primary); border: 2px solid var(--border); border-radius: 10px;
+  color: var(--text-primary); outline: none;
+}
+.pin-input:focus { border-color: var(--accent); }
+
+/* Экран блокировки PIN */
+#pin-lock-screen {
+  position: fixed; inset: 0; z-index: 5000;
+  background: var(--bg-primary);
+  display: none; align-items: center; justify-content: center;
+}
+#pin-lock-screen.show { display: flex; }
+.pin-lock-box {
+  background: var(--bg-secondary); border-radius: 16px; padding: 32px 24px;
+  width: 340px; max-width: 90%; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.pin-lock-box .pin-logo { font-size: 44px; margin-bottom: 12px; }
+.pin-lock-box h2 { margin-bottom: 6px; font-size: 19px; }
+.pin-lock-box p { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+.pin-error { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 8px; }
+
+/* Галочки прочтения */
+.tick-marks { font-size: 10px; }
+.tick-marks.read { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -1274,8 +1352,8 @@ html[data-glass="on"] .login-box {
       <div class="step-title">Код подтверждения</div>
       <div class="step-description" id="step-2-desc">Код отправлен на ваш номер</div>
       <div class="input-group">
-        <label>4-значный код</label>
-        <input type="text" id="code-input" placeholder="1234" maxlength="4" autofocus>
+        <label>6-значный код</label>
+        <input type="text" id="code-input" placeholder="123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" autofocus>
         <div class="input-hint info">Код отображается в консоли сервера</div>
       </div>
       <button class="btn" onclick="step2Next()">Подтвердить</button>
@@ -1358,6 +1436,9 @@ html[data-glass="on"] .login-box {
         <button class="side-menu-item" onclick="openNewGroup()">
           <span class="icon">👥</span> Новая группа
         </button>
+        <button class="side-menu-item" onclick="openNewChannel()">
+          <span class="icon">📢</span> Новый канал
+        </button>
         <button class="side-menu-item" onclick="openSearch()">
           <span class="icon">🔍</span> Найти пользователя
         </button>
@@ -1403,7 +1484,10 @@ html[data-glass="on"] .login-box {
           <button class="menu-btn back-btn" onclick="closeChat()">←</button>
           <div class="chat-avatar" id="chat-header-avatar">U</div>
           <div class="chat-header-info">
-            <div class="chat-header-name" id="chat-header-name">Чат</div>
+            <div class="chat-header-name-row">
+              <span class="chat-header-name" id="chat-header-name">Чат</span>
+              <span class="enc-badge secured" id="enc-badge" style="display:none">🔒 E2EE</span>
+            </div>
             <div class="chat-header-status" id="chat-header-status">в сети</div>
           </div>
           <div class="chat-header-actions">
@@ -1432,6 +1516,18 @@ html[data-glass="on"] .login-box {
 </div>
 
 <div id="toast-container"></div>
+
+<div id="pin-lock-screen">
+  <div class="pin-lock-box">
+    <div class="pin-logo">🔒</div>
+    <h2>CipherTalk заблокирован</h2>
+    <p>Введите PIN-код для разблокировки</p>
+    <input type="password" id="pin-lock-input" class="pin-input" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+    <div class="pin-error" id="pin-lock-error"></div>
+    <button class="btn" onclick="unlockWithPin()">Разблокировать</button>
+    <button class="btn btn-secondary" onclick="logout()">Выйти из аккаунта</button>
+  </div>
+</div>
 
 <canvas id="snow-canvas" aria-hidden="true"></canvas>
 

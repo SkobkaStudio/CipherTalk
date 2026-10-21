@@ -15,6 +15,7 @@ class User {
     this.password_hash = data.password_hash || '';
     this.online = data.online || 0;
     this.last_seen = data.last_seen || 0;
+    this.hide_online = data.hide_online || 0;
     this.created_at = data.created_at || Date.now();
   }
 
@@ -47,14 +48,18 @@ class User {
       avatar: this.avatar,
       bio: this.bio || '',
       public_key: this.public_key,
+      password_hash: this.password_hash || '',
       online: this.online,
       last_seen: this.last_seen,
+      hide_online: this.hide_online || 0,
       created_at: this.created_at
     };
   }
 
   toSafeJSON() {
-    return this.toJSON();
+    const data = this.toJSON();
+    delete data.password_hash;
+    return data;
   }
 }
 

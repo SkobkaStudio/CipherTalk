@@ -1,12 +1,16 @@
 const http = require('http');
+process.env.PORT = '3498';
+process.env.DB_FILE = './test-smoke-db.json';
+process.env.UPLOADS_DIR = './test-smoke-uploads';
 const App = require('../src/app');
 
 jest.setTimeout(15000);
 
 describe('CipherTalk smoke', () => {
   let server;
+  let app;
   beforeAll((done) => {
-    const app = new App();
+    app = new App();
     server = app.start();
     const timer = setTimeout(() => {
       if (server.listening) done();
@@ -19,11 +23,8 @@ describe('CipherTalk smoke', () => {
   });
   afterAll((done) => {
     try {
-      if (server && server.listening) {
-        server.close(() => done());
-      } else {
-        done();
-      }
+      if (app) app.stop(() => done());
+      else done();
     } catch (e) {
       done();
     }

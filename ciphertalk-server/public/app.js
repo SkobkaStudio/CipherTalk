@@ -27,7 +27,7 @@ let sessionExpiredHandled = false;
 let typewriterTimers = new Set();
 
 let regState = {
-  phone: '', code: '', verifyToken: '', firstName: '', lastName: '',
+  phone: '', code: '', verifyToken: '', loginToken: '', firstName: '', lastName: '',
   username: '', password: '', action: null, existingName: ''
 };
 
@@ -36,22 +36,51 @@ const APPEARANCE_KEY = 'ciphertalk_appearance';
 const THEMES = [
   { id: 'dark', name: 'Тёмная', colors: ['#0e1621', '#2b5278', '#5eb5f7'] },
   { id: 'light', name: 'Светлая', colors: ['#ffffff', '#4a9de0', '#2b7fd4'] },
+  { id: 'amoled', name: 'AMOLED', colors: ['#000000', '#1a3a5c', '#ffffff'] },
   { id: 'cyberpunk', name: 'Киберпанк', colors: ['#0d0221', '#ff2e97', '#00f5d4'] },
-  { id: 'neon', name: 'Неон', colors: ['#05070d', '#00b4ff', '#39ff14'] }
+  { id: 'neon', name: 'Неон', colors: ['#05070d', '#00b4ff', '#39ff14'] },
+  { id: 'dracula', name: 'Dracula', colors: ['#282a36', '#bd93f9', '#ff79c6'] },
+  { id: 'nord', name: 'Nord', colors: ['#2e3440', '#88c0d0', '#a3be8c'] },
+  { id: 'mono', name: 'Монохром', colors: ['#141414', '#4d4d4d', '#e6e6e6'] },
+  { id: 'rose', name: 'Розовая', colors: ['#1a1016', '#ff6fae', '#ffd1e8'] },
+  { id: 'ice', name: 'Ледяная', colors: ['#0b1a24', '#5ec8f0', '#c9f4ff'] },
+  { id: 'sunset', name: 'Закат', colors: ['#1a0f1e', '#ff7849', '#ffd166'] },
+  { id: 'matrix', name: 'Матрица', colors: ['#020a02', '#00ff41', '#0d2b0d'] }
 ];
 const CHAT_BACKGROUNDS = [
   { id: 'default', name: 'По умолчанию' },
   { id: 'aurora', name: 'Aurora' },
   { id: 'sunset', name: 'Закат' },
   { id: 'forest', name: 'Лес' },
-  { id: 'grid', name: 'Сетка' }
+  { id: 'grid', name: 'Сетка' },
+  { id: 'dots', name: 'Точки' },
+  { id: 'waves', name: 'Волны' },
+  { id: 'stars', name: 'Звёзды' }
 ];
-let appearance = { theme: 'dark', chatBg: 'default', glass: false, snow: true };
+const STYLE_PRESETS = [
+  { id: 'classic', name: 'Классика', patch: { theme: 'dark', glass: false, snow: true, blur: 14, bgOpacity: 55, saturate: 140, glow: 0, roundness: 12 } },
+  { id: 'frost', name: 'Frost', patch: { theme: 'ice', glass: true, snow: true, blur: 22, bgOpacity: 45, saturate: 160, glow: 6, roundness: 18 } },
+  { id: 'cyber', name: 'Cyber', patch: { theme: 'cyberpunk', glass: true, snow: false, blur: 12, bgOpacity: 60, saturate: 200, glow: 14, roundness: 6, customBg: '' } },
+  { id: 'minimal', name: 'Minimal', patch: { theme: 'mono', glass: false, snow: false, blur: 8, bgOpacity: 70, saturate: 100, glow: 0, roundness: 8 } },
+  { id: 'vapor', name: 'Vaporwave', patch: { theme: 'rose', glass: true, snow: false, blur: 18, bgOpacity: 50, saturate: 180, glow: 10, roundness: 20 } },
+  { id: 'matrix', name: 'Matrix', patch: { theme: 'matrix', glass: true, snow: false, blur: 10, bgOpacity: 65, saturate: 120, glow: 16, roundness: 4 } }
+];
+let appearance = {
+  theme: 'dark', chatBg: 'default', glass: false, snow: true, blur: 14,
+  bgOpacity: 55, saturate: 140, glow: 0, roundness: 12,
+  customBg: '', animLevel: 'normal'
+};
+let privacy = { pinHash: '', hideOnline: false };
+const PRIVACY_KEY = 'ciphertalk_privacy';
 
 function loadAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}');
     appearance = Object.assign(appearance, saved);
+  } catch (e) { /* ignore */ }
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRIVACY_KEY) || '{}');
+    privacy = Object.assign(privacy, saved);
   } catch (e) { /* ignore */ }
   applyAppearance();
 }
@@ -60,17 +89,88 @@ function saveAppearance() {
   try { localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance)); } catch (e) { /* ignore */ }
 }
 
+function savePrivacy() {
+  try { localStorage.setItem(PRIVACY_KEY, JSON.stringify(privacy)); } catch (e) { /* ignore */ }
+}
+
 function applyAppearance() {
   const html = document.documentElement;
   html.setAttribute('data-theme', appearance.theme);
   html.setAttribute('data-glass', appearance.glass ? 'on' : 'off');
+  html.setAttribute('data-anim', appearance.animLevel || 'normal');
+  const root = document.documentElement.style;
+  root.setProperty('--glass-blur', (Number(appearance.blur) || 14) + 'px');
+  root.setProperty('--glass-alpha', ((Number(appearance.bgOpacity) || 55) / 100).toFixed(2));
+  root.setProperty('--glass-saturate', (Number(appearance.saturate) || 140) + '%');
+  root.setProperty('--glow-strength', (Number(appearance.glow) || 0) + 'px');
+  root.setProperty('--radius', (Number(appearance.roundness) || 12) + 'px');
   document.querySelectorAll('.chat-area').forEach(el => {
     el.setAttribute('data-bg', appearance.chatBg);
+    if (appearance.customBg) {
+      el.style.backgroundImage = `linear-gradient(rgba(0,0,0,${1 - (Number(appearance.bgOpacity) || 55) / 100}), rgba(0,0,0,${1 - (Number(appearance.bgOpacity) || 55) / 100})), url("${appearance.customBg}")`;
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = 'center';
+    } else {
+      el.style.backgroundImage = '';
+    }
   });
   if (snow) {
     if (appearance.snow) snow.resume();
     else { snow.pause(); if (snow.ctx) snow.ctx.clearRect(0, 0, window.innerWidth, window.innerHeight); }
   }
+}
+
+function setStylePreset(id) {
+  const preset = STYLE_PRESETS.find(p => p.id === id);
+  if (!preset) return;
+  Object.assign(appearance, preset.patch);
+  if (preset.patch.customBg === '') appearance.customBg = '';
+  saveAppearance();
+  applyAppearance();
+  if (currentChatId) renderMessages(currentChatId);
+  document.querySelectorAll('.preset-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.preset === id));
+  showToast(`Стиль «${preset.name}» применён ✨`, 'success');
+}
+
+function setCustomBg(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (file.size > 3 * 1024 * 1024) { showToast('Файл больше 3 МБ', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    appearance.customBg = reader.result;
+    appearance.chatBg = 'default';
+    saveAppearance();
+    applyAppearance();
+    showToast('Свой фон установлен 🖼️', 'success');
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearCustomBg() {
+  appearance.customBg = '';
+  saveAppearance();
+  applyAppearance();
+  showToast('Свой фон убран', 'success');
+}
+
+function setAnimLevel(level) {
+  appearance.animLevel = level;
+  saveAppearance();
+  applyAppearance();
+  document.querySelectorAll('.anim-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.anim === level));
+}
+
+function setFloat(prop, value, labelId, suffix) {
+  const bounds = { bgOpacity: [10, 95], saturate: [80, 240], glow: [0, 30], roundness: [0, 28] };
+  const [min, max] = bounds[prop] || [0, 100];
+  appearance[prop] = Math.max(min, Math.min(max, Number(value)));
+  saveAppearance();
+  applyAppearance();
+  const label = document.getElementById(labelId);
+  if (label) label.textContent = appearance[prop] + (suffix || '');
 }
 
 function setTheme(id) {
@@ -103,6 +203,104 @@ function toggleSnow() {
   applyAppearance();
   const sw = document.getElementById('snow-switch');
   if (sw) sw.classList.toggle('on', appearance.snow);
+}
+
+function setBlur(value) {
+  appearance.blur = Math.max(4, Math.min(40, Number(value) || 14));
+  saveAppearance();
+  applyAppearance();
+  const label = document.getElementById('blur-value');
+  if (label) label.textContent = appearance.blur + 'px';
+}
+
+// ==================== PIN-КОД ====================
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function setPin() {
+  const pin = (document.getElementById('settings-pin')?.value || '').trim();
+  if (!/^\d{4,8}$/.test(pin)) {
+    showToast('PIN: 4-8 цифр', 'error');
+    return;
+  }
+  privacy.pinHash = await sha256Hex(pin);
+  savePrivacy();
+  const input = document.getElementById('settings-pin');
+  if (input) input.value = '';
+  showToast('PIN-код установлен 🔒', 'success');
+}
+
+function removePin() {
+  privacy.pinHash = '';
+  savePrivacy();
+  showToast('PIN-код снят', 'success');
+}
+
+function showPinLock() {
+  const el = document.getElementById('pin-lock-screen');
+  if (!el) return;
+  el.classList.add('show');
+  const input = document.getElementById('pin-lock-input');
+  const err = document.getElementById('pin-lock-error');
+  if (err) err.textContent = '';
+  if (input) { input.value = ''; input.focus(); }
+}
+
+function hidePinLock() {
+  document.getElementById('pin-lock-screen')?.classList.remove('show');
+}
+
+async function unlockWithPin() {
+  const input = document.getElementById('pin-lock-input');
+  const err = document.getElementById('pin-lock-error');
+  const pin = (input?.value || '').trim();
+  if (!pin) { if (err) err.textContent = 'Введите PIN'; return; }
+  const hash = await sha256Hex(pin);
+  if (hash === privacy.pinHash) {
+    hidePinLock();
+  } else {
+    if (err) err.textContent = 'Неверный PIN-код';
+    if (input) input.value = '';
+  }
+}
+
+function maybeLockApp() {
+  if (privacy.pinHash && currentUser) showPinLock();
+}
+
+// ==================== E2EE: СБРОС И СТАТУС ====================
+async function resetE2EE() {
+  if (!confirm('Сбросить ключи шифрования? Старые сообщения станут нечитаемыми на этом устройстве.')) return;
+  try {
+    const kp = await generateKeyPair();
+    keyPairs[currentUser.id] = kp;
+    localStorage.setItem('ciphertalk_keys', JSON.stringify(kp));
+    cryptoKeys = {};
+    await publishOwnPublicKey();
+    showToast('🔑 Ключи шифрования пересозданы', 'success');
+    if (currentChatId) renderMessages(currentChatId);
+  } catch (e) {
+    showToast('Не удалось сбросить ключи: ' + e.message, 'error');
+  }
+}
+
+function updateEncryptionBadge() {
+  const badge = document.getElementById('enc-badge');
+  if (!badge) return;
+  const chat = getChatById(currentChatId);
+  if (!chat) { badge.style.display = 'none'; return; }
+  if (chat.type === 'private') {
+    const other = chat.members?.find(m => m.id !== currentUser.id);
+    const hasKey = other && other.public_key;
+    badge.textContent = hasKey ? '🔒 E2EE' : '⏳ Ожидание ключа';
+    badge.className = 'enc-badge' + (hasKey ? ' secured' : ' pending');
+  } else {
+    badge.textContent = '🔒 E2EE (группа)';
+    badge.className = 'enc-badge secured';
+  }
+  badge.style.display = 'inline-flex';
 }
 
 
@@ -187,7 +385,7 @@ function formatMessageText(text) {
   html = html.replace(/__(.*?)__/g, '<em>$1</em>');
   html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
   html = html.replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:2px 5px;border-radius:3px;font-family:monospace">$1</code>');
-  html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">$1</a>');
+  html = html.replace(/(https?:\/\/[^\s<"'`]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">$1</a>');
   return html;
 }
 
@@ -242,7 +440,8 @@ function normalizeChat(chat) {
     last_message: chat.last_message || '',
     last_message_type: chat.last_message_type || null,
     last_message_time: chat.last_message_time || 0,
-    last_sender_id: chat.last_sender_id || 0
+    last_sender_id: chat.last_sender_id || 0,
+    last_read_by: chat.last_read_by || {}
   };
 }
 
@@ -390,29 +589,94 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
+// Ожидание публичного ключа собеседника (если сервер ещё не прислал)
+const pendingPublicKeys = new Map(); // userId -> [{ resolve, reject, timer }]
+
+function waitForPublicKey(userId, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const list = pendingPublicKeys.get(userId) || [];
+    const entry = { resolve, reject };
+    entry.timer = setTimeout(() => {
+      const arr = (pendingPublicKeys.get(userId) || []).filter(e => e !== entry);
+      pendingPublicKeys.set(userId, arr);
+      reject(new Error('Нет ключа шифрования у собеседника'));
+    }, timeoutMs);
+    list.push(entry);
+    pendingPublicKeys.set(userId, list);
+    sendWs({ type: 'get_public_key', targetUserId: userId });
+  });
+}
+
+function resolvePublicKeyWait(userId, publicKey) {
+  const list = pendingPublicKeys.get(userId) || [];
+  list.forEach(e => { clearTimeout(e.timer); e.resolve(publicKey); });
+  pendingPublicKeys.delete(userId);
+}
+
+async function parsePublicKey(raw) {
+  if (!raw) return null;
+  // public_key может прийти как строка-JSON или уже объектом JWK
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+  return raw;
+}
+
+async function ensureLocalKeyPair() {
+  let kp = keyPairs[currentUser?.id];
+  if (!kp) {
+    kp = await getOrCreateLocalKeyPair();
+    if (currentUser) keyPairs[currentUser.id] = kp;
+  }
+  return kp;
+}
+
+// Публикует свой публичный ключ на сервер (чтобы собеседники могли шифровать)
+async function publishOwnPublicKey() {
+  const kp = await ensureLocalKeyPair();
+  if (!kp) return;
+  const mine = JSON.stringify(kp.publicKey);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'set_public_key', publicKey: mine }));
+  }
+  // Дублируем через REST — на случай, если WS ещё не готов или ключ сменился
+  try {
+    await api('/api/update-profile', { method: 'POST', body: { publicKey: mine } });
+  } catch (e) { /* WS-путь достаточен */ }
+}
+
 async function getChatKey(chatId, chat) {
   if (cryptoKeys[chatId]) return cryptoKeys[chatId];
-  if (!chat) return null;
+  if (!chat) throw new Error('Чат не найден');
 
   if (chat.type === 'private') {
     const other = chat.members?.find(m => m.id !== currentUser.id);
-    const kp = keyPairs[currentUser.id];
-    if (!other || !kp) return null;
-    if (!other.public_key) {
-      sendWs({ type: 'get_public_key', targetUserId: other.id });
-      return null;
+    if (!other) throw new Error('Не найден собеседник');
+    const kp = await ensureLocalKeyPair();
+    if (!kp) throw new Error('Локальный ключ шифрования недоступен');
+
+    let otherKey = await parsePublicKey(other.public_key);
+    if (!otherKey) {
+      // Ждём публичный ключ собеседника (он мог ещё не выйти в сеть / сменить устройство)
+      const fetched = await waitForPublicKey(other.id);
+      otherKey = await parsePublicKey(fetched);
+      other.public_key = fetched;
     }
+    if (!otherKey) throw new Error('У собеседника ещё нет ключа шифрования');
+
     try {
-      const key = await deriveSharedKey(kp.privateKey, JSON.parse(other.public_key));
+      const key = await deriveSharedKey(kp.privateKey, otherKey);
       cryptoKeys[chatId] = key;
       return key;
     } catch (e) {
-      return null;
+      throw new Error('Не удалось согласовать ключ с собеседником');
     }
   }
 
-  // Группа/Избранное: детерминированный ключ из id чата (ограничение описано в отчёте)
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('CipherTalk-Group-' + chatId));
+  // Группа/канал/Избранное: детерминированный общий ключ чата
+  // (групповой E2EE-секрет; смена ключа — при ротации участников)
+  const secret = 'CipherTalk-Group-' + chatId + (chat.group_secret || '');
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
   const key = await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   cryptoKeys[chatId] = key;
   return key;
@@ -484,13 +748,6 @@ async function step1Next() {
     const { ok, data } = await api('/api/send-code', { method: 'POST', body: { phone }, auth: false });
     if (ok && data.success) {
       regState.phone = phone;
-      // Демо-режим («чит-код»): вход без SMS — сразу подставляем код и входим.
-      if (data.demo) {
-        document.getElementById('code-input').value = data.code || '';
-        regState.phone = phone;
-        await step2Next();
-        return;
-      }
       goToStep(2);
       showToast('Код отправлен! Он выведен в консоль сервера', 'success');
     } else {
@@ -516,28 +773,19 @@ async function step2Next() {
       method: 'POST', body: { phone: regState.phone, code }, auth: false
     });
     if (ok && data.success) {
-      // Демо-режим («чит-код»): сразу входим, без пароля.
-      if (data.action === 'demo' && data.token) {
-        const kp = await getOrCreateLocalKeyPair();
-        // публикуем ключ демо-пользователя на сервере
-        try {
-          await api('/api/login', {
-            method: 'POST',
-            body: { phone: regState.phone, password: 'demo123', publicKey: JSON.stringify(kp.publicKey) },
-            auth: false
-          });
-        } catch (e) { /* не критично */ }
-        await enterApp(data, kp);
-        showToast('Демо-режим: добро пожаловать! 🎄', 'success');
-        return;
-      }
       regState.action = data.action;
       regState.verifyToken = data.verifyToken || '';
+      regState.loginToken = data.loginToken || '';
       if (data.action === 'register') {
         goToStep(3);
       } else {
         regState.existingName = data.name;
-        goToStep(3);
+        if (data.loginToken) {
+          // Вход по коду из SMS (passwordless) — пароль не требуется
+          await loginWithToken();
+        } else {
+          goToStep(3);
+        }
       }
     } else {
       showToast(data.error || 'Неверный код', 'error');
@@ -579,6 +827,27 @@ async function step3LoginNext() {
       showToast(`С возвращением, ${currentUser.name}! 🔐`, 'success');
     } else {
       showToast(data.error || 'Ошибка входа', 'error');
+    }
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function loginWithToken() {
+  try {
+    const kp = await getOrCreateLocalKeyPair();
+    const { ok, data } = await api('/api/login-code', {
+      method: 'POST',
+      body: { phone: regState.phone, loginToken: regState.loginToken, publicKey: JSON.stringify(kp.publicKey) },
+      auth: false
+    });
+
+    if (ok && data.success) {
+      await enterApp(data, kp);
+      showToast(`С возвращением, ${currentUser.name}! 🔐`, 'success');
+    } else {
+      showToast(data.error || 'Ошибка входа', 'error');
+      if (data && /просроч|недействительн/i.test(data.error || '')) goToStep(1);
     }
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
@@ -707,10 +976,15 @@ async function enterApp(data, kp) {
   keyPairs[currentUser.id] = kp;
   localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
   localStorage.setItem('ciphertalk_keys', JSON.stringify(kp));
+  if (currentUser.hide_online) privacy.hideOnline = true;
+  savePrivacy();
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   initApp();
+  // Публикуем актуальный публичный ключ (перекрывает старый, если сменилось устройство)
+  publishOwnPublicKey().catch(() => {});
+  maybeLockApp();
 }
 
 // ==================== ПРИЛОЖЕНИЕ ====================
@@ -735,10 +1009,7 @@ function connectWebSocket() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'auth', token: authToken }));
-    const kp = keyPairs[currentUser.id];
-    if (kp) {
-      ws.send(JSON.stringify({ type: 'set_public_key', publicKey: JSON.stringify(kp.publicKey) }));
-    }
+    publishOwnPublicKey().catch(() => {});
   };
 
   ws.onmessage = (event) => {
@@ -809,18 +1080,23 @@ async function handleWSMessage(msg) {
     case 'messages': {
       const chatId = Number(msg.chatId);
       messages[chatId] = (msg.messages || []).map(normalizeMessage);
-      if (currentChatId === chatId) renderMessages(chatId);
+      if (currentChatId === chatId) {
+        renderMessages(chatId);
+        markChatRead(chatId);
+      }
       break;
     }
 
     case 'new_message': {
       const message = normalizeMessage(msg.message);
       if (!messages[message.chat_id]) messages[message.chat_id] = [];
-      if (!messages[message.chat_id].some(m => m.id === message.id)) {
+      const isNew = !messages[message.chat_id].some(m => m.id === message.id);
+      if (isNew) {
         messages[message.chat_id].push(message);
+        if (currentChatId === message.chat_id) appendMessage(message);
       }
-      if (currentChatId === message.chat_id) appendMessage(message);
       updateChatPreview(message.chat_id, message);
+      if (isNew && currentChatId === message.chat_id) markChatRead(message.chat_id);
       break;
     }
 
@@ -840,6 +1116,17 @@ async function handleWSMessage(msg) {
       if (messages[chatId]) {
         messages[chatId] = messages[chatId].filter(m => m.id !== Number(msg.messageId));
         if (currentChatId === chatId) renderMessages(chatId);
+      }
+      break;
+    }
+
+    case 'messages_read': {
+      const chatId = Number(msg.chatId);
+      const chat = getChatById(chatId);
+      if (chat) {
+        if (!chat.last_read_by) chat.last_read_by = {};
+        chat.last_read_by[msg.userId] = Number(msg.lastReadId) || 0;
+        if (currentChatId === chatId) updateTicksForChat(chatId);
       }
       break;
     }
@@ -889,9 +1176,10 @@ async function handleWSMessage(msg) {
 }
 
 function handlePublicKey(userId, publicKey) {
+  resolvePublicKeyWait(Number(userId), publicKey);
   let changed = false;
   chats.forEach(chat => {
-    const member = chat.members?.find(m => m.id === userId);
+    const member = chat.members?.find(m => m.id === Number(userId));
     if (member && publicKey && member.public_key !== publicKey) {
       member.public_key = publicKey;
       delete cryptoKeys[chat.id];
@@ -984,6 +1272,40 @@ function updateChatPreview(chatId, msg) {
   renderChatList();
 }
 
+// ==================== ОТМЕТКА ПРОЧТЕНИЯ ====================
+function markChatRead(chatId) {
+  const chat = getChatById(chatId);
+  const list = messages[chatId] || [];
+  if (!chat || !list.length || !currentUser) return;
+  const lastId = list[list.length - 1].id;
+  if (!chat.last_read_by) chat.last_read_by = {};
+  if ((chat.last_read_by[currentUser.id] || 0) >= lastId) return;
+  chat.last_read_by[currentUser.id] = lastId;
+  sendWs({ type: 'read_messages', chatId, lastReadId: lastId });
+  updateTicksForChat(chatId);
+}
+
+function isMessageReadByOthers(msg, chat) {
+  if (!chat || !currentUser) return false;
+  const others = (chat.members || []).filter(m => m.id !== currentUser.id);
+  if (!others.length) return false;
+  const reads = chat.last_read_by || {};
+  return others.every(m => (reads[m.id] || 0) >= msg.id);
+}
+
+function updateTicksForChat(chatId) {
+  const chat = getChatById(chatId);
+  const list = messages[chatId] || [];
+  list.forEach(msg => {
+    if (msg.sender_id !== currentUser?.id) return;
+    const el = document.querySelector(`.message[data-msg-id="${msg.id}"] .tick-marks`);
+    if (!el) return;
+    const read = isMessageReadByOthers(msg, chat);
+    el.textContent = read ? '✓✓' : '✓';
+    el.classList.toggle('read', read);
+  });
+}
+
 async function openChat(chatId) {
   // Очищаем анимации печати от предыдущего чата
   for (const t of typewriterTimers) clearTimeout(t);
@@ -1031,6 +1353,7 @@ function updateChatHeader() {
   } else {
     statusEl.textContent = 'заметки';
   }
+  updateEncryptionBadge();
 }
 
 // ==================== ОТРИСОВКА СООБЩЕНИЙ ====================
@@ -1040,7 +1363,8 @@ async function renderMessages(chatId) {
   if (!chat) return;
 
   const list = messages[chatId] || [];
-  const key = await getChatKey(chatId, chat);
+  let key = null;
+  try { key = await getChatKey(chatId, chat); } catch (e) { key = null; }
 
   container.innerHTML = '';
   let lastDate = '';
@@ -1068,7 +1392,8 @@ async function appendMessage(msg) {
   }
 
   const shouldScroll = container.scrollHeight - container.scrollTop - container.clientHeight < 180;
-  const key = await getChatKey(currentChatId, chat);
+  let key = null;
+  try { key = await getChatKey(currentChatId, chat); } catch (e) { key = null; }
   // «Печатная машинка» только для свежих входящих текстовых сообщений.
   const animate = msg.sender_id !== currentUser.id && (msg.type === 'text' || !msg.type);
   const el = await buildMessageElement(msg, chat, key, animate);
@@ -1119,7 +1444,9 @@ async function buildMessageElement(msg, chat, key, animate = false) {
   meta.appendChild(time);
   if (isOut) {
     const ticks = document.createElement('span');
-    ticks.textContent = '✓✓';
+    const read = isMessageReadByOthers(msg, chat);
+    ticks.className = 'tick-marks' + (read ? ' read' : '');
+    ticks.textContent = read ? '✓✓' : '✓';
     meta.appendChild(ticks);
   }
   wrapper.appendChild(meta);
@@ -1386,9 +1713,11 @@ async function sendMessage() {
   if (!text || !currentChatId) return;
 
   const chat = getChatById(currentChatId);
-  const key = await getChatKey(currentChatId, chat);
-  if (!key) {
-    showToast('Не удалось получить ключ шифрования. Попробуйте ещё раз.', 'error');
+  let key;
+  try {
+    key = await getChatKey(currentChatId, chat);
+  } catch (err) {
+    showToast('🔒 ' + err.message, 'error');
     return;
   }
 
@@ -1433,8 +1762,9 @@ async function editMessage(msgId) {
   if (!msg) return;
 
   const chat = getChatById(currentChatId);
-  const key = await getChatKey(currentChatId, chat);
-  if (!key) return showToast('Нет ключа шифрования', 'error');
+  let key;
+  try { key = await getChatKey(currentChatId, chat); }
+  catch (err) { return showToast('🔒 ' + err.message, 'error'); }
 
   let currentText = '';
   try { currentText = await decryptMessage(msg.encrypted_content, msg.iv, key); } catch (e) { /* ignore */ }
@@ -1793,6 +2123,37 @@ function createGroup() {
   closeModal();
 }
 
+function openNewChannel() {
+  toggleMenu();
+  showModal(`
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>📢 Новый канал</h2>
+    <div class="input-group">
+      <label>Название канала</label>
+      <input type="text" id="channel-name-input" placeholder="Мой канал">
+    </div>
+    <div class="input-group">
+      <label>Описание</label>
+      <input type="text" id="channel-desc-input" placeholder="О канала (необязательно)">
+    </div>
+    <button class="btn" onclick="createChannel()">Создать канал</button>
+  `);
+}
+
+function createChannel() {
+  const name = document.getElementById('channel-name-input').value.trim();
+  const description = document.getElementById('channel-desc-input').value.trim();
+  if (!name) {
+    showToast('Введите название', 'error');
+    return;
+  }
+  const sent = sendWs({ type: 'create_channel', name, description });
+  if (sent) {
+    closeModal();
+    showToast('Канал создан', 'success');
+  }
+}
+
 function openSavedMessages() {
   toggleMenu();
   const saved = chats.find(c => c.type === 'saved');
@@ -1889,17 +2250,92 @@ function openSettings() {
 
     <div class="settings-section-title">Фон чата</div>
     <div class="bg-grid">${bgSwatches}</div>
+    <div class="row" style="margin-top:10px">
+      <label class="btn btn-secondary" style="cursor:pointer;text-align:center">
+        🖼️ Свой фон
+        <input type="file" accept="image/*,image/gif" style="display:none" onchange="setCustomBg(event)">
+      </label>
+      <button class="btn btn-secondary" onclick="clearCustomBg()" ${appearance.customBg ? '' : 'disabled'}>Убрать свой фон</button>
+    </div>
 
-    <div class="settings-section-title">Эффекты</div>
+    <div class="settings-section-title">Стиль одним кликом</div>
+    <div class="preset-row">
+      ${STYLE_PRESETS.map(p => `<button class="preset-chip ${appearance.theme === p.patch.theme && appearance.glass === p.patch.glass ? 'active' : ''}" data-preset="${p.id}" onclick="setStylePreset('${p.id}')">${escapeHtml(p.name)}</button>`).join('')}
+    </div>
+
+    <div class="settings-section-title">Эффекты стекла</div>
     <div class="switch-row">
       <span>Прозрачные панели (glassmorphism)</span>
       <div class="switch ${appearance.glass ? 'on' : ''}" id="glass-switch" onclick="toggleGlass()"></div>
+    </div>
+    <div class="slider-row">
+      <span>Сила размытия</span>
+      <input type="range" min="4" max="40" step="1" value="${appearance.blur}" oninput="setBlur(this.value)">
+      <span class="slider-value" id="blur-value">${appearance.blur}px</span>
+    </div>
+    <div class="slider-row">
+      <span>Прозрачность панелей</span>
+      <input type="range" min="10" max="95" step="1" value="${appearance.bgOpacity}" oninput="setFloat('bgOpacity', this.value, 'opacity-value', '%')">
+      <span class="slider-value" id="opacity-value">${appearance.bgOpacity}%</span>
+    </div>
+    <div class="slider-row">
+      <span>Насыщенность</span>
+      <input type="range" min="80" max="240" step="5" value="${appearance.saturate}" oninput="setFloat('saturate', this.value, 'saturate-value', '%')">
+      <span class="slider-value" id="saturate-value">${appearance.saturate}%</span>
+    </div>
+    <div class="slider-row">
+      <span>Свечение (glow)</span>
+      <input type="range" min="0" max="30" step="1" value="${appearance.glow}" oninput="setFloat('glow', this.value, 'glow-value', 'px')">
+      <span class="slider-value" id="glow-value">${appearance.glow}px</span>
+    </div>
+    <div class="slider-row">
+      <span>Округление углов</span>
+      <input type="range" min="0" max="28" step="1" value="${appearance.roundness}" oninput="setFloat('roundness', this.value, 'round-value', 'px')">
+      <span class="slider-value" id="round-value">${appearance.roundness}px</span>
     </div>
     <div class="switch-row">
       <span>Снежинки на фоне</span>
       <div class="switch ${appearance.snow ? 'on' : ''}" id="snow-switch" onclick="toggleSnow()"></div>
     </div>
+    <div class="slider-row" style="align-items:center">
+      <span>Анимации</span>
+      <div class="anim-row">
+        <button class="anim-chip ${appearance.animLevel === 'off' ? 'active' : ''}" data-anim="off" onclick="setAnimLevel('off')">Выкл</button>
+        <button class="anim-chip ${appearance.animLevel === 'normal' ? 'active' : ''}" data-anim="normal" onclick="setAnimLevel('normal')">Обычные</button>
+        <button class="anim-chip ${appearance.animLevel === 'full' ? 'active' : ''}" data-anim="full" onclick="setAnimLevel('full')">Максимум</button>
+      </div>
+    </div>
+
+    <div class="settings-section-title">Приватность</div>
+    <div class="switch-row">
+      <span>Скрыть статус «в сети»</span>
+      <div class="switch ${privacy.hideOnline ? 'on' : ''}" id="hide-online-switch" onclick="toggleHideOnline()"></div>
+    </div>
+    <div class="input-group">
+      <label>PIN-код приложения (4-8 цифр)</label>
+      <input type="password" id="settings-pin" placeholder="${privacy.pinHash ? 'PIN установлен — введите новый' : 'Не задан'}" inputmode="numeric" maxlength="8">
+    </div>
+    <div class="row">
+      <button class="btn" onclick="setPin()">Установить PIN</button>
+      <button class="btn btn-secondary" onclick="removePin()" ${privacy.pinHash ? '' : 'disabled'}>Снять PIN</button>
+    </div>
+
+    <div class="settings-section-title">Шифрование</div>
+    <div class="settings-hint">Ключи E2EE хранятся только на этом устройстве. Сброс сделает старые сообщения нечитаемыми здесь.</div>
+    <button class="btn btn-secondary" onclick="resetE2EE()">🔑 Сбросить ключи шифрования</button>
   `);
+}
+
+async function toggleHideOnline() {
+  privacy.hideOnline = !privacy.hideOnline;
+  savePrivacy();
+  const sw = document.getElementById('hide-online-switch');
+  if (sw) sw.classList.toggle('on', privacy.hideOnline);
+  sendWs({ type: 'set_privacy', hideOnline: privacy.hideOnline });
+  try {
+    await api('/api/update-profile', { method: 'POST', body: { hideOnline: privacy.hideOnline } });
+  } catch (e) { /* WS уже применил */ }
+  showToast(privacy.hideOnline ? 'Статус онлайна скрыт' : 'Статус онлайна виден', 'success');
 }
 
 async function saveSettings() {
@@ -2076,9 +2512,15 @@ window.addEventListener('load', async () => {
         currentUser = normalizeUser(data.user);
         keyPairs[currentUser.id] = JSON.parse(savedKeys);
         localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
+        if (currentUser.hide_online) {
+          privacy.hideOnline = true;
+          savePrivacy();
+        }
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'block';
         initApp();
+        publishOwnPublicKey().catch(() => {});
+        maybeLockApp();
         return;
       }
     } catch (e) { /* fallthrough */ }
@@ -2110,6 +2552,10 @@ document.getElementById('password-input')?.addEventListener('keydown', (e) => {
 
 document.getElementById('confirm-password-input')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') step5Next();
+});
+
+document.getElementById('pin-lock-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') unlockWithPin();
 });
 
 window.addEventListener('beforeunload', () => {

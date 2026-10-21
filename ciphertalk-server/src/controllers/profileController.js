@@ -10,10 +10,14 @@ class ProfileController {
   // Обновление профиля (только своего — userId берётся из сессии)
   updateProfile(req, res) {
     try {
-      const { firstName, lastName, name, username, avatar, bio, publicKey, oldPassword, newPassword } = req.body;
+      const { firstName, lastName, name, username, avatar, bio, publicKey, oldPassword, newPassword, hideOnline } = req.body;
       const user = this.db.findUserById(req.userId);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (hideOnline !== undefined) {
+        user.hide_online = hideOnline ? 1 : 0;
       }
 
       if (firstName !== undefined) user.first_name = String(firstName).trim().slice(0, 60);
@@ -102,7 +106,11 @@ class ProfileController {
           (u.email || '').toLowerCase().includes(q)
         ))
         .slice(0, 50)
-        .map(u => u.toSafeJSON());
+        .map(u => {
+          const json = u.toSafeJSON();
+          if (u.hide_online) json.online = 0;
+          return json;
+        });
 
       res.json(users);
     } catch (error) {

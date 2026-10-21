@@ -194,6 +194,17 @@ class App {
   getServer() {
     return this.server;
   }
+
+  stop(callback) {
+    if (this.sessionCleanupTimer) clearInterval(this.sessionCleanupTimer);
+    if (this.wsService) this.wsService.stop();
+    try { this.db.flush(); } catch (e) {}
+    if (this.server && this.server.listening) {
+      this.server.close(callback);
+    } else if (callback) {
+      callback();
+    }
+  }
 }
 
 module.exports = App;

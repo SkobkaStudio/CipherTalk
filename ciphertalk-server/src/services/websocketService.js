@@ -86,7 +86,8 @@ class WebSocketService {
       'pin_message': () => this.handlePinMessage(ws, msg),
       'unpin_message': () => this.handlePinMessage(ws, msg, true),
       'react_message': () => this.handleReactMessage(ws, msg),
-      'read_messages': () => this.handleReadMessages(ws, msg)
+      'read_messages': () => this.handleReadMessages(ws, msg),
+      'set_privacy': () => this.handleSetPrivacy(ws, msg)
     };
 
     const handler = handlers[msg.type];
@@ -119,13 +120,16 @@ class WebSocketService {
       user.online = 1;
       user.last_seen = Date.now();
       this.db.markDirty();
+      // «Скрытый онлайн»: остальным пользователям не рассылаем событие
+      if (!user.hide_online) {
+        presenceService.broadcast(
+          { type: 'user_online', userId: auth.user.id },
+          auth.user.id
+        );
+      }
     }
 
     this.send(ws, { type: 'chats', chats: this.getUserChatsWithDetails(auth.user.id) });
-    presenceService.broadcast(
-      { type: 'user_online', userId: auth.user.id },
-      auth.user.id
-    );
   }
 
   // ==================== HANDLERS ====================
@@ -545,8 +549,30 @@ class WebSocketService {
     if (typeof msg.publicKey !== 'string' || msg.publicKey.length > 4096) {
       return this.sendError(ws, 'bad_request', 'Некорректный publicKey');
     }
+    const changed = user.public_key !== msg.publicKey;
     user.public_key = msg.publicKey;
     this.db.markDirty();
+
+    // Сообщаем собеседникам: у пользователя новый публичный ключ.
+    // Клиент сбросит кэш ключа и пересогласует общий секрет.
+    if (changed) {
+      const chatIds = this.db.chatMembers
+        .filter(cm => cm.user_id === user.id)
+        .map(cm => cm.chat_id);
+      const recipients = new Set();
+      chatIds.forEach(chatId => {
+        this.getChatMemberIds(chatId).forEach(uid => {
+          if (uid !== user.id) recipients.add(uid);
+        });
+      });
+      recipients.forEach(uid => {
+        presenceService.sendToUser(uid, {
+          type: 'public_key',
+          userId: user.id,
+          publicKey: msg.publicKey
+        });
+      });
+    }
   }
 
   handleForwardMessage(ws, msg) {
@@ -642,7 +668,37 @@ class WebSocketService {
   }
 
   handleReadMessages(ws, msg) {
-    // stub for future read receipts
+    const chatId = Number(msg.chatId);
+    const lastReadId = Number(msg.lastReadId) || 0;
+    if (!this.db.isChatMember(chatId, ws.userId)) return;
+
+    const cm = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === ws.userId);
+    if (!cm) return;
+    if ((cm.last_read_message_id || 0) >= lastReadId) return;
+    cm.last_read_message_id = lastReadId;
+    this.db.markDirty();
+
+    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+      type: 'messages_read',
+      chatId,
+      userId: ws.userId,
+      lastReadId
+    });
+  }
+
+  handleSetPrivacy(ws, msg) {
+    const user = this.db.findUserById(ws.userId);
+    if (!user) return;
+    if (typeof msg.hideOnline === 'boolean') {
+      user.hide_online = msg.hideOnline ? 1 : 0;
+      if (user.hide_online) {
+        presenceService.broadcast({ type: 'user_offline', userId: ws.userId }, ws.userId);
+      } else {
+        presenceService.broadcast({ type: 'user_online', userId: ws.userId }, ws.userId);
+      }
+    }
+    this.db.markDirty();
+    this.send(ws, { type: 'privacy_updated', hideOnline: !!user.hide_online });
   }
 
   // ==================== LIFECYCLE ====================
@@ -660,6 +716,10 @@ class WebSocketService {
       user.online = 0;
       user.last_seen = Date.now();
       this.db.markDirty();
+      if (!user.hide_online) {
+        presenceService.broadcast({ type: 'user_offline', userId });
+      }
+      return;
     }
 
     presenceService.broadcast({ type: 'user_offline', userId });
@@ -690,7 +750,10 @@ class WebSocketService {
   startOnlinePing() {
     if (this.onlinePingTimer) return;
     this.onlinePingTimer = setInterval(() => {
-      const onlineIds = presenceService.getOnlineUsers();
+      const onlineIds = presenceService.getOnlineUsers().filter(id => {
+        const u = this.db.findUserById(id);
+        return u && !u.hide_online;
+      });
       presenceService.broadcast({ type: 'online_users', users: onlineIds });
     }, config.onlinePingInterval);
   }
@@ -733,13 +796,18 @@ class WebSocketService {
     const chatMessages = this.db.messages.filter(m => m.chat_id === chat.id);
     const lastMsg = chatMessages[chatMessages.length - 1];
     const lastContent = lastMsg ? (lastMsg.deleted_for_all ? '' : (encryptionService.decryptMessage(lastMsg.encrypted_content) || lastMsg.encrypted_content)) : '';
+    const lastReadBy = {};
+    this.db.chatMembers
+      .filter(m => m.chat_id === chat.id)
+      .forEach(m => { lastReadBy[m.user_id] = m.last_read_message_id || 0; });
     return {
       ...(chat.toJSON ? chat.toJSON() : chat),
       members,
       last_message: lastContent === null ? '' : lastContent,
       last_message_type: lastMsg?.type || null,
       last_message_time: lastMsg?.created_at || 0,
-      last_sender_id: lastMsg?.sender_id || 0
+      last_sender_id: lastMsg?.sender_id || 0,
+      last_read_by: lastReadBy
     };
   }
 
@@ -771,7 +839,7 @@ class WebSocketService {
           username: u.username,
           avatar: u.avatar,
           public_key: u.public_key,
-          online: u.online,
+          online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
           role: m.role
         };

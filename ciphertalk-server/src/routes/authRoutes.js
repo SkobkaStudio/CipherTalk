@@ -12,6 +12,7 @@ router.post('/send-code', c.sendCode.bind(c));
 router.post('/verify-code', c.verifyCode.bind(c));
 router.post('/register', c.register.bind(c));
 router.post('/login', c.login.bind(c));
+router.post('/login-code', c.loginWithCode.bind(c));
 router.get('/check-username', c.checkUsername.bind(c));
 
 // Требуют сессию
