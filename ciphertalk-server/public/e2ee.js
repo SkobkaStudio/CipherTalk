@@ -130,6 +130,32 @@
 
   const ECDH_PARAMS = { name: 'ECDH', namedCurve: 'P-256' };
 
+  /**
+   * Нормализует публичный ключ собеседника к base64(SPKI).
+   * Поддерживает старый формат хранения (JWK-JSON), чтобы продолжали
+   * работать аккаунты, зарегистрированные до перехода на текущую схему.
+   */
+  async function normalizePublicKey(key) {
+    if (!key) return null;
+    let raw = key;
+    if (typeof raw !== 'string') {
+      if (typeof raw === 'object' && raw.kty) raw = JSON.stringify(raw);
+      else return null;
+    }
+    raw = String(raw).trim();
+    if (!raw) return null;
+    if (raw.charAt(0) !== '{') return raw;
+    try {
+      const jwk = JSON.parse(raw);
+      if (!jwk || jwk.kty !== 'EC' || jwk.crv !== 'P-256') return null;
+      const subtle = getCrypto().subtle;
+      const pk = await subtle.importKey('jwk', jwk, ECDH_PARAMS, true, []);
+      return bytesToB64(new Uint8Array(await subtle.exportKey('spki', pk)));
+    } catch (e) {
+      return null;
+    }
+  }
+
   async function generateIdentity() {
     const subtle = getCrypto().subtle;
     const pair = await subtle.generateKey(ECDH_PARAMS, true, ['deriveBits', 'deriveKey']);
@@ -440,6 +466,7 @@
     MAX_SKIP,
     MAX_SEND_KEYS,
     generateIdentity,
+    normalizePublicKey,
     importPublicKey,
     importPrivateKey,
     ecdhSharedSecret,

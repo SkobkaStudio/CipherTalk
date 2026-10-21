@@ -79,32 +79,32 @@ async function openMessageContextMenu(msg, x, y) {
 
   buttons.push({
     emoji: '↩️',
-    label: 'Ответить',
+    label: I18N.t('msg.reply'),
     action: () => startReply(msg)
   });
 
   buttons.push({
     emoji: '🔁',
-    label: 'Переслать',
+    label: I18N.t('msg.forward'),
     action: () => openForwardModal(msg)
   });
 
   buttons.push({
     emoji: '😊',
-    label: 'Реакция',
+    label: I18N.t('msg.react'),
     action: () => openReactionBar(msg, x, y)
   });
 
   if (msg.pinned) {
     buttons.push({
       emoji: '📌',
-      label: 'Открепить',
+      label: I18N.t('msg.unpin'),
       action: () => togglePin(msg, false)
     });
   } else {
     buttons.push({
       emoji: '📌',
-      label: 'Закрепить',
+      label: I18N.t('msg.pin'),
       action: () => togglePin(msg, true)
     });
   }
@@ -113,7 +113,7 @@ async function openMessageContextMenu(msg, x, y) {
     buttons.push({ sep: true });
     buttons.push({
       emoji: '✏️',
-      label: 'Редактировать',
+      label: I18N.t('msg.edit'),
       action: () => editMessage(msg.id)
     });
   }
@@ -121,7 +121,7 @@ async function openMessageContextMenu(msg, x, y) {
   if (isOwn) {
     buttons.push({
       emoji: '🗑️',
-      label: 'Удалить',
+      label: I18N.t('msg.delete'),
       danger: true,
       action: () => deleteMessage(msg.id)
     });
@@ -170,11 +170,11 @@ async function startReply(msg) {
     const key = await getChatKey(currentChatId, chat);
     text = await decryptChatText(key, msg, currentChatId, msg.sender_id === currentUser.id);
   } catch (e) {
-    text = 'Сообщение';
+    text = I18N.t('chat.message');
   }
   replyContext = {
     messageId: msg.id,
-    senderName: msg.sender_id === currentUser.id ? 'Вы' : (msg.sender_name || 'Собеседник'),
+    senderName: msg.sender_id === currentUser.id ? I18N.t('chat.you') : (msg.sender_name || I18N.t('chat.peer')),
     text: String(text).slice(0, 120)
   };
   renderReplyBar();
@@ -196,7 +196,7 @@ function renderReplyBar() {
   bar.style.display = 'flex';
   const title = document.getElementById('reply-bar-title');
   const text = document.getElementById('reply-bar-text');
-  if (title) title.textContent = 'Ответ для ' + replyContext.senderName;
+  if (title) title.textContent = I18N.t('reply.for', { name: replyContext.senderName });
   if (text) text.textContent = replyContext.text;
 }
 
@@ -240,7 +240,7 @@ async function openPinnedModal() {
 
   const items = [];
   for (const msg of list) {
-    let text = '🔒 [не расшифровано]';
+    let text = I18N.t('chat.notDecrypted');
     try {
       text = await decryptChatText(key, msg, currentChatId, msg.sender_id === currentUser.id);
     } catch (e) { /* ignore */ }
@@ -251,14 +251,14 @@ async function openPinnedModal() {
           <div class="pi-text">${escapeHtml(String(text).slice(0, 500))}</div>
           <div class="pi-date">${escapeHtml(formatMessageTime(msg.created_at))}</div>
         </div>
-        <button class="mini-btn danger" data-action="unpinFromModal" data-id="${msg.id}">Открепить</button>
+        <button class="mini-btn danger" data-action="unpinFromModal" data-id="${msg.id}">${I18N.t('msg.unpin')}</button>
       </div>`);
   }
 
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>📌 Закреплённые сообщения</h2>
-    ${items.length ? items.join('') : '<div class="empty-note">Закреплённых сообщений пока нет</div>'}
+    <h2>${I18N.t('pinned.title')}</h2>
+    ${items.length ? items.join('') : `<div class="empty-note">${I18N.t('pinned.empty')}</div>`}
   `);
 }
 
@@ -274,14 +274,14 @@ function openForwardModal(msg) {
   const targets = chats.filter(c => c.id !== currentChatId || true);
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>🔁 Переслать в чат</h2>
+    <h2>${I18N.t('forward.title')}</h2>
     <div id="forward-list">
       ${targets.map(c => `
         <div class="forward-item" data-action="forwardTo" data-id="${c.id}" data-msg="${msg.id}">
           <div class="fi-avatar">${escapeHtml(getChatAvatar(c))}</div>
           <div>
             <div class="fi-name">${escapeHtml(getChatName(c))}</div>
-            <div class="fi-sub">${escapeHtml(c.type === 'private' ? 'Личный чат' : (c.type === 'channel' ? 'Канал' : 'Группа'))}</div>
+            <div class="fi-sub">${escapeHtml(c.type === 'private' ? I18N.t('forward.private') : (c.type === 'channel' ? I18N.t('forward.channel') : I18N.t('forward.group')))}</div>
           </div>
         </div>`).join('')}
     </div>
@@ -317,7 +317,7 @@ async function forwardToChat(msgId, toChatId) {
       const res = await fetch(SERVER_URL + payload.url, {
         headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
       });
-      if (!res.ok) throw new Error('Не удалось скачать вложение');
+      if (!res.ok) throw new Error(I18N.t('err.downloadAttachment'));
       const raw = await res.arrayBuffer();
       const decrypted = await decryptBlob(raw, sourceKey);
       const encrypted = await encryptBlob(decrypted, targetKey);
@@ -330,7 +330,7 @@ async function forwardToChat(msgId, toChatId) {
         body: form
       });
       const uploaded = await uploadRes.json().catch(() => ({}));
-      if (!uploadRes.ok) throw new Error(uploaded.error || 'Ошибка загрузки');
+      if (!uploadRes.ok) throw new Error(uploaded.error || I18N.t('err.uploadShort'));
 
       payload.url = uploaded.url;
       payload.fileId = uploaded.fileId;
@@ -353,10 +353,10 @@ async function forwardToChat(msgId, toChatId) {
     });
     if (sent) {
       closeModal();
-      showToast('🔁 Переслано в «' + getChatName(target) + '»', 'success');
+      showToast(I18N.t('forward.done', { name: getChatName(target) }), 'success');
     }
   } catch (err) {
-    showToast('Не удалось переслать: ' + err.message, 'error');
+    showToast(I18N.t('forward.failed', { error: err.message }), 'error');
   }
 }
 
@@ -381,14 +381,14 @@ function renderFolderBar() {
   folders.forEach(f => (f.chat_ids || []).forEach(id => { counts[id] = (counts[id] || 0) + 1; }));
 
   bar.innerHTML = `
-    <button class="folder-chip ${activeFolderId === null ? 'active' : ''}" data-action="filterFolder" data-id="">Все</button>
+    <button class="folder-chip ${activeFolderId === null ? 'active' : ''}" data-action="filterFolder" data-id="">${I18N.t('folder.all')}</button>
     ${folders.map(f => `
       <button class="folder-chip ${activeFolderId === Number(f.id) ? 'active' : ''}" data-action="filterFolder" data-id="${f.id}">
         <span>${escapeHtml(f.emoji || '📁')}</span>
         <span>${escapeHtml(f.name)}</span>
         <span class="fcount">${(f.chat_ids || []).length}</span>
       </button>`).join('')}
-    <button class="folder-chip add" data-action="createFolder">＋ Папка</button>`;
+    <button class="folder-chip add" data-action="createFolder">${I18N.t('folder.add')}</button>`;
 }
 
 function filterFolder(folderId) {
@@ -400,16 +400,16 @@ function filterFolder(folderId) {
 function openCreateFolder() {
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>📁 Новая папка</h2>
+    <h2>${I18N.t('folder.new.title')}</h2>
     <div class="input-group">
-      <label>Название</label>
-      <input type="text" id="folder-name-input" placeholder="Работа, Друзья...">
+      <label>${I18N.t('folder.name')}</label>
+      <input type="text" id="folder-name-input" placeholder="${I18N.t('folder.placeholder')}">
     </div>
     <div class="input-group">
-      <label>Иконка</label>
+      <label>${I18N.t('folder.icon')}</label>
       <input type="text" id="folder-emoji-input" placeholder="📁" maxlength="4" value="📁">
     </div>
-    <button class="btn" data-action="createFolderSubmit">Создать</button>
+    <button class="btn" data-action="createFolderSubmit">${I18N.t('folder.create')}</button>
   `);
 }
 
@@ -417,27 +417,27 @@ function createFolderSubmit() {
   const name = document.getElementById('folder-name-input')?.value.trim();
   const emoji = document.getElementById('folder-emoji-input')?.value.trim() || '📁';
   if (!name) {
-    showToast('Введите название папки', 'error');
+    showToast(I18N.t('err.folderName'), 'error');
     return;
   }
   const sent = sendWs({ type: 'create_folder', name, emoji });
   if (sent) {
     closeModal();
-    showToast('Папка создана', 'success');
+    showToast(I18N.t('folder.created'), 'success');
   }
 }
 
 function deleteFolder(folderId) {
-  if (!confirm('Удалить папку? Чаты останутся в общем списке.')) return;
+  if (!confirm(I18N.t('folder.deleteConfirm'))) return;
   sendWs({ type: 'delete_folder', id: Number(folderId) });
 }
 
 function openFolderAssignModal(chatId) {
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>📁 Папка для чата</h2>
+    <h2>${I18N.t('folder.assign.title')}</h2>
     <div class="forward-item" data-action="assignFolder" data-chat="${chatId}" data-id="">
-      <div class="fi-avatar">💬</div><div><div class="fi-name">Без папки</div></div>
+      <div class="fi-avatar">💬</div><div><div class="fi-name">${I18N.t('folder.none')}</div></div>
     </div>
     ${folders.map(f => `
       <div class="forward-item" data-action="assignFolder" data-chat="${chatId}" data-id="${f.id}">
@@ -459,10 +459,10 @@ async function openAddMemberModal() {
   if (!chat) return;
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>👥 Добавить участника</h2>
+    <h2>${I18N.t('member.add.title')}</h2>
     <div class="input-group">
-      <label>Поиск по имени или @username</label>
-      <input type="text" id="member-search-input" placeholder="Имя или @username" data-action="memberSearch">
+      <label>${I18N.t('member.search')}</label>
+      <input type="text" id="member-search-input" placeholder="${I18N.t('member.searchPlaceholder')}" data-action="memberSearch">
     </div>
     <div id="member-search-results"></div>
   `);
@@ -486,9 +486,9 @@ async function memberSearch(query) {
           <div class="fi-name">${escapeHtml(u.name || '')}</div>
           <div class="fi-sub">@${escapeHtml(u.username || '')}</div>
         </div>
-      </div>`).join('') : '<div class="empty-note">Никого не найдено</div>';
+      </div>`).join('') : `<div class="empty-note">${I18N.t('member.notFound')}</div>`;
   } catch (e) {
-    box.innerHTML = '<div class="empty-note">Ошибка поиска</div>';
+    box.innerHTML = `<div class="empty-note">${I18N.t('member.searchError')}</div>`;
   }
 }
 
@@ -523,23 +523,23 @@ function changeMemberRole(userId, role) {
 }
 
 function removeMemberFromChat(userId) {
-  if (!confirm('Удалить участника из группы?')) return;
+  if (!confirm(I18N.t('chatinfo.removeConfirm'))) return;
   sendWs({ type: 'remove_member', chatId: currentChatId, userId: Number(userId) });
 }
 
 function leaveChat() {
   const chat = getChatById(currentChatId);
   if (!chat) return;
-  if (!confirm('Покинуть «' + getChatName(chat) + '»?')) return;
+  if (!confirm(I18N.t('chatinfo.leaveConfirm', { name: getChatName(chat) }))) return;
   sendWs({ type: 'remove_member', chatId: currentChatId, userId: currentUser.id });
   closeModal();
   closeChat();
 }
 
 function roleLabel(role) {
-  if (role === 'owner') return 'владелец';
-  if (role === 'admin') return 'админ';
-  return 'участник';
+  if (role === 'owner') return I18N.t('role.owner');
+  if (role === 'admin') return I18N.t('role.admin');
+  return I18N.t('role.member');
 }
 
 // Расширенная информация о чате
@@ -556,16 +556,16 @@ async function showChatInfoFull() {
       <div class="member-row">
         <div class="member-avatar">${escapeHtml((m.name || '?')[0].toUpperCase())}${online ? '<span class="dot"></span>' : ''}</div>
         <div class="member-info">
-          <div class="member-name">${escapeHtml(m.name || 'Пользователь')}</div>
-          <div class="member-sub">@${escapeHtml(m.username || '')} ${m.public_key ? '· 🔑 ключ есть' : '· 🔑 без ключа'}</div>
+          <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}</div>
+          <div class="member-sub">@${escapeHtml(m.username || '')} ${m.public_key ? '· ' + I18N.t('chatinfo.hasKey') : '· ' + I18N.t('chatinfo.noKey')}</div>
         </div>
         ${isGroup ? `<span class="member-role ${m.role || 'member'}">${escapeHtml(roleLabel(m.role))}</span>` : ''}
         ${canManage && m.id !== currentUser.id ? `
           <div class="member-actions">
             <button class="mini-btn" data-action="toggleRole" data-id="${m.id}" data-role="${m.role || 'member'}">
-              ${m.role === 'admin' ? 'Снять админа' : 'Сделать админом'}
+              ${m.role === 'admin' ? I18N.t('chatinfo.removeAdmin') : I18N.t('chatinfo.makeAdmin')}
             </button>
-            <button class="mini-btn danger" data-action="removeMember" data-id="${m.id}">Удалить</button>
+            <button class="mini-btn danger" data-action="removeMember" data-id="${m.id}">${I18N.t('msg.delete')}</button>
           </div>` : ''}
       </div>`;
   }).join('');
@@ -580,15 +580,15 @@ async function showChatInfoFull() {
       <div class="encryption-badge">🔒 E2EE · AES-256-GCM</div>
     </div>
 
-    <div class="section-title">Участники (${(chat.members || []).length})</div>
-    ${members || '<div class="empty-note">Нет участников</div>'}
-    ${isGroup ? '<button class="btn btn-secondary" style="margin-top:10px;width:100%" data-action="openAddMember">＋ Добавить участника</button>' : ''}
+    <div class="section-title">${I18N.t('chatinfo.members', { count: (chat.members || []).length })}</div>
+    ${members || `<div class="empty-note">${I18N.t('chatinfo.none')}</div>`}
+    ${isGroup ? `<button class="btn btn-secondary" style="margin-top:10px;width:100%" data-action="openAddMember">${I18N.t('chatinfo.addMember')}</button>` : ''}
 
-    <div class="section-title">Действия</div>
+    <div class="section-title">${I18N.t('chatinfo.actions')}</div>
     <div class="row" style="flex-wrap:wrap;gap:8px">
-      <button class="mini-btn" data-action="openPinnedModal">📌 Закреплённые (${pinned})</button>
-      <button class="mini-btn" data-action="openFolderAssign" data-id="${currentChatId}">📁 Папка: ${escapeHtml(folder ? folder.name : 'нет')}</button>
-      ${isGroup ? '<button class="mini-btn danger" data-action="leaveChat">🚪 Покинуть</button>' : ''}
+      <button class="mini-btn" data-action="openPinnedModal">${I18N.t('chatinfo.pinned', { count: pinned })}</button>
+      <button class="mini-btn" data-action="openFolderAssign" data-id="${currentChatId}">${I18N.t('chatinfo.folder', { name: escapeHtml(folder ? folder.name : I18N.t('chatinfo.folderNone')) })}</button>
+      ${isGroup ? `<button class="mini-btn danger" data-action="leaveChat">${I18N.t('chatinfo.leave')}</button>` : ''}
     </div>
   `);
 }
@@ -597,36 +597,36 @@ async function showChatInfoFull() {
 function openProfileEditor() {
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>🧑 Профиль</h2>
+    <h2>${I18N.t('profile.title')}</h2>
     <div style="text-align:center;margin-bottom:14px;">
       <img id="profile-avatar-preview" src="${escapeHtml(currentUser.avatar || '')}"
            style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--bg-message-in)" alt="avatar">
       <div style="margin-top:8px">
-        <button class="mini-btn" data-action="pickAvatar">Изменить фото</button>
+        <button class="mini-btn" data-action="pickAvatar">${I18N.t('profile.photo')}</button>
       </div>
       <input type="file" id="avatar-file-input" accept="image/*" style="display:none" data-action="uploadAvatar">
     </div>
     <div class="input-group">
-      <label>Имя</label>
+      <label>${I18N.t('profile.firstname')}</label>
       <input type="text" id="profile-firstname" value="${escapeHtml(currentUser.firstName || '')}">
     </div>
     <div class="input-group">
-      <label>Фамилия</label>
+      <label>${I18N.t('profile.lastname')}</label>
       <input type="text" id="profile-lastname" value="${escapeHtml(currentUser.lastName || '')}">
     </div>
     <div class="input-group">
-      <label>Username</label>
+      <label>${I18N.t('profile.username')}</label>
       <input type="text" id="profile-username" value="${escapeHtml(currentUser.username || '')}">
     </div>
     <div class="input-group">
-      <label>Email</label>
+      <label>${I18N.t('profile.email')}</label>
       <input type="email" id="profile-email" value="${escapeHtml(currentUser.email || '')}" placeholder="you@example.com">
     </div>
     <div class="input-group">
-      <label>О себе</label>
-      <textarea id="profile-bio" rows="3" placeholder="Пара слов о себе">${escapeHtml(currentUser.bio || '')}</textarea>
+      <label>${I18N.t('profile.bio')}</label>
+      <textarea id="profile-bio" rows="3" placeholder="${I18N.t('profile.bioPlaceholder')}">${escapeHtml(currentUser.bio || '')}</textarea>
     </div>
-    <button class="btn" data-action="saveProfile">Сохранить</button>
+    <button class="btn" data-action="saveProfile">${I18N.t('profile.save')}</button>
   `);
 }
 
@@ -638,7 +638,7 @@ async function uploadAvatar(el) {
   const file = el.files && el.files[0];
   if (!file) return;
   if (file.size > 4 * 1024 * 1024) {
-    showToast('Файл больше 4 МБ', 'error');
+    showToast(I18N.t('profile.tooBig'), 'error');
     return;
   }
   const reader = new FileReader();
@@ -653,9 +653,9 @@ async function uploadAvatar(el) {
         localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
       }
       updateUserUI();
-      showToast('Фото обновлено', 'success');
+      showToast(I18N.t('profile.photoSaved'), 'success');
     } else {
-      showToast(res.error || 'Не удалось загрузить фото', 'error');
+      showToast(res.error || I18N.t('profile.uploadFailed'), 'error');
     }
   };
   reader.readAsDataURL(file);
@@ -675,9 +675,9 @@ async function saveProfile() {
     localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
     updateUserUI();
     closeModal();
-    showToast('Профиль сохранён', 'success');
+    showToast(I18N.t('profile.saved'), 'success');
   } else {
-    showToast(res.error || 'Не удалось сохранить', 'error');
+    showToast(res.error || I18N.t('err.save'), 'error');
   }
 }
 

@@ -697,6 +697,28 @@ body {
 .side-menu-item .icon { font-size: 18px; width: 26px; text-align: center; }
 .side-menu-divider { height: 1px; background: var(--border); margin: 6px 0; }
 
+.side-menu-lang { display: flex; gap: 8px; padding: 4px 18px 8px; }
+.lang-chip {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--hover);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.lang-chip:hover { color: var(--text-primary); border-color: var(--accent); }
+.lang-chip.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+
 .menu-backdrop {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1329,7 +1351,7 @@ html[data-glass="on"] .login-box {
   <div class="login-box">
     <div class="login-logo">🔐</div>
     <h1>CipherTalk</h1>
-    <p class="subtitle">Защищённый мессенджер с шифрованием AES-256</p>
+    <p class="subtitle" data-i18n="app.tagline"></p>
     
     <div class="steps-progress" id="steps-progress">
       <div class="step-dot active" data-step="1"></div>
@@ -1340,83 +1362,83 @@ html[data-glass="on"] .login-box {
     </div>
 
     <div class="login-step" id="step-1">
-      <div class="step-title">Ваш номер телефона</div>
-      <div class="step-description">Введите номер для входа или регистрации</div>
+      <div class="step-title" data-i18n="auth.phone.title"></div>
+      <div class="step-description" data-i18n="auth.phone.desc"></div>
       <div class="input-group">
-        <label>Номер телефона</label>
+        <label data-i18n="auth.phone.label"></label>
         <input type="tel" id="phone-input" placeholder="+7 (999) 123-45-67" value="+7">
       </div>
-      <button class="btn" id="send-code-btn" data-action="step1Next">Далее</button>
+      <button class="btn" id="send-code-btn" data-action="step1Next" data-i18n="auth.next"></button>
     </div>
 
     <div class="login-step" id="step-2" style="display:none">
-      <div class="step-title">Код подтверждения</div>
-      <div class="step-description" id="step-2-desc">Код отправлен на ваш номер</div>
+      <div class="step-title" data-i18n="auth.code.title"></div>
+      <div class="step-description" id="step-2-desc" data-i18n="auth.code.desc"></div>
       <div class="input-group">
-        <label>6-значный код</label>
+        <label data-i18n="auth.code.label"></label>
         <input type="text" id="code-input" placeholder="123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" autofocus>
-        <div class="input-hint info">Код отображается в консоли сервера</div>
+        <div class="input-hint info" data-i18n="auth.code.hint"></div>
       </div>
-      <button class="btn" data-action="step2Next">Подтвердить</button>
-      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Изменить номер</button>
+      <button class="btn" data-action="step2Next" data-i18n="auth.code.confirm"></button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1" data-i18n="auth.code.change"></button>
     </div>
 
     <div class="login-step" id="step-3-register" style="display:none">
-      <div class="step-title">Как вас зовут?</div>
-      <div class="step-description">Так вас будут видеть другие пользователи</div>
+      <div class="step-title" data-i18n="auth.name.title"></div>
+      <div class="step-description" data-i18n="auth.name.desc"></div>
       <div class="row">
         <div class="input-group">
-          <label>Имя <span class="required">*</span></label>
-          <input type="text" id="firstname-input" placeholder="Иван">
+          <label><span data-i18n="auth.firstname"></span> <span class="required">*</span></label>
+          <input type="text" id="firstname-input" placeholder="Иван" data-i18n-placeholder="auth.firstname.placeholder">
         </div>
         <div class="input-group">
-          <label>Фамилия</label>
-          <input type="text" id="lastname-input" placeholder="Иванов">
+          <label data-i18n="auth.lastname"></label>
+          <input type="text" id="lastname-input" placeholder="Иванов" data-i18n-placeholder="auth.lastname.placeholder">
         </div>
       </div>
-      <button class="btn" data-action="step3RegNext">Далее</button>
-      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Назад</button>
+      <button class="btn" data-action="step3RegNext" data-i18n="auth.next"></button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1" data-i18n="auth.back"></button>
     </div>
 
     <div class="login-step" id="step-3-login" style="display:none">
-      <div class="step-title">С возвращением, <span id="welcome-name"></span>!</div>
-      <div class="step-description">Введите ваш пароль для входа</div>
+      <div class="step-title"><span data-i18n="auth.welcome.text"></span> <span id="welcome-name"></span>!</div>
+      <div class="step-description" data-i18n="auth.welcome.desc"></div>
       <div class="input-group">
-        <label>Пароль</label>
-        <input type="password" id="password-input" placeholder="Ваш пароль">
+        <label data-i18n="auth.password"></label>
+        <input type="password" id="password-input" placeholder="Ваш пароль" data-i18n-placeholder="auth.password.placeholder">
         <button class="password-toggle" data-action="togglePassword" data-target="password-input">👁️</button>
       </div>
-      <button class="btn" data-action="step3LoginNext">Войти</button>
-      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Назад</button>
+      <button class="btn" data-action="step3LoginNext" data-i18n="auth.login"></button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1" data-i18n="auth.back"></button>
     </div>
 
     <div class="login-step" id="step-4" style="display:none">
-      <div class="step-title">Придумайте username</div>
-      <div class="step-description">Так другие смогут вас найти. Только латиница, цифры и _</div>
+      <div class="step-title" data-i18n="auth.username.title"></div>
+      <div class="step-description" data-i18n="auth.username.desc"></div>
       <div class="input-group">
         <label>Username</label>
         <input type="text" id="username-input" placeholder="ivan_ivanov" data-action="checkUsername">
-        <div class="input-hint info" id="username-hint">Минимум 3 символа</div>
+        <div class="input-hint info" id="username-hint" data-i18n="auth.username.hint"></div>
       </div>
-      <button class="btn" id="username-next-btn" data-action="step4Next" disabled>Далее</button>
-      <button class="btn btn-secondary" data-action="goToStep" data-step="3">← Назад</button>
+      <button class="btn" id="username-next-btn" data-action="step4Next" disabled data-i18n="auth.next"></button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="3" data-i18n="auth.back"></button>
     </div>
 
     <div class="login-step" id="step-5" style="display:none">
-      <div class="step-title">Придумайте пароль</div>
-      <div class="step-description">Минимум 6 символов. Он понадобится для входа</div>
+      <div class="step-title" data-i18n="auth.newpass.title"></div>
+      <div class="step-description" data-i18n="auth.newpass.desc"></div>
       <div class="input-group">
-        <label>Пароль</label>
-        <input type="password" id="new-password-input" placeholder="Минимум 6 символов" data-action="checkPasswordStrength">
+        <label data-i18n="auth.password"></label>
+        <input type="password" id="new-password-input" placeholder="Минимум 6 символов" data-i18n-placeholder="auth.newpass.min" data-action="checkPasswordStrength">
         <button class="password-toggle" data-action="togglePassword" data-target="new-password-input">👁️</button>
       </div>
       <div class="input-group">
-        <label>Повторите пароль</label>
-        <input type="password" id="confirm-password-input" placeholder="Повторите пароль">
+        <label data-i18n="auth.newpass.repeat"></label>
+        <input type="password" id="confirm-password-input" placeholder="Повторите пароль" data-i18n-placeholder="auth.newpass.repeat.placeholder">
         <button class="password-toggle" data-action="togglePassword" data-target="confirm-password-input">👁️</button>
       </div>
-      <button class="btn" data-action="step5Next">Завершить регистрацию</button>
-      <button class="btn btn-secondary" data-action="goToStep" data-step="4">← Назад</button>
+      <button class="btn" data-action="step5Next" data-i18n="auth.finish"></button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="4" data-i18n="auth.back"></button>
     </div>
   </div>
 </div>
@@ -1429,36 +1451,40 @@ html[data-glass="on"] .login-box {
     <div class="side-menu" id="side-menu">
       <div class="side-menu-header">
         <div class="side-menu-avatar" id="menu-avatar">U</div>
-        <div class="side-menu-name" id="menu-name">Пользователь</div>
+        <div class="side-menu-name" id="menu-name" data-i18n="chat.you"></div>
         <div class="side-menu-username" id="menu-username">@username</div>
         <div class="side-menu-phone" id="menu-phone">+7...</div>
       </div>
       <div class="side-menu-items">
         <button class="side-menu-item" data-action="openNewGroup">
-          <span class="icon">👥</span> Новая группа
+          <span class="icon">👥</span> <span data-i18n="menu.group"></span>
         </button>
         <button class="side-menu-item" data-action="openNewChannel">
-          <span class="icon">📢</span> Новый канал
+          <span class="icon">📢</span> <span data-i18n="menu.channel"></span>
         </button>
         <button class="side-menu-item" data-action="openSearch">
-          <span class="icon">🔍</span> Найти пользователя
+          <span class="icon">🔍</span> <span data-i18n="menu.search"></span>
         </button>
         <button class="side-menu-item" data-action="openSavedMessages">
-          <span class="icon">⭐</span> Избранное
+          <span class="icon">⭐</span> <span data-i18n="menu.saved"></span>
         </button>
         <button class="side-menu-item" data-action="openProfileEditor">
-          <span class="icon">🧑</span> Мой профиль
+          <span class="icon">🧑</span> <span data-i18n="menu.profile"></span>
         </button>
         <div class="side-menu-divider"></div>
+        <div class="side-menu-lang">
+          <button class="lang-chip" data-action="setLang" data-id="ru" id="lang-ru">RU</button>
+          <button class="lang-chip" data-action="setLang" data-id="en" id="lang-en">EN</button>
+        </div>
         <button class="side-menu-item" data-action="openSettings">
-          <span class="icon">⚙️</span> Настройки
+          <span class="icon">⚙️</span> <span data-i18n="menu.settings"></span>
         </button>
         <button class="side-menu-item" data-action="showEncryptionInfo">
-          <span class="icon">🔐</span> О шифровании
+          <span class="icon">🔐</span> <span data-i18n="menu.encryption"></span>
         </button>
         <div class="side-menu-divider"></div>
         <button class="side-menu-item" data-action="logout" style="color: var(--danger)">
-          <span class="icon">🚪</span> Выйти
+          <span class="icon">🚪</span> <span data-i18n="menu.logout"></span>
         </button>
       </div>
     </div>
@@ -1467,7 +1493,7 @@ html[data-glass="on"] .login-box {
       <div class="sidebar-header">
         <button class="menu-btn" data-action="toggleMenu">☰</button>
         <div class="search-box">
-          <input type="text" placeholder="Поиск" id="sidebar-search" data-action="searchChats">
+          <input type="text" placeholder="Поиск" id="sidebar-search" data-action="searchChats" data-i18n-placeholder="search.placeholder">
         </div>
       </div>
       <div class="folder-bar" id="folder-bar"></div>
@@ -1477,10 +1503,10 @@ html[data-glass="on"] .login-box {
     <div class="chat-area" id="chat-area">
       <div class="empty-state" id="empty-state">
         <div class="empty-state-icon">💬</div>
-        <h2>CipherTalk</h2>
-        <p>Выберите чат для начала общения</p>
+        <h2 data-i18n="app.empty.title"></h2>
+        <p data-i18n="app.empty.text"></p>
         <div class="encryption-badge" style="margin-top: 14px">
-          🔒 Сквозное шифрование AES-256
+          <span data-i18n="app.encrypted"></span>
         </div>
       </div>
 
@@ -1490,14 +1516,14 @@ html[data-glass="on"] .login-box {
           <div class="chat-avatar" id="chat-header-avatar">U</div>
           <div class="chat-header-info">
             <div class="chat-header-name-row">
-              <span class="chat-header-name" id="chat-header-name">Чат</span>
+              <span class="chat-header-name" id="chat-header-name" data-i18n="chat.generic">Чат</span>
               <span class="enc-badge secured" id="enc-badge" style="display:none">🔒 E2EE</span>
             </div>
-            <div class="chat-header-status" id="chat-header-status">в сети</div>
+            <div class="chat-header-status" id="chat-header-status" data-i18n="chat.online">в сети</div>
           </div>
           <div class="chat-header-actions">
-            <button class="menu-btn" data-action="openPinnedModal" title="Закреплённые">📌</button>
-            <button class="menu-btn" data-action="showChatInfo" title="Инфо">ℹ️</button>
+            <button class="menu-btn" data-action="openPinnedModal" title="Закреплённые" data-i18n-title="chat.pinned">📌</button>
+            <button class="menu-btn" data-action="showChatInfo" title="Инфо" data-i18n-title="chat.info">ℹ️</button>
           </div>
         </div>
 
@@ -1505,18 +1531,18 @@ html[data-glass="on"] .login-box {
 
         <div class="reply-bar" id="reply-bar" style="display:none">
           <div class="rb-info">
-            <div class="rb-title" id="reply-bar-title">Ответ</div>
+            <div class="rb-title" id="reply-bar-title" data-i18n="reply.title">Ответ</div>
             <div class="rb-text" id="reply-bar-text"></div>
           </div>
-          <button class="rb-close" data-action="cancelReply" title="Отменить">✕</button>
+          <button class="rb-close" data-action="cancelReply" title="Отменить" data-i18n-title="reply.cancel">✕</button>
         </div>
 
         <div class="input-area" id="input-area">
-          <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить">📎</button>
-          <textarea class="message-input" id="message-input" placeholder="Сообщение..." rows="1"
+          <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить" data-i18n-title="chat.attach">📎</button>
+          <textarea class="message-input" id="message-input" placeholder="Сообщение..." rows="1" data-i18n-placeholder="chat.placeholder"
             data-action="messageInput"></textarea>
-          <button class="attach-btn" id="voice-btn" data-action="toggleVoiceRecording" title="Голосовое">🎤</button>
-          <button class="attach-btn" id="video-btn" data-action="toggleVideoRecording" title="Видеосообщение">📹</button>
+          <button class="attach-btn" id="voice-btn" data-action="toggleVoiceRecording" title="Голосовое" data-i18n-title="chat.voice">🎤</button>
+          <button class="attach-btn" id="video-btn" data-action="toggleVideoRecording" title="Видеосообщение" data-i18n-title="chat.video">📹</button>
           <button class="send-btn" id="send-btn" data-action="sendMessage">➤</button>
         </div>
       </div>
@@ -1533,17 +1559,18 @@ html[data-glass="on"] .login-box {
 <div id="pin-lock-screen">
   <div class="pin-lock-box">
     <div class="pin-logo">🔒</div>
-    <h2>CipherTalk заблокирован</h2>
-    <p>Введите PIN-код для разблокировки</p>
+    <h2 data-i18n="pin.title"></h2>
+    <p data-i18n="pin.desc"></p>
     <input type="password" id="pin-lock-input" class="pin-input" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
     <div class="pin-error" id="pin-lock-error"></div>
-    <button class="btn" data-action="unlockWithPin">Разблокировать</button>
-    <button class="btn btn-secondary" data-action="logout">Выйти из аккаунта</button>
+    <button class="btn" data-action="unlockWithPin" data-i18n="pin.unlock"></button>
+    <button class="btn btn-secondary" data-action="logout" data-i18n="menu.logout"></button>
   </div>
 </div>
 
 <canvas id="snow-canvas" aria-hidden="true"></canvas>
 
+<script src="/i18n.js"></script>
 <script src="/e2ee.js"></script>
 <script src="/app.js"></script>
 <script src="/chat-features.js"></script>

@@ -33,31 +33,31 @@ let regState = {
 // ==================== ВНЕШНИЙ ВИД (темы/фон/стекло) ====================
 const APPEARANCE_KEY = 'ciphertalk_appearance';
 const THEMES = [
-  { id: 'dark', name: 'Тёмная', colors: ['#0e1621', '#2b5278', '#5eb5f7'] },
-  { id: 'light', name: 'Светлая', colors: ['#ffffff', '#4a9de0', '#2b7fd4'] },
+  { id: 'dark', name: I18N.t('theme.dark'), colors: ['#0e1621', '#2b5278', '#5eb5f7'] },
+  { id: 'light', name: I18N.t('theme.light'), colors: ['#ffffff', '#4a9de0', '#2b7fd4'] },
   { id: 'amoled', name: 'AMOLED', colors: ['#000000', '#1a3a5c', '#ffffff'] },
-  { id: 'cyberpunk', name: 'Киберпанк', colors: ['#0d0221', '#ff2e97', '#00f5d4'] },
-  { id: 'neon', name: 'Неон', colors: ['#05070d', '#00b4ff', '#39ff14'] },
+  { id: 'cyberpunk', name: I18N.t('theme.cyberpunk'), colors: ['#0d0221', '#ff2e97', '#00f5d4'] },
+  { id: 'neon', name: I18N.t('theme.neon'), colors: ['#05070d', '#00b4ff', '#39ff14'] },
   { id: 'dracula', name: 'Dracula', colors: ['#282a36', '#bd93f9', '#ff79c6'] },
   { id: 'nord', name: 'Nord', colors: ['#2e3440', '#88c0d0', '#a3be8c'] },
-  { id: 'mono', name: 'Монохром', colors: ['#141414', '#4d4d4d', '#e6e6e6'] },
-  { id: 'rose', name: 'Розовая', colors: ['#1a1016', '#ff6fae', '#ffd1e8'] },
-  { id: 'ice', name: 'Ледяная', colors: ['#0b1a24', '#5ec8f0', '#c9f4ff'] },
-  { id: 'sunset', name: 'Закат', colors: ['#1a0f1e', '#ff7849', '#ffd166'] },
-  { id: 'matrix', name: 'Матрица', colors: ['#020a02', '#00ff41', '#0d2b0d'] }
+  { id: 'mono', name: I18N.t('theme.mono'), colors: ['#141414', '#4d4d4d', '#e6e6e6'] },
+  { id: 'rose', name: I18N.t('theme.rose'), colors: ['#1a1016', '#ff6fae', '#ffd1e8'] },
+  { id: 'ice', name: I18N.t('theme.ice'), colors: ['#0b1a24', '#5ec8f0', '#c9f4ff'] },
+  { id: 'sunset', name: I18N.t('theme.sunset'), colors: ['#1a0f1e', '#ff7849', '#ffd166'] },
+  { id: 'matrix', name: I18N.t('theme.matrix'), colors: ['#020a02', '#00ff41', '#0d2b0d'] }
 ];
 const CHAT_BACKGROUNDS = [
-  { id: 'default', name: 'По умолчанию' },
+  { id: 'default', name: I18N.t('bg.default') },
   { id: 'aurora', name: 'Aurora' },
-  { id: 'sunset', name: 'Закат' },
-  { id: 'forest', name: 'Лес' },
-  { id: 'grid', name: 'Сетка' },
-  { id: 'dots', name: 'Точки' },
-  { id: 'waves', name: 'Волны' },
-  { id: 'stars', name: 'Звёзды' }
+  { id: 'sunset', name: I18N.t('bg.sunset') },
+  { id: 'forest', name: I18N.t('bg.forest') },
+  { id: 'grid', name: I18N.t('bg.grid') },
+  { id: 'dots', name: I18N.t('bg.dots') },
+  { id: 'waves', name: I18N.t('bg.waves') },
+  { id: 'stars', name: I18N.t('bg.stars') }
 ];
 const STYLE_PRESETS = [
-  { id: 'classic', name: 'Классика', patch: { theme: 'dark', glass: false, snow: true, blur: 14, bgOpacity: 55, saturate: 140, glow: 0, roundness: 12 } },
+  { id: 'classic', name: I18N.t('preset.classic'), patch: { theme: 'dark', glass: false, snow: true, blur: 14, bgOpacity: 55, saturate: 140, glow: 0, roundness: 12 } },
   { id: 'frost', name: 'Frost', patch: { theme: 'ice', glass: true, snow: true, blur: 22, bgOpacity: 45, saturate: 160, glow: 6, roundness: 18 } },
   { id: 'cyber', name: 'Cyber', patch: { theme: 'cyberpunk', glass: true, snow: false, blur: 12, bgOpacity: 60, saturate: 200, glow: 14, roundness: 6, customBg: '' } },
   { id: 'minimal', name: 'Minimal', patch: { theme: 'mono', glass: false, snow: false, blur: 8, bgOpacity: 70, saturate: 100, glow: 0, roundness: 8 } },
@@ -129,20 +129,20 @@ function setStylePreset(id) {
   if (currentChatId) renderMessages(currentChatId);
   document.querySelectorAll('.preset-chip').forEach(el =>
     el.classList.toggle('active', el.dataset.preset === id));
-  showToast(`Стиль «${preset.name}» применён ✨`, 'success');
+  showToast(I18N.t('toast.styleApplied', { preset: preset.name }), 'success');
 }
 
 function setCustomBg(el) {
   const file = el && el.files && el.files[0];
   if (!file) return;
-  if (file.size > 3 * 1024 * 1024) { showToast('Файл больше 3 МБ', 'error'); return; }
+  if (file.size > 3 * 1024 * 1024) { showToast(I18N.t('err.fileTooBig'), 'error'); return; }
   const reader = new FileReader();
   reader.onload = () => {
     appearance.customBg = reader.result;
     appearance.chatBg = 'default';
     saveAppearance();
     applyAppearance();
-    showToast('Свой фон установлен 🖼️', 'success');
+    showToast(I18N.t('toast.customBg'), 'success');
   };
   reader.readAsDataURL(file);
 }
@@ -151,7 +151,7 @@ function clearCustomBg() {
   appearance.customBg = '';
   saveAppearance();
   applyAppearance();
-  showToast('Свой фон убран', 'success');
+  showToast(I18N.t('toast.customBgRemoved'), 'success');
 }
 
 function setAnimLevel(level) {
@@ -221,20 +221,20 @@ async function sha256Hex(text) {
 async function setPin() {
   const pin = (document.getElementById('settings-pin')?.value || '').trim();
   if (!/^\d{4,8}$/.test(pin)) {
-    showToast('PIN: 4-8 цифр', 'error');
+    showToast(I18N.t('pin.format'), 'error');
     return;
   }
   privacy.pinHash = await sha256Hex(pin);
   savePrivacy();
   const input = document.getElementById('settings-pin');
   if (input) input.value = '';
-  showToast('PIN-код установлен 🔒', 'success');
+  showToast(I18N.t('toast.pinSet'), 'success');
 }
 
 function removePin() {
   privacy.pinHash = '';
   savePrivacy();
-  showToast('PIN-код снят', 'success');
+  showToast(I18N.t('toast.pinRemoved'), 'success');
 }
 
 function showPinLock() {
@@ -255,12 +255,12 @@ async function unlockWithPin() {
   const input = document.getElementById('pin-lock-input');
   const err = document.getElementById('pin-lock-error');
   const pin = (input?.value || '').trim();
-  if (!pin) { if (err) err.textContent = 'Введите PIN'; return; }
+  if (!pin) { if (err) err.textContent = I18N.t('pin.enter'); return; }
   const hash = await sha256Hex(pin);
   if (hash === privacy.pinHash) {
     hidePinLock();
   } else {
-    if (err) err.textContent = 'Неверный PIN-код';
+    if (err) err.textContent = I18N.t('pin.wrong');
     if (input) input.value = '';
   }
 }
@@ -271,7 +271,7 @@ function maybeLockApp() {
 
 // ==================== E2EE: СБРОС И СТАТУС ====================
 async function resetE2EE() {
-  if (!confirm('Сбросить ключи шифрования? Старые сообщения станут нечитаемыми на этом устройстве.')) return;
+  if (!confirm(I18N.t('confirm.resetKeys'))) return;
   try {
     identity = await E2EE.generateIdentity();
     localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
@@ -279,11 +279,12 @@ async function resetE2EE() {
     chatKeys = {};
     groupKeyBlobs = {};
     localStorage.removeItem(GROUP_KEYS_KEY);
+    clearPlaintextCache();
     await publishOwnPublicKey();
-    showToast('🔑 Ключи шифрования пересозданы', 'success');
+    showToast(I18N.t('toast.keysReset'), 'success');
     if (currentChatId) renderMessages(currentChatId);
   } catch (e) {
-    showToast('Не удалось сбросить ключи: ' + e.message, 'error');
+    showToast(I18N.t('err.resetKeys') + ' ' + e.message, 'error');
   }
 }
 
@@ -295,10 +296,10 @@ function updateEncryptionBadge() {
   if (chat.type === 'private') {
     const other = chat.members?.find(m => m.id !== currentUser.id);
     const hasKey = other && other.public_key;
-    badge.textContent = hasKey ? '🔒 E2EE' : '⏳ Ожидание ключа';
+    badge.textContent = hasKey ? '🔒 E2EE' : I18N.t('chat.waitingKey');
     badge.className = 'enc-badge' + (hasKey ? ' secured' : ' pending');
   } else {
-    badge.textContent = '🔒 E2EE (группа)';
+    badge.textContent = I18N.t('chat.encGroup');
     badge.className = 'enc-badge secured';
   }
   badge.style.display = 'inline-flex';
@@ -340,16 +341,16 @@ function formatTime(ts) {
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'вчера';
+  if (d.toDateString() === yesterday.toDateString()) return I18N.t('date.yesterday');
   return d.toLocaleDateString('ru', { day: 'numeric', month: 'short' });
 }
 
 function formatDate(ts) {
   const d = new Date(ts);
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) return 'Сегодня';
+  if (d.toDateString() === now.toDateString()) return I18N.t('date.today');
   const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Вчера';
+  if (d.toDateString() === yesterday.toDateString()) return I18N.t('date.yesterday');
   return d.toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
@@ -359,9 +360,9 @@ function formatMessageTime(ts) {
 
 function formatLastSeen(ts) {
   const diff = Date.now() - ts;
-  if (diff < 60000) return 'только что';
-  if (diff < 3600000) return Math.floor(diff / 60000) + ' мин. назад';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + ' ч. назад';
+  if (diff < 60000) return I18N.t('time.justNow');
+  if (diff < 3600000) return Math.floor(diff / 60000) + I18N.t('time.minAgo');
+  if (diff < 86400000) return Math.floor(diff / 3600000) + I18N.t('time.hourAgo');
   return formatDate(ts);
 }
 
@@ -374,9 +375,9 @@ function formatDuration(seconds) {
 
 function formatBytes(bytes) {
   const size = Number(bytes) || 0;
-  if (size < 1024) return size + ' Б';
-  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' КБ';
-  return (size / (1024 * 1024)).toFixed(1) + ' МБ';
+  if (size < 1024) return size + ' ' + I18N.t('size.b');
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' ' + I18N.t('size.kb');
+  return (size / (1024 * 1024)).toFixed(1) + ' ' + I18N.t('size.mb');
 }
 
 function formatMessageText(text) {
@@ -474,14 +475,14 @@ function getChatById(chatId) {
 }
 
 function getChatName(chat) {
-  if (!chat) return 'Чат';
-  if (chat.type === 'saved') return 'Избранное';
-  if (chat.type === 'group' || chat.type === 'supergroup') return chat.name || 'Группа';
+  if (!chat) return I18N.t('chat.generic');
+  if (chat.type === 'saved') return I18N.t('chat.saved');
+  if (chat.type === 'group' || chat.type === 'supergroup') return chat.name || I18N.t('chat.group');
   if (chat.type === 'private') {
     const other = chat.members?.find(m => m.id !== currentUser?.id);
-    return other?.name || other?.phone || 'Чат';
+    return other?.name || other?.phone || I18N.t('chat.generic');
   }
-  return chat.name || 'Чат';
+  return chat.name || I18N.t('chat.generic');
 }
 
 function getChatAvatar(chat) {
@@ -528,7 +529,7 @@ let groupKeyBlobs = {};      // chatId -> { version, wrapped, createdBy }
 
 function assertWebCrypto() {
   if (!window.crypto || !window.crypto.subtle) {
-    throw new Error('WebCrypto недоступен: откройте сайт по HTTPS или через localhost');
+    throw new Error(I18N.t('err.webcrypto'));
   }
   if (!E2EE) throw new Error('Модуль шифрования /e2ee.js не загружен');
 }
@@ -549,6 +550,12 @@ async function getOrCreateIdentity() {
 async function ensureLocalIdentity() {
   if (!identity) identity = await getOrCreateIdentity();
   return identity;
+}
+
+// Локальная пара ключей E2EE для входа/регистрации (base64 SPKI/PKCS8).
+// Ключ тот же, что публикуется собеседникам через publishOwnPublicKey().
+async function getOrCreateLocalKeyPair() {
+  return ensureLocalIdentity();
 }
 
 function loadSessionMap() {
@@ -589,7 +596,7 @@ function requestGroupKey(chatId) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingGroupKeys.delete(chatId);
-      reject(new Error('Сервер не прислал ключ группы'));
+      reject(new Error(I18N.t('err.groupKeyTimeout')));
     }, 6000);
     pendingGroupKeys.set(chatId, { resolve, reject, timer });
     sendWs({ type: 'get_group_key', chatId });
@@ -608,7 +615,7 @@ function resolveGroupKey(chatId, payload) {
 
 async function getChatKey(chatId, chat) {
   if (chatKeys[chatId]) return chatKeys[chatId];
-  if (!chat) throw new Error('Чат не найден');
+  if (!chat) throw new Error(I18N.t('err.chatNotFound'));
   const me = await ensureLocalIdentity();
 
   if (chat.type === 'private' || chat.type === 'saved') {
@@ -618,15 +625,15 @@ async function getChatKey(chatId, chat) {
       peerKey = me.publicKey;
     } else {
       const other = chat.members?.find(m => m.id !== currentUser.id) || chat.members?.[0];
-      if (!other) throw new Error('Не найден собеседник');
-      peerKey = other.public_key;
+      if (!other) throw new Error(I18N.t('err.noPeer'));
+      peerKey = await E2EE.normalizePublicKey(other.public_key);
       if (!peerKey) {
         const fetched = await waitForPublicKey(other.id);
-        peerKey = fetched;
-        other.public_key = fetched;
+        peerKey = await E2EE.normalizePublicKey(fetched);
+        other.public_key = peerKey;
       }
     }
-    if (!peerKey) throw new Error('У собеседника ещё нет ключа шифрования');
+    if (!peerKey) throw new Error(I18N.t('err.peerNoKey'));
 
     let session = loadSession(chatId);
     if (!session || session.peerPublicKey !== peerKey) {
@@ -650,17 +657,32 @@ async function ensureGroupKey(chat) {
   if (!state || !state.mine) {
     state = await requestGroupKey(chatId);
   }
-  if (!state || !state.mine) throw new Error('Ключ группы ещё не создан');
+  if (!state || !state.mine) throw new Error(I18N.t('err.groupKeyMissing'));
 
   const me = await ensureLocalIdentity();
   const creatorId = Number(state.createdBy) || 0;
-  const creator = chat.members?.find(m => m.id === creatorId);
-  const creatorKey = creator?.public_key || (creatorId === currentUser.id ? me.publicKey : null);
-  if (!creatorKey) throw new Error('Нет публичного ключа создателя группы');
+  if (creatorId === currentUser.id) return await unwrapOwn(state);
+  let creator = chat.members?.find(m => m.id === creatorId);
+  let creatorKey = await E2EE.normalizePublicKey(creator?.public_key);
+  if (!creatorKey) {
+    // Владелец ключа мог не быть в списке/не опубликовать ключ — запрашиваем его
+    try {
+      const fetchedOwner = await waitForPublicKey(creatorId, 6000);
+      creatorKey = await E2EE.normalizePublicKey(fetchedOwner);
+      if (creator) creator.public_key = creatorKey;
+    } catch (e) { /* ignore */ }
+  }
+  if (!creatorKey) throw new Error(I18N.t('err.ownerKeyMissing'));
 
   const groupKey = await E2EE.unwrapGroupKey(state.mine, me, creatorKey);
   chatKeys[chatId] = { kind: 'group', groupKey };
   return groupKey;
+
+  async function unwrapOwn(st) {
+    const gk = await E2EE.unwrapGroupKey(st.mine, me, me.publicKey);
+    chatKeys[chatId] = { kind: 'group', groupKey: gk };
+    return gk;
+  }
 }
 
 // Создаёт и публикует групповой ключ (вызывается создателем группы/канала)
@@ -668,8 +690,9 @@ async function publishGroupKey(chat, groupKeyBytes, version) {
   const me = await ensureLocalIdentity();
   const wrapped = {};
   for (const member of chat.members || []) {
-    if (!member.public_key) continue;
-    wrapped[member.id] = await E2EE.wrapGroupKey(groupKeyBytes, me, member.public_key);
+    const mk = await E2EE.normalizePublicKey(member.public_key);
+    if (!mk) continue;
+    wrapped[member.id] = await E2EE.wrapGroupKey(groupKeyBytes, me, mk);
   }
   if (!wrapped[currentUser.id]) {
     wrapped[currentUser.id] = await E2EE.wrapGroupKey(groupKeyBytes, me, me.publicKey);
@@ -687,24 +710,36 @@ async function publishGroupKey(chat, groupKeyBytes, version) {
   return wrapped;
 }
 
-// Добавляет участника в группу: ключ группы заворачивается лично для него
+// Добавляет участника в группу: групповой ключ перезаворачивается заново
+// для ВСЕХ участников (владельцем этой версии становится тот, кто перезавернул),
+// иначе новый участник не смог бы расшифровать свой блоб.
 async function shareGroupKeyWithMember(chat, member) {
   const me = await ensureLocalIdentity();
-  if (!member.public_key) throw new Error('У участника нет публичного ключа');
+  const memberKey = await E2EE.normalizePublicKey(member.public_key);
+  if (!memberKey) throw new Error(I18N.t('err.memberNoKey'));
   const groupKey = await ensureGroupKey(chat);
   const state = groupKeyBlobs[chat.id] || {};
-  const blob = await E2EE.wrapGroupKey(groupKey, me, member.public_key);
-  const wrapped = { ...(state.wrapped || {}), [member.id]: blob };
+  const wrapped = {};
+  const members = (chat.members || []).filter(m => m.id !== member.id);
+  for (const m of members) {
+    const mk = await E2EE.normalizePublicKey(m.public_key);
+    if (!mk) continue;
+    wrapped[m.id] = await E2EE.wrapGroupKey(groupKey, me, mk);
+  }
+  wrapped[member.id] = await E2EE.wrapGroupKey(groupKey, me, memberKey);
+  if (!wrapped[currentUser.id]) {
+    wrapped[currentUser.id] = await E2EE.wrapGroupKey(groupKey, me, me.publicKey);
+  }
   const version = (state.version || 1) + 1;
   groupKeyBlobs[chat.id] = {
     version,
     wrapped,
-    mine: state.mine || blob,
-    createdBy: state.createdBy || currentUser.id
+    mine: wrapped[currentUser.id],
+    createdBy: currentUser.id
   };
   saveGroupKeyBlobs();
   sendWs({ type: 'set_group_key', chatId: chat.id, version, wrapped });
-  return blob;
+  return wrapped[member.id];
 }
 
 // Сохраняет полученный от сервера групповой ключ (только мой зашифрованный блоб)
@@ -720,7 +755,7 @@ function storeGroupKeyState(chatId, version, wrapped, createdBy) {
 // ==================== ШИФРОВАНИЕ СООБЩЕНИЙ ====================
 
 async function encryptChatText(chatKey, text, chatId) {
-  if (!chatKey) throw new Error('Нет ключа чата');
+  if (!chatKey) throw new Error(I18N.t('err.noChatKey'));
   if (chatKey.kind === 'group') {
     return E2EE.encryptGroup(chatKey.groupKey, text, String(chatId), 1);
   }
@@ -729,42 +764,111 @@ async function encryptChatText(chatKey, text, chatId) {
   return envelope;
 }
 
+// Кэш расшифрованных сообщений.
+//
+// Один и тот же шифротекст запрашивается несколько раз: превью в списке чатов,
+// тело сообщения в открытом чате, превью ответа. Рatchet (как и любой
+// симметрический ratchet) не позволяет расшифровать одно сообщение дважды —
+// без кэша вторая попытка падала бы с «сообщение устарело или повторяется».
+//
+// Кэш живёт в памяти и персистируется в localStorage (ограниченно): ratchet
+// намеренно не хранит старые ключи цепочек, поэтому после перезагрузки страницы
+// история иначе была бы нечитаемой. Ключ кэша — chatId + шифротекст.
+const plaintextCache = new Map();      // cacheKey -> plaintext | Promise
+const PLAINTEXT_CACHE_KEY = 'ciphertalk_plaintexts';
+const PLAINTEXT_CACHE_LIMIT = 800;     // максимум записей
+const PLAINTEXT_CACHE_MAX_CHARS = 20000; // не кэшируем «очень длинные» тексты
+let persistedPlaintext = null;         // { cacheKey: plaintext }
+
+function loadPersistedPlaintext() {
+  if (persistedPlaintext) return persistedPlaintext;
+  try {
+    persistedPlaintext = JSON.parse(localStorage.getItem(PLAINTEXT_CACHE_KEY)) || {};
+  } catch (e) {
+    persistedPlaintext = {};
+  }
+  return persistedPlaintext;
+}
+
+function plaintextCacheKey(chatId, content) {
+  return String(chatId) + '|' + (content || '');
+}
+
+function persistPlaintext(chatId, content, text) {
+  if (typeof text !== 'string' || text.length > PLAINTEXT_CACHE_MAX_CHARS) return;
+  const store = loadPersistedPlaintext();
+  store[plaintextCacheKey(chatId, content)] = text;
+  const keys = Object.keys(store);
+  if (keys.length > PLAINTEXT_CACHE_LIMIT) {
+    // Вытесняем самые старые записи (порядок вставки в объекте сохраняется)
+    for (const k of keys.slice(0, keys.length - PLAINTEXT_CACHE_LIMIT)) {
+      delete store[k];
+    }
+  }
+  try {
+    localStorage.setItem(PLAINTEXT_CACHE_KEY, JSON.stringify(store));
+  } catch (e) { /* хранилище переполнено — пропускаем */ }
+}
+
+function clearPlaintextCache() {
+  plaintextCache.clear();
+  persistedPlaintext = {};
+  try { localStorage.removeItem(PLAINTEXT_CACHE_KEY); } catch (e) { /* ignore */ }
+}
+
 // Кэш только что отправленных сообщений: подстраховка для расшифровки
 // собственных сообщений (echo от сервера) без обращения к ratchet.
-const sentPlaintext = new Map();
-
-function rememberSent(content, text) {
-  sentPlaintext.set(content, text);
-  if (sentPlaintext.size > 200) {
-    const oldest = sentPlaintext.keys().next().value;
-    sentPlaintext.delete(oldest);
-  }
+function rememberSent(chatId, content, text) {
+  const ck = plaintextCacheKey(chatId, content);
+  plaintextCache.set(ck, text);
+  persistPlaintext(chatId, content, text);
 }
 
 async function decryptChatText(chatKey, message, chatId, isOwn = false) {
-  if (!chatKey) throw new Error('Нет ключа чата');
-  const payload = {
-    content: message.encrypted_content,
-    iv: message.iv,
-    header: message.header || ''
-  };
-  if (chatKey.kind === 'group') {
-    return E2EE.decryptGroup(chatKey.groupKey, payload, String(chatId));
+  if (!chatKey) throw new Error(I18N.t('err.noChatKey'));
+
+  const raw = message.encrypted_content;
+  const ck = plaintextCacheKey(chatId, raw);
+
+  const cached = plaintextCache.get(ck);
+  if (typeof cached === 'string') return cached;
+  if (cached && typeof cached.then === 'function') return cached; // уже идёт расшифровка
+
+  const persisted = loadPersistedPlaintext()[ck];
+  if (typeof persisted === 'string') {
+    plaintextCache.set(ck, persisted);
+    return persisted;
   }
-  if (isOwn) {
-    try {
-      const text = await E2EE.decryptDirectOwn(chatKey.session, payload, String(chatId));
-      saveSession(chatId, chatKey.session);
-      return text;
-    } catch (e) {
-      const cached = sentPlaintext.get(message.encrypted_content);
-      if (cached !== undefined) return cached;
-      throw e;
+
+  const task = (async () => {
+    const payload = { content: raw, iv: message.iv, header: message.header || '' };
+    if (chatKey.kind === 'group') {
+      return E2EE.decryptGroup(chatKey.groupKey, payload, String(chatId));
     }
+    if (isOwn) {
+      try {
+        const text = await E2EE.decryptDirectOwn(chatKey.session, payload, String(chatId));
+        saveSession(chatId, chatKey.session);
+        return text;
+      } catch (e) {
+        throw e;
+      }
+    }
+    const text = await E2EE.decryptDirect(chatKey.session, payload, String(chatId));
+    saveSession(chatId, chatKey.session);
+    return text;
+  })();
+
+  plaintextCache.set(ck, task);
+  try {
+    const text = await task;
+    plaintextCache.set(ck, text);
+    persistPlaintext(chatId, raw, text);
+    return text;
+  } catch (e) {
+    plaintextCache.delete(ck);
+    throw e;
   }
-  const text = await E2EE.decryptDirect(chatKey.session, payload, String(chatId));
-  saveSession(chatId, chatKey.session);
-  return text;
 }
 
 // ==================== ФАЙЛЫ И МЕДИА ====================
@@ -790,7 +894,7 @@ async function encryptBlob(buffer, chatKey) {
 
 async function decryptBlob(buffer, chatKey) {
   const all = new Uint8Array(buffer);
-  if (all.byteLength < 14) throw new Error('Повреждённый файл');
+  if (all.byteLength < 14) throw new Error(I18N.t('err.corruptFile'));
   const saltLength = all[0];
   const salt = all.slice(1, 1 + saltLength);
   const iv = all.slice(1 + saltLength, 1 + saltLength + 12);
@@ -815,7 +919,7 @@ function waitForPublicKey(userId, timeoutMs = 6000) {
     entry.timer = setTimeout(() => {
       const arr = (pendingPublicKeys.get(userId) || []).filter(e => e !== entry);
       pendingPublicKeys.set(userId, arr);
-      reject(new Error('Нет ключа шифрования у собеседника'));
+      reject(new Error(I18N.t('err.peerNoKey')));
     }, timeoutMs);
     list.push(entry);
     pendingPublicKeys.set(userId, list);
@@ -855,7 +959,7 @@ function goToStep(step) {
     document.getElementById('phone-input').focus();
   } else if (step === 2) {
     document.getElementById('step-2').style.display = 'block';
-    document.getElementById('step-2-desc').textContent = `Код отправлен на ${regState.phone}`;
+    document.getElementById('step-2-desc').textContent = I18N.t('auth.codeSentTo', { phone: regState.phone });
     document.getElementById('code-input').focus();
   } else if (step === 3) {
     if (regState.action === 'register') {
@@ -878,34 +982,34 @@ function goToStep(step) {
 async function step1Next() {
   const phone = document.getElementById('phone-input').value.trim();
   if (!phone || phone.length < 5) {
-    showToast('Введите номер телефона', 'error');
+    showToast(I18N.t('err.phoneRequired'), 'error');
     return;
   }
 
   const btn = document.getElementById('send-code-btn');
   btn.disabled = true;
-  btn.textContent = 'Отправка...';
+  btn.textContent = I18N.t('auth.sending');
   try {
     const { ok, data } = await api('/api/send-code', { method: 'POST', body: { phone }, auth: false });
     if (ok && data.success) {
       regState.phone = phone;
       goToStep(2);
-      showToast('Код отправлен! Он выведен в консоль сервера', 'success');
+      showToast(I18N.t('auth.codeSent'), 'success');
     } else {
-      showToast(data.error || 'Не удалось отправить код', 'error');
+      showToast(data.error || I18N.t('err.sendCode'), 'error');
     }
   } catch (e) {
-    showToast('Ошибка соединения с сервером', 'error');
+    showToast(I18N.t('err.connection'), 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Далее';
+    btn.textContent = I18N.t('auth.next');
   }
 }
 
 async function step2Next() {
   const code = document.getElementById('code-input').value.trim();
   if (!code || code.length < 4) {
-    showToast('Введите код', 'error');
+    showToast(I18N.t('err.codeRequired'), 'error');
     return;
   }
 
@@ -929,10 +1033,10 @@ async function step2Next() {
         }
       }
     } else {
-      showToast(data.error || 'Неверный код', 'error');
+      showToast(data.error || I18N.t('err.codeInvalid'), 'error');
     }
   } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
+    showToast(I18N.t('err.generic') + ' ' + e.message, 'error');
   }
 }
 
@@ -940,7 +1044,7 @@ function step3RegNext() {
   const firstName = document.getElementById('firstname-input').value.trim();
   const lastName = document.getElementById('lastname-input').value.trim();
   if (!firstName || firstName.length < 2) {
-    showToast('Введите имя (минимум 2 символа)', 'error');
+    showToast(I18N.t('err.nameRequired'), 'error');
     return;
   }
   regState.firstName = firstName;
@@ -951,7 +1055,7 @@ function step3RegNext() {
 async function step3LoginNext() {
   const password = document.getElementById('password-input').value;
   if (!password) {
-    showToast('Введите пароль', 'error');
+    showToast(I18N.t('err.passwordRequired'), 'error');
     return;
   }
 
@@ -959,18 +1063,18 @@ async function step3LoginNext() {
     const kp = await getOrCreateLocalKeyPair();
     const { ok, data } = await api('/api/login', {
       method: 'POST',
-      body: { phone: regState.phone, password, publicKey: JSON.stringify(kp.publicKey) },
+      body: { phone: regState.phone, password, publicKey: kp.publicKey },
       auth: false
     });
 
     if (ok && data.success) {
       await enterApp(data, kp);
-      showToast(`С возвращением, ${currentUser.name}! 🔐`, 'success');
+      showToast(I18N.t('auth.welcome', { name: currentUser.name }) + ' 🔐', 'success');
     } else {
-      showToast(data.error || 'Ошибка входа', 'error');
+      showToast(data.error || I18N.t('err.login'), 'error');
     }
   } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
+    showToast(I18N.t('err.generic') + ' ' + e.message, 'error');
   }
 }
 
@@ -979,19 +1083,19 @@ async function loginWithToken() {
     const kp = await getOrCreateLocalKeyPair();
     const { ok, data } = await api('/api/login-code', {
       method: 'POST',
-      body: { phone: regState.phone, loginToken: regState.loginToken, publicKey: JSON.stringify(kp.publicKey) },
+      body: { phone: regState.phone, loginToken: regState.loginToken, publicKey: kp.publicKey },
       auth: false
     });
 
     if (ok && data.success) {
       await enterApp(data, kp);
-      showToast(`С возвращением, ${currentUser.name}! 🔐`, 'success');
+      showToast(I18N.t('auth.welcome', { name: currentUser.name }) + ' 🔐', 'success');
     } else {
-      showToast(data.error || 'Ошибка входа', 'error');
+      showToast(data.error || I18N.t('err.login'), 'error');
       if (data && /просроч|недействительн/i.test(data.error || '')) goToStep(1);
     }
   } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
+    showToast(I18N.t('err.generic') + ' ' + e.message, 'error');
   }
 }
 
@@ -1005,14 +1109,14 @@ async function checkUsername() {
   clearTimeout(usernameCheckTimeout);
 
   if (value.length < 3) {
-    hint.textContent = 'Минимум 3 символа';
+    hint.textContent = I18N.t('err.usernameMin');
     hint.className = 'input-hint info';
     input.classList.remove('success', 'error');
     btn.disabled = true;
     return;
   }
 
-  hint.textContent = 'Проверка...';
+  hint.textContent = I18N.t('auth.checking');
   hint.className = 'input-hint info';
   input.classList.remove('success', 'error');
   btn.disabled = true;
@@ -1021,21 +1125,21 @@ async function checkUsername() {
     try {
       const { data } = await api(`/api/check-username?username=${encodeURIComponent(value)}`, { auth: false });
       if (data.available) {
-        hint.innerHTML = `✅ Свободен! Вы будете: <span class="username-preview">@${escapeHtml(value)}</span>`;
+        hint.innerHTML = `${I18N.t('auth.usernameFree')}<span class="username-preview">@${escapeHtml(value)}</span>`;
         hint.className = 'input-hint success';
         input.classList.add('success');
         input.classList.remove('error');
         btn.disabled = false;
         regState.username = value;
       } else {
-        hint.textContent = '❌ ' + (data.error || 'Username уже занят');
+        hint.textContent = '❌ ' + (data.error || I18N.t('err.usernameTaken'));
         hint.className = 'input-hint error';
         input.classList.add('error');
         input.classList.remove('success');
         btn.disabled = true;
       }
     } catch (e) {
-      hint.textContent = 'Ошибка проверки';
+      hint.textContent = I18N.t('err.check');
       hint.className = 'input-hint error';
     }
   }, 400);
@@ -1057,15 +1161,15 @@ async function step5Next() {
   const confirm = document.getElementById('confirm-password-input').value;
 
   if (pwd.length < 6) {
-    showToast('Пароль минимум 6 символов', 'error');
+    showToast(I18N.t('err.passwordMin'), 'error');
     return;
   }
   if (pwd !== confirm) {
-    showToast('Пароли не совпадают', 'error');
+    showToast(I18N.t('err.passwordMismatch'), 'error');
     return;
   }
   if (!regState.verifyToken) {
-    showToast('Подтвердите номер телефона заново', 'error');
+    showToast(I18N.t('err.confirmPhoneAgain'), 'error');
     goToStep(1);
     return;
   }
@@ -1080,7 +1184,7 @@ async function step5Next() {
         lastName: regState.lastName,
         username: regState.username,
         password: pwd,
-        publicKey: JSON.stringify(kp.publicKey),
+        publicKey: kp.publicKey,
         verifyToken: regState.verifyToken
       },
       auth: false
@@ -1088,12 +1192,12 @@ async function step5Next() {
 
     if (ok && data.success) {
       await enterApp(data, kp);
-      showToast(`Добро пожаловать, ${currentUser.name}! 🔐`, 'success');
+      showToast(I18N.t('auth.registered', { name: currentUser.name }), 'success');
     } else {
-      showToast(data.error || 'Ошибка регистрации', 'error');
+      showToast(data.error || I18N.t('err.register'), 'error');
     }
   } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
+    showToast(I18N.t('err.generic') + ' ' + e.message, 'error');
   }
 }
 
@@ -1133,7 +1237,7 @@ function initApp() {
 }
 
 function updateMenuProfile() {
-  document.getElementById('menu-name').textContent = currentUser.name || 'Пользователь';
+  document.getElementById('menu-name').textContent = currentUser.name || I18N.t('chat.user');
   document.getElementById('menu-username').textContent = '@' + (currentUser.username || 'username');
   document.getElementById('menu-phone').textContent = currentUser.phone || '';
   const avatarEl = document.getElementById('menu-avatar');
@@ -1180,7 +1284,7 @@ function connectWebSocket() {
 
 function sendWs(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    showToast('Нет соединения с сервером', 'error');
+    showToast(I18N.t('err.noConnection'), 'error');
     return false;
   }
   ws.send(JSON.stringify(payload));
@@ -1400,7 +1504,7 @@ async function handleWSMessage(msg) {
       break;
 
     case 'error':
-      showToast(msg.error || 'Ошибка сервера', 'error');
+      showToast(msg.error || I18N.t('err.server'), 'error');
       break;
   }
 }
@@ -1495,24 +1599,24 @@ function renderChatList(filter = '') {
 }
 
 function chatPreview(chat) {
-  if (!chat.last_message) return 'Нет сообщений';
+  if (!chat.last_message) return I18N.t('chat.noMessages');
   const labels = {
-    voice: '🎤 Голосовое сообщение',
-    video: '📹 Видеосообщение',
-    image: '🖼 Изображение',
-    file: '📎 Файл'
+    voice: I18N.t('chat.voiceMsg'),
+    video: I18N.t('chat.videoMsg'),
+    image: I18N.t('chat.imageMsg'),
+    file: I18N.t('chat.fileMsg')
   };
-  return labels[chat.last_message_type] || '🔒 Загрузка…';
+  return labels[chat.last_message_type] || I18N.t('chat.loading');
 }
 
 async function refreshChatPreview(chat) {
   const el = document.querySelector(`.chat-preview[data-preview-chat="${chat.id}"]`);
   if (!el || !chat.last_message) return;
   const labels = {
-    voice: '🎤 Голосовое сообщение',
-    video: '📹 Видеосообщение',
-    image: '🖼 Изображение',
-    file: '📎 Файл'
+    voice: I18N.t('chat.voiceMsg'),
+    video: I18N.t('chat.videoMsg'),
+    image: I18N.t('chat.imageMsg'),
+    file: I18N.t('chat.fileMsg')
   };
   if (labels[chat.last_message_type]) {
     el.textContent = labels[chat.last_message_type];
@@ -1527,7 +1631,7 @@ async function refreshChatPreview(chat) {
     }, chat.id, chat.last_sender_id === currentUser.id);
     el.textContent = String(text).slice(0, 80);
   } catch (e) {
-    el.textContent = '🔒 Зашифрованное сообщение';
+    el.textContent = I18N.t('chat.encryptedMessage');
   }
 }
 
@@ -1621,19 +1725,19 @@ function updateChatHeader() {
   if (chat.type === 'private') {
     const other = chat.members?.find(m => m.id !== currentUser.id);
     if (isChatOnline(chat)) {
-      statusEl.textContent = 'в сети';
+      statusEl.textContent = I18N.t('chat.online');
       statusEl.className = 'chat-header-status online';
     } else if (other?.last_seen) {
-      statusEl.textContent = 'был(а) ' + formatLastSeen(other.last_seen);
+      statusEl.textContent = I18N.t('chat.lastSeen', { time: formatLastSeen(other.last_seen) });
       statusEl.className = 'chat-header-status';
     } else {
-      statusEl.textContent = 'не в сети';
+      statusEl.textContent = I18N.t('chat.offline');
       statusEl.className = 'chat-header-status';
     }
   } else if (chat.type === 'group' || chat.type === 'supergroup') {
-    statusEl.textContent = `${chat.members?.length || 0} участников`;
+    statusEl.textContent = I18N.t('chat.membersCount', { count: chat.members?.length || 0 });
   } else {
-    statusEl.textContent = 'заметки';
+    statusEl.textContent = I18N.t('chat.notes');
   }
   updateEncryptionBadge();
 }
@@ -1717,7 +1821,7 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     if (original) {
       const preview = document.createElement('div');
       preview.className = 'reply-preview';
-      let author = original.sender_name || 'Собеседник';
+      let author = original.sender_name || I18N.t('chat.peer');
       let text = '🔒';
       try {
         if (key) text = await decryptChatText(key, original, chat.id, original.sender_id === currentUser.id);
@@ -1753,7 +1857,7 @@ async function buildMessageElement(msg, chat, key, animate = false) {
   if (msg.edited) {
     const edited = document.createElement('span');
     edited.className = 'message-edited';
-    edited.textContent = 'ред.';
+    edited.textContent = I18N.t('chat.edited');
     meta.appendChild(edited);
   }
   const time = document.createElement('span');
@@ -1775,14 +1879,14 @@ async function buildMessageElement(msg, chat, key, animate = false) {
       const editBtn = document.createElement('button');
       editBtn.className = 'msg-action-btn';
       editBtn.textContent = '✏️';
-      editBtn.title = 'Редактировать';
+      editBtn.title = I18N.t('msg.edit');
       editBtn.onclick = () => editMessage(msg.id);
       actions.appendChild(editBtn);
     }
     const delBtn = document.createElement('button');
     delBtn.className = 'msg-action-btn';
     delBtn.textContent = '🗑️';
-    delBtn.title = 'Удалить';
+    delBtn.title = I18N.t('msg.delete');
     delBtn.onclick = () => deleteMessage(msg.id);
     actions.appendChild(delBtn);
     wrapper.appendChild(actions);
@@ -1797,7 +1901,7 @@ async function buildMessageContent(msg, chat, key, animate = false) {
   if (msg.deleted_for_all) {
     const div = document.createElement('div');
     div.className = 'message-text message-deleted';
-    div.textContent = '🗑️ Сообщение удалено';
+    div.textContent = I18N.t('chat.deleted');
     return div;
   }
 
@@ -1808,12 +1912,12 @@ async function buildMessageContent(msg, chat, key, animate = false) {
     div.className = 'message-text';
     const raw = msg.encrypted_content;
     if (!raw) return div;
-    let text = '🔒 [Нет ключа шифрования]';
+    let text = I18N.t('chat.noKey');
     if (key) {
       try {
         text = await decryptChatText(key, msg, chatId, isOwn);
       } catch (e) {
-        text = '⚠️ Не удалось расшифровать сообщение';
+        text = I18N.t('chat.decryptFailed');
       }
     }
     if (animate && text && !text.startsWith('🔒') && !text.startsWith('⚠️')) {
@@ -1835,7 +1939,7 @@ async function buildMessageContent(msg, chat, key, animate = false) {
   if (!payload || !payload.url) {
     const div = document.createElement('div');
     div.className = 'message-text';
-    div.textContent = '🔒 [Медиа недоступно]';
+    div.textContent = I18N.t('chat.mediaUnavailable');
     return div;
   }
 
@@ -1851,7 +1955,7 @@ async function getMediaObjectUrl(payload, key) {
   const res = await fetch(SERVER_URL + payload.url, {
     headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
   });
-  if (!res.ok) throw new Error('Не удалось скачать файл (' + res.status + ')');
+  if (!res.ok) throw new Error(I18N.t('err.downloadStatus', { status: res.status }));
 
   const encrypted = await res.arrayBuffer();
   const plain = await decryptBlob(encrypted, key);
@@ -1873,7 +1977,7 @@ function buildImage(payload, key) {
   wrap.className = 'image-message';
   const placeholder = document.createElement('div');
   placeholder.className = 'media-loading';
-  placeholder.textContent = 'Загрузка изображения…';
+  placeholder.textContent = I18N.t('chat.loadingImage');
   wrap.appendChild(placeholder);
 
   const load = async () => {
@@ -1881,11 +1985,11 @@ function buildImage(payload, key) {
       const src = await getMediaObjectUrl(payload, key);
       const img = document.createElement('img');
       img.src = src;
-      img.alt = payload.name || 'Изображение';
+      img.alt = payload.name || I18N.t('chat.image');
       img.onclick = () => window.open(src, '_blank', 'noopener');
       placeholder.replaceWith(img);
     } catch (e) {
-      placeholder.textContent = '🔒 Изображение недоступно';
+      placeholder.textContent = I18N.t('chat.imageUnavailable');
     }
   };
   lazyLoad(wrap, load);
@@ -1929,7 +2033,7 @@ function buildVoice(payload, key) {
       else audio.pause();
     } catch (e) {
       btn.disabled = false;
-      showToast('Не удалось воспроизвести: ' + e.message, 'error');
+      showToast(I18N.t('err.play', { error: e.message }), 'error');
     }
   };
 
@@ -1943,7 +2047,7 @@ function buildVideo(payload, key) {
 
   const placeholder = document.createElement('div');
   placeholder.className = 'media-loading';
-  placeholder.textContent = 'Нажмите, чтобы загрузить видео';
+  placeholder.textContent = I18N.t('chat.tapToLoadVideo');
 
   const play = document.createElement('div');
   play.className = 'video-play';
@@ -1959,7 +2063,7 @@ function buildVideo(payload, key) {
   wrap.onclick = async () => {
     try {
       if (!video) {
-        placeholder.textContent = 'Загрузка видео…';
+        placeholder.textContent = I18N.t('chat.loadingVideo');
         const src = await getMediaObjectUrl(payload, key);
         video = document.createElement('video');
         video.src = src;
@@ -1974,8 +2078,8 @@ function buildVideo(payload, key) {
       if (video.paused) await video.play();
       else video.pause();
     } catch (e) {
-      placeholder.textContent = '🔒 Видео недоступно';
-      showToast('Не удалось воспроизвести видео: ' + e.message, 'error');
+      placeholder.textContent = I18N.t('chat.videoUnavailable');
+      showToast(I18N.t('err.playVideo', { error: e.message }), 'error');
     }
   };
 
@@ -1994,10 +2098,10 @@ function buildFile(payload, key) {
   info.className = 'file-info';
   const name = document.createElement('div');
   name.className = 'file-name';
-  name.textContent = payload.name || 'Файл';
+  name.textContent = payload.name || I18N.t('chat.file');
   const size = document.createElement('div');
   size.className = 'file-size';
-  size.textContent = formatBytes(payload.size) + ' • нажмите, чтобы скачать';
+  size.textContent = formatBytes(payload.size) + I18N.t('chat.clickToDownload');
   info.append(name, size);
 
   wrap.append(icon, info);
@@ -2011,7 +2115,7 @@ function buildFile(payload, key) {
       a.click();
       a.remove();
     } catch (e) {
-      showToast('Не удалось скачать файл: ' + e.message, 'error');
+      showToast(I18N.t('err.downloadFile', { error: e.message }), 'error');
     }
   };
   return wrap;
@@ -2063,7 +2167,8 @@ async function sendMessage() {
     showToast('🔒 ' + err.message, 'error');
     return;
   }
-  rememberSent(envelope.content, text);
+  rememberSent(currentChatId, envelope.content, text);
+  const replyTo = (typeof replyContext !== 'undefined' && replyContext) ? replyContext.messageId : null;
   const sent = sendWs({
     type: 'send_message',
     chatId: currentChatId,
@@ -2071,7 +2176,7 @@ async function sendMessage() {
     iv: envelope.iv,
     header: envelope.header,
     msgType: 'text',
-    replyTo: replyContext?.messageId || null
+    replyTo: replyTo || null
   });
   if (!sent) return;
 
@@ -2084,6 +2189,9 @@ async function sendMessage() {
 
   input.value = '';
   input.style.height = 'auto';
+
+  // Контекст ответа сбрасывается после успешной отправки
+  if (replyTo && typeof cancelReply === 'function') cancelReply();
 }
 
 function handleKeyDown(e) {
@@ -2119,7 +2227,7 @@ async function editMessage(msgId) {
   let currentText = '';
   try { currentText = await decryptChatText(key, msg, currentChatId); } catch (e) { /* ignore */ }
 
-  const newText = prompt('Редактировать сообщение:', currentText);
+  const newText = prompt(I18N.t('msg.editPrompt'), currentText);
   if (newText === null || newText === currentText || !newText.trim()) return;
 
   const envelope = await encryptChatText(key, newText.trim(), currentChatId);
@@ -2134,7 +2242,7 @@ async function editMessage(msgId) {
 }
 
 function deleteMessage(msgId) {
-  if (!confirm('Удалить сообщение?')) return;
+  if (!confirm(I18N.t('msg.deleteConfirm'))) return;
   sendWs({ type: 'delete_message', chatId: currentChatId, messageId: msgId });
 }
 
@@ -2161,13 +2269,13 @@ async function toggleVideoRecording() {
 
 async function startRecording(type) {
   if (!currentChatId) {
-    showToast('Сначала выберите чат', 'error');
+    showToast(I18N.t('err.pickChat'), 'error');
     return;
   }
   if (mediaRecorder) return;
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
-    showToast('Браузер не поддерживает запись медиа', 'error');
+    showToast(I18N.t('err.noMediaSupport'), 'error');
     return;
   }
 
@@ -2197,7 +2305,7 @@ async function startRecording(type) {
       resetRecordingUI();
 
       if (durationSec < 1 || blob.size === 0) {
-        showToast('Слишком короткая запись', 'error');
+        showToast(I18N.t('err.tooShort'), 'error');
         return;
       }
 
@@ -2205,11 +2313,11 @@ async function startRecording(type) {
         await sendMediaBlob(blob, type, {
           chatId: chatIdAtStart,
           duration: durationSec,
-          name: type === 'video' ? 'Видеосообщение' : 'Голосовое сообщение',
+          name: type === 'video' ? I18N.t('chat.videoMsg') : I18N.t('chat.voiceMsg'),
           mime: blob.type
         });
       } catch (e) {
-        showToast('Ошибка отправки: ' + e.message, 'error');
+        showToast(I18N.t('err.sendFailed') + ' ' + e.message, 'error');
       }
     };
 
@@ -2218,7 +2326,7 @@ async function startRecording(type) {
 
     const maxSeconds = type === 'video' ? MAX_VIDEO_SECONDS : MAX_VOICE_SECONDS;
     recordingMaxTimer = setTimeout(() => {
-      showToast(`Достигнут лимит ${maxSeconds} сек.`, 'error');
+      showToast(I18N.t('err.recLimit', { seconds: maxSeconds }), 'error');
       stopRecording();
     }, maxSeconds * 1000);
 
@@ -2227,7 +2335,7 @@ async function startRecording(type) {
       updateRecordingTime(elapsed);
     }, 500);
   } catch (e) {
-    showToast('Нет доступа к медиа: ' + e.message, 'error');
+    showToast(I18N.t('err.noMediaAccess') + ' ' + e.message, 'error');
   }
 }
 
@@ -2266,7 +2374,7 @@ function updateRecordingUI(isRecording) {
     indicator.innerHTML = `
       <div class="recording-dot"></div>
       <span class="recording-time" id="recording-time">0:00</span>
-      <span class="recording-text">${recordingType === 'video' ? 'Запись видео…' : 'Запись аудио…'}</span>
+      <span class="recording-text">${recordingType === 'video' ? I18N.t('rec.video') : I18N.t('rec.audio')}</span>
     `;
     inputArea.insertBefore(indicator, messageInput);
   } else {
@@ -2305,7 +2413,7 @@ function resetRecordingUI() {
 
 function attachFile() {
   if (!currentChatId) {
-    showToast('Сначала выберите чат', 'error');
+    showToast(I18N.t('err.pickChat'), 'error');
     return;
   }
 
@@ -2315,13 +2423,13 @@ function attachFile() {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) {
-      showToast('Файл слишком большой (максимум 20 МБ)', 'error');
+      showToast(I18N.t('err.fileTooLarge'), 'error');
       return;
     }
 
     const chatIdAtStart = currentChatId;
     const kind = (file.type || '').startsWith('image/') ? 'image' : 'file';
-    showToast('Загрузка файла…');
+    showToast(I18N.t('chat.uploadingFile'));
     try {
       await sendMediaBlob(file, kind, {
         chatId: chatIdAtStart,
@@ -2329,9 +2437,9 @@ function attachFile() {
         name: file.name,
         mime: file.type || 'application/octet-stream'
       });
-      showToast('Файл отправлен', 'success');
+      showToast(I18N.t('toast.fileSent'), 'success');
     } catch (err) {
-      showToast('Ошибка загрузки: ' + err.message, 'error');
+      showToast(I18N.t('err.upload') + ' ' + err.message, 'error');
     }
   };
   input.click();
@@ -2340,10 +2448,10 @@ function attachFile() {
 async function sendMediaBlob(blob, kind, opts) {
   const chatId = Number(opts.chatId);
   const chat = getChatById(chatId);
-  if (!chat) throw new Error('Чат не найден');
+  if (!chat) throw new Error(I18N.t('err.chatNotFound'));
 
   const key = await getChatKey(chatId, chat);
-  if (!key) throw new Error('Нет ключа шифрования');
+  if (!key) throw new Error(I18N.t('err.noKey'));
 
   const buffer = await blob.arrayBuffer();
   const encrypted = await encryptBlob(buffer, key);
@@ -2358,20 +2466,20 @@ async function sendMediaBlob(blob, kind, opts) {
   });
   const uploaded = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(uploaded.error || 'Сервер отклонил файл');
+    throw new Error(uploaded.error || I18N.t('err.fileRejected'));
   }
 
   const payload = {
     url: uploaded.url,
     fileId: uploaded.fileId,
-    name: opts.name || 'Файл',
+    name: opts.name || I18N.t('chat.file'),
     size: buffer.byteLength,
     mime: opts.mime || blob.type || 'application/octet-stream',
     duration: opts.duration || 0
   };
 
   const envelope = await encryptChatText(key, JSON.stringify(payload), chatId);
-  rememberSent(envelope.content, JSON.stringify(payload));
+  rememberSent(currentChatId, envelope.content, JSON.stringify(payload));
   const sent = sendWs({
     type: 'send_message',
     chatId,
@@ -2380,7 +2488,7 @@ async function sendMediaBlob(blob, kind, opts) {
     header: envelope.header,
     msgType: kind
   });
-  if (!sent) throw new Error('Нет соединения с сервером');
+  if (!sent) throw new Error(I18N.t('err.noConnection'));
 }
 
 // ==================== UI ====================
@@ -2412,9 +2520,9 @@ function openSearch() {
   toggleMenu();
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>🔍 Найти пользователя</h2>
+    <h2>${I18N.t('search.title')}</h2>
     <div class="input-group">
-      <input type="text" id="user-search-input" placeholder="Имя, номер или @username" data-action="searchUsers">
+      <input type="text" id="user-search-input" placeholder="${I18N.t('search.placeholder2')}" data-action="searchUsers">
     </div>
     <div class="search-results" id="search-results"></div>
   `);
@@ -2425,7 +2533,7 @@ async function searchUsers(query) {
   clearTimeout(searchTimeout);
   const container = document.getElementById('search-results');
   if (!query || query.length < 2) {
-    container.innerHTML = '<p style="color:var(--text-secondary);padding:14px;text-align:center">Введите минимум 2 символа</p>';
+    container.innerHTML = `<p style="color:var(--text-secondary);padding:14px;text-align:center">${I18N.t('search.min2')}</p>`;
     return;
   }
 
@@ -2436,20 +2544,20 @@ async function searchUsers(query) {
       if (!ok || !Array.isArray(data)) throw new Error('search failed');
 
       if (data.length === 0) {
-        container.innerHTML = '<p style="color:var(--text-secondary);padding:14px;text-align:center">Никого не найдено</p>';
+        container.innerHTML = `<p style="color:var(--text-secondary);padding:14px;text-align:center">${I18N.t('search.none')}</p>`;
         return;
       }
       container.innerHTML = data.map(u => `
         <div class="search-result-item" data-action="startChat" data-id="${u.id}">
           <div class="chat-avatar">${escapeHtml((u.name || 'U')[0].toUpperCase())}</div>
           <div>
-            <div style="font-weight:600">${escapeHtml(u.name || 'Пользователь')}</div>
+            <div style="font-weight:600">${escapeHtml(u.name || I18N.t('chat.user'))}</div>
             <div style="font-size:12px;color:var(--text-secondary)">@${escapeHtml(u.username || '')} • ${escapeHtml(u.phone || '')}</div>
           </div>
         </div>
       `).join('');
     } catch (e) {
-      container.innerHTML = '<p style="color:var(--danger);padding:14px;text-align:center">Ошибка поиска</p>';
+      container.innerHTML = `<p style="color:var(--danger);padding:14px;text-align:center">${I18N.t('search.error')}</p>`;
     }
   }, 300);
 }
@@ -2463,19 +2571,19 @@ function openNewGroup() {
   toggleMenu();
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>👥 Новая группа</h2>
+    <h2>${I18N.t('group.title')}</h2>
     <div class="input-group">
-      <label>Название группы</label>
-      <input type="text" id="group-name-input" placeholder="Моя группа">
+      <label>${I18N.t('group.name')}</label>
+      <input type="text" id="group-name-input" placeholder="${I18N.t('group.namePlaceholder')}">
     </div>
-    <button class="btn" data-action="createGroup">Создать группу</button>
+    <button class="btn" data-action="createGroup">${I18N.t('group.create')}</button>
   `);
 }
 
 function createGroup() {
   const name = document.getElementById('group-name-input').value.trim();
   if (!name) {
-    showToast('Введите название', 'error');
+    showToast(I18N.t('err.nameRequired2'), 'error');
     return;
   }
   sendWs({ type: 'create_group', name, members: [] });
@@ -2486,16 +2594,16 @@ function openNewChannel() {
   toggleMenu();
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>📢 Новый канал</h2>
+    <h2>${I18N.t('channel.title')}</h2>
     <div class="input-group">
-      <label>Название канала</label>
-      <input type="text" id="channel-name-input" placeholder="Мой канал">
+      <label>${I18N.t('channel.name')}</label>
+      <input type="text" id="channel-name-input" placeholder="${I18N.t('channel.namePlaceholder')}">
     </div>
     <div class="input-group">
-      <label>Описание</label>
-      <input type="text" id="channel-desc-input" placeholder="О канала (необязательно)">
+      <label>${I18N.t('channel.desc')}</label>
+      <input type="text" id="channel-desc-input" placeholder="${I18N.t('channel.descPlaceholder')}">
     </div>
-    <button class="btn" data-action="createChannel">Создать канал</button>
+    <button class="btn" data-action="createChannel">${I18N.t('channel.create')}</button>
   `);
 }
 
@@ -2503,13 +2611,13 @@ function createChannel() {
   const name = document.getElementById('channel-name-input').value.trim();
   const description = document.getElementById('channel-desc-input').value.trim();
   if (!name) {
-    showToast('Введите название', 'error');
+    showToast(I18N.t('err.nameRequired2'), 'error');
     return;
   }
   const sent = sendWs({ type: 'create_channel', name, description });
   if (sent) {
     closeModal();
-    showToast('Канал создан', 'success');
+    showToast(I18N.t('toast.channelCreated'), 'success');
   }
 }
 
@@ -2530,7 +2638,7 @@ function showChatInfo() {
       <div class="encryption-badge">🔒 E2EE AES-256-GCM</div>
     </div>
     <div style="font-size:13px;color:var(--text-secondary)">
-      Участников: ${chat.members?.length || 0}
+      ${I18N.t('chatinfo.membersShort', { count: chat.members?.length || 0 })}
     </div>
   `);
 }
@@ -2539,14 +2647,14 @@ function showEncryptionInfo() {
   toggleMenu();
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>🔐 О шифровании</h2>
+    <h2>${I18N.t('enc.title')}</h2>
     <div style="line-height:1.7;font-size:13px;">
-      <p><strong>CipherTalk</strong> использует сквозное шифрование:</p><br>
-      <p>🔑 <strong>ECDH</strong> (P-256) — обмен ключами</p>
-      <p>🔒 <strong>AES-256-GCM</strong> — сообщения, файлы, голос и видео</p>
-      <p>🛡️ <strong>HKDF</strong> — вывод ключей</p>
-      <p>💾 <strong>AES-256-GCM</strong> — данные на диске сервера</p><br>
-      <p>Сервер <strong>не имеет доступа</strong> к содержимому переписки и вложений.</p>
+      <p><strong>CipherTalk</strong> ${I18N.t('enc.subtitle')}</p><br>
+      <p>🔑 <strong>ECDH</strong> (P-256) — ${I18N.t('enc.ecdh')}</p>
+      <p>🔒 <strong>AES-256-GCM</strong> — ${I18N.t('enc.aes')}</p>
+      <p>🛡️ <strong>HKDF</strong> — ${I18N.t('enc.hkdf')}</p>
+      <p>💾 <strong>AES-256-GCM</strong> — ${I18N.t('enc.atRest')}</p><br>
+      <p>${I18N.t('enc.serverBlind')}</p>
     </div>
   `);
 }
@@ -2563,7 +2671,7 @@ function updateOnlineStatuses() {
 
 function showTypingIndicator(name) {
   const statusEl = document.getElementById('chat-header-status');
-  statusEl.innerHTML = `<span class="typing-indicator"><span></span><span></span><span></span></span> ${escapeHtml(name || '')} печатает…`;
+  statusEl.innerHTML = `<span class="typing-indicator"><span></span><span></span><span></span></span> ${escapeHtml(name || '')} ${I18N.t('chat.typing')}`;
   statusEl.className = 'chat-header-status online';
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => updateChatHeader(), 3000);
@@ -2585,104 +2693,130 @@ function openSettings() {
 
   showModal(`
     <button class="modal-close" data-action="closeModal">×</button>
-    <h2>⚙️ Настройки</h2>
+    <h2>${I18N.t('settings.title')}</h2>
 
-    <div class="settings-section-title">Профиль</div>
+    <div class="settings-section-title">${I18N.t('settings.profile')}</div>
     <div class="row">
       <div class="input-group">
-        <label>Имя</label>
+        <label>${I18N.t('profile.firstname')}</label>
         <input type="text" id="settings-firstname" value="${escapeHtml(currentUser.firstName || '')}">
       </div>
       <div class="input-group">
-        <label>Фамилия</label>
+        <label>${I18N.t('profile.lastname')}</label>
         <input type="text" id="settings-lastname" value="${escapeHtml(currentUser.lastName || '')}">
       </div>
     </div>
     <div class="input-group">
-      <label>Username</label>
+      <label>${I18N.t('profile.username')}</label>
       <input type="text" id="settings-username" value="${escapeHtml(currentUser.username || '')}">
     </div>
-    <button class="btn" data-action="saveSettings">Сохранить</button>
+    <button class="btn" data-action="saveSettings">${I18N.t('profile.save')}</button>
 
-    <div class="settings-section-title">Тема оформления</div>
+    <div class="settings-section-title">${I18N.t('settings.theme')}</div>
     <div class="theme-grid">${themeSwatches}</div>
 
-    <div class="settings-section-title">Фон чата</div>
+    <div class="settings-section-title">${I18N.t('settings.bg')}</div>
     <div class="bg-grid">${bgSwatches}</div>
     <div class="row" style="margin-top:10px">
       <label class="btn btn-secondary" style="cursor:pointer;text-align:center">
-        🖼️ Свой фон
+        ${I18N.t('settings.customBg')}
         <input type="file" accept="image/*,image/gif" style="display:none" data-action="setCustomBg">
       </label>
-      <button class="btn btn-secondary" data-action="clearCustomBg" ${appearance.customBg ? '' : 'disabled'}>Убрать свой фон</button>
+      <button class="btn btn-secondary" data-action="clearCustomBg" ${appearance.customBg ? '' : 'disabled'}>${I18N.t('settings.removeBg')}</button>
     </div>
 
-    <div class="settings-section-title">Стиль одним кликом</div>
+    <div class="settings-section-title">${I18N.t('settings.preset')}</div>
     <div class="preset-row">
       ${STYLE_PRESETS.map(p => `<button class="preset-chip ${appearance.theme === p.patch.theme && appearance.glass === p.patch.glass ? 'active' : ''}" data-preset="${p.id}" data-action="setStylePreset" data-id="${p.id}">${escapeHtml(p.name)}</button>`).join('')}
     </div>
 
-    <div class="settings-section-title">Эффекты стекла</div>
+    <div class="settings-section-title">${I18N.t('settings.glass')}</div>
     <div class="switch-row">
-      <span>Прозрачные панели (glassmorphism)</span>
+      <span>${I18N.t('settings.glassSwitch')}</span>
       <div class="switch ${appearance.glass ? 'on' : ''}" id="glass-switch" data-action="toggleGlass"></div>
     </div>
     <div class="slider-row">
-      <span>Сила размытия</span>
+      <span>${I18N.t('settings.blur')}</span>
       <input type="range" min="4" max="40" step="1" value="${appearance.blur}" data-action="setBlur">
       <span class="slider-value" id="blur-value">${appearance.blur}px</span>
     </div>
     <div class="slider-row">
-      <span>Прозрачность панелей</span>
+      <span>${I18N.t('settings.opacity')}</span>
       <input type="range" min="10" max="95" step="1" value="${appearance.bgOpacity}" data-action="setFloat" data-key="bgOpacity" data-target="opacity-value" data-unit="opacity-value">
       <span class="slider-value" id="opacity-value">${appearance.bgOpacity}%</span>
     </div>
     <div class="slider-row">
-      <span>Насыщенность</span>
+      <span>${I18N.t('settings.saturate')}</span>
       <input type="range" min="80" max="240" step="5" value="${appearance.saturate}" data-action="setFloat" data-key="saturate" data-target="saturate-value" data-unit="saturate-value">
       <span class="slider-value" id="saturate-value">${appearance.saturate}%</span>
     </div>
     <div class="slider-row">
-      <span>Свечение (glow)</span>
+      <span>${I18N.t('settings.glow')}</span>
       <input type="range" min="0" max="30" step="1" value="${appearance.glow}" data-action="setFloat" data-key="glow" data-target="glow-value" data-unit="px">
       <span class="slider-value" id="glow-value">${appearance.glow}px</span>
     </div>
     <div class="slider-row">
-      <span>Округление углов</span>
+      <span>${I18N.t('settings.roundness')}</span>
       <input type="range" min="0" max="28" step="1" value="${appearance.roundness}" data-action="setFloat" data-key="roundness" data-target="round-value" data-unit="px">
       <span class="slider-value" id="round-value">${appearance.roundness}px</span>
     </div>
     <div class="switch-row">
-      <span>Снежинки на фоне</span>
+      <span>${I18N.t('settings.snow')}</span>
       <div class="switch ${appearance.snow ? 'on' : ''}" id="snow-switch" data-action="toggleSnow"></div>
     </div>
     <div class="slider-row" style="align-items:center">
-      <span>Анимации</span>
+      <span>${I18N.t('settings.animations')}</span>
       <div class="anim-row">
-        <button class="anim-chip ${appearance.animLevel === 'off' ? 'active' : ''}" data-anim="off" data-action="setAnimLevel" data-id="off">Выкл</button>
-        <button class="anim-chip ${appearance.animLevel === 'normal' ? 'active' : ''}" data-anim="normal" data-action="setAnimLevel" data-id="normal">Обычные</button>
-        <button class="anim-chip ${appearance.animLevel === 'full' ? 'active' : ''}" data-anim="full" data-action="setAnimLevel" data-id="full">Максимум</button>
+        <button class="anim-chip ${appearance.animLevel === 'off' ? 'active' : ''}" data-anim="off" data-action="setAnimLevel" data-id="off">${I18N.t('settings.animOff')}</button>
+        <button class="anim-chip ${appearance.animLevel === 'normal' ? 'active' : ''}" data-anim="normal" data-action="setAnimLevel" data-id="normal">${I18N.t('settings.animNormal')}</button>
+        <button class="anim-chip ${appearance.animLevel === 'full' ? 'active' : ''}" data-anim="full" data-action="setAnimLevel" data-id="full">${I18N.t('settings.animFull')}</button>
       </div>
     </div>
 
-    <div class="settings-section-title">Приватность</div>
+    <div class="settings-section-title">${I18N.t('settings.privacy')}</div>
     <div class="switch-row">
-      <span>Скрыть статус «в сети»</span>
+      <span>${I18N.t('settings.hideOnline')}</span>
       <div class="switch ${privacy.hideOnline ? 'on' : ''}" id="hide-online-switch" data-action="toggleHideOnline"></div>
     </div>
     <div class="input-group">
-      <label>PIN-код приложения (4-8 цифр)</label>
-      <input type="password" id="settings-pin" placeholder="${privacy.pinHash ? 'PIN установлен — введите новый' : 'Не задан'}" inputmode="numeric" maxlength="8">
+      <label>${I18N.t('settings.pin')}</label>
+      <input type="password" id="settings-pin" placeholder="${privacy.pinHash ? I18N.t('toast.pinSetNew') : I18N.t('settings.notSet')}" inputmode="numeric" maxlength="8">
     </div>
     <div class="row">
-      <button class="btn" data-action="setPin">Установить PIN</button>
-      <button class="btn btn-secondary" data-action="removePin" ${privacy.pinHash ? '' : 'disabled'}>Снять PIN</button>
+      <button class="btn" data-action="setPin">${I18N.t('settings.setPin')}</button>
+      <button class="btn btn-secondary" data-action="removePin" ${privacy.pinHash ? '' : 'disabled'}>${I18N.t('settings.removePin')}</button>
     </div>
 
-    <div class="settings-section-title">Шифрование</div>
-    <div class="settings-hint">Ключи E2EE хранятся только на этом устройстве. Сброс сделает старые сообщения нечитаемыми здесь.</div>
-    <button class="btn btn-secondary" data-action="resetE2EE">🔑 Сбросить ключи шифрования</button>
+    <div class="settings-section-title">${I18N.t('settings.encryption')}</div>
+    <div class="settings-hint">${I18N.t('settings.encryptionHint')}</div>
+    <button class="btn btn-secondary" data-action="resetE2EE">${I18N.t('settings.resetKeys')}</button>
+
+    <div class="settings-section-title">${I18N.t('lang.name')}</div>
+    <div class="anim-row">
+      <button class="anim-chip ${I18N.getLang() === 'ru' ? 'active' : ''}" data-action="setLang" data-id="ru">${I18N.t('lang.ru')}</button>
+      <button class="anim-chip ${I18N.getLang() === 'en' ? 'active' : ''}" data-action="setLang" data-id="en">${I18N.t('lang.en')}</button>
+    </div>
   `);
+}
+
+function updateLangChips() {
+  const cur = I18N.getLang();
+  const ru = document.getElementById('lang-ru');
+  const en = document.getElementById('lang-en');
+  if (ru) ru.classList.toggle('active', cur === 'ru');
+  if (en) en.classList.toggle('active', cur === 'en');
+}
+
+function setLanguage(lang) {
+  if (!lang || lang === I18N.getLang()) return;
+  I18N.setLang(lang);
+  I18N.applyI18n();
+  updateLangChips();
+  try { renderChatList(); } catch (e) { /* ignore */ }
+  try { if (typeof renderFolderBar === 'function') renderFolderBar(); } catch (e) { /* ignore */ }
+  try { if (currentChatId) { updateChatHeader(); renderMessages(currentChatId); } } catch (e) { /* ignore */ }
+  try { if (document.getElementById('modal-overlay').classList.contains('show')) openSettings(); } catch (e) { /* ignore */ }
+  showToast(I18N.t('lang.changed', { lang: I18N.t('lang.' + lang) }), 'success');
 }
 
 async function toggleHideOnline() {
@@ -2694,7 +2828,7 @@ async function toggleHideOnline() {
   try {
     await api('/api/update-profile', { method: 'POST', body: { hideOnline: privacy.hideOnline } });
   } catch (e) { /* WS уже применил */ }
-  showToast(privacy.hideOnline ? 'Статус онлайна скрыт' : 'Статус онлайна виден', 'success');
+  showToast(privacy.hideOnline ? I18N.t('toast.onlineHidden') : I18N.t('toast.onlineShown'), 'success');
 }
 
 async function saveSettings() {
@@ -2703,7 +2837,7 @@ async function saveSettings() {
   const username = document.getElementById('settings-username').value.trim();
 
   if (!firstName || firstName.length < 2) {
-    showToast('Имя обязательно', 'error');
+    showToast(I18N.t('err.nameRequired'), 'error');
     return;
   }
 
@@ -2719,19 +2853,19 @@ async function saveSettings() {
       updateMenuProfile();
       renderChatList();
       closeModal();
-      showToast('Сохранено!', 'success');
+      showToast(I18N.t('toast.saved'), 'success');
     } else {
-      showToast(data.error || 'Ошибка', 'error');
+      showToast(data.error || I18N.t('err.genericShort'), 'error');
     }
   } catch (e) {
-    showToast('Ошибка сохранения', 'error');
+    showToast(I18N.t('err.save'), 'error');
   }
 }
 
 function handleSessionExpired() {
   if (sessionExpiredHandled) return;
   sessionExpiredHandled = true;
-  showToast('Сессия истекла, войдите снова', 'error');
+  showToast(I18N.t('err.sessionExpired'), 'error');
   clearSession(false);
   setTimeout(() => location.reload(), 700);
 }
@@ -2749,11 +2883,12 @@ function clearSession(reload) {
   }
   mediaCache.forEach(objectUrl => URL.revokeObjectURL(objectUrl));
   mediaCache.clear();
+  clearPlaintextCache();
   if (reload) location.reload();
 }
 
 async function logout() {
-  if (!confirm('Выйти из аккаунта?')) return;
+  if (!confirm(I18N.t('confirm.logout'))) return;
   try {
     if (authToken) {
       await fetch(SERVER_URL + '/api/logout', {
@@ -2901,7 +3036,8 @@ const CLICK_ACTIONS = {
   toggleHideOnline: () => toggleHideOnline(),
   setPin: () => setPin(),
   removePin: () => removePin(),
-  resetE2EE: () => resetE2EE()
+  resetE2EE: () => resetE2EE(),
+  setLang: (el) => setLanguage(el.dataset.id)
 };
 
 const CHANGE_ACTIONS = {
@@ -2946,6 +3082,8 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== СТАРТ ====================
 window.addEventListener('load', async () => {
+  I18N.applyI18n();
+  updateLangChips();
   loadAppearance();
   snow.init();
   const savedUser = localStorage.getItem('ciphertalk_user');
