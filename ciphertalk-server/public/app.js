@@ -2498,6 +2498,61 @@ const snow = {
   }
 };
 
+// ==================== ДЕЛЕГИРОВАНИЕ СОБЫТИЙ (CSP-safe, без inline-обработчиков) ====================
+const CLICK_ACTIONS = {
+  step1Next: () => step1Next(),
+  step2Next: () => step2Next(),
+  step3RegNext: () => step3RegNext(),
+  step3LoginNext: () => step3LoginNext(),
+  step4Next: () => step4Next(),
+  step5Next: () => step5Next(),
+  goToStep: (el) => goToStep(parseInt(el.dataset.step, 10) || 1),
+  togglePassword: (el) => togglePassword(el.dataset.target, el),
+  openNewGroup: () => openNewGroup(),
+  openNewChannel: () => openNewChannel(),
+  openSearch: () => openSearch(),
+  openSavedMessages: () => openSavedMessages(),
+  openSettings: () => openSettings(),
+  showEncryptionInfo: () => showEncryptionInfo(),
+  logout: () => logout(),
+  toggleMenu: () => toggleMenu(),
+  closeChat: () => closeChat(),
+  showChatInfo: () => showChatInfo(),
+  attachFile: () => attachFile(),
+  toggleVoiceRecording: () => toggleVoiceRecording(),
+  toggleVideoRecording: () => toggleVideoRecording(),
+  sendMessage: () => sendMessage(),
+  unlockWithPin: () => unlockWithPin()
+};
+
+const INPUT_ACTIONS = {
+  checkUsername: () => checkUsername(),
+  checkPasswordStrength: () => checkPasswordStrength(),
+  searchChats: (el) => searchChats(el.value),
+  messageInput: (el) => { autoResize(el); handleTyping(); }
+};
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const handler = CLICK_ACTIONS[el.dataset.action];
+  if (!handler) return;
+  e.preventDefault();
+  handler(el);
+});
+
+document.addEventListener('input', (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const handler = INPUT_ACTIONS[el.dataset.action];
+  if (handler) handler(el);
+});
+
+document.addEventListener('keydown', (e) => {
+  const el = e.target.closest('[data-action="messageInput"]');
+  if (el) handleKeyDown(e);
+});
+
 // ==================== СТАРТ ====================
 window.addEventListener('load', async () => {
   loadAppearance();

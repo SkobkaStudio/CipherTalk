@@ -118,6 +118,21 @@ class EncryptionService {
   hashToken(token) {
     return crypto.createHash('sha256').update(String(token)).digest('hex');
   }
+
+  /**
+   * Криптографически стойкие одноразовые коды (Math.random() предсказуем).
+   */
+  randomDigits(length = 6) {
+    const digits = [];
+    for (let i = 0; i < length; i++) {
+      digits.push(crypto.randomInt(0, 10));
+    }
+    return digits.join('');
+  }
+
+  randomBytes(length = 32) {
+    return crypto.randomBytes(length);
+  }
 }
 
 module.exports = new EncryptionService();

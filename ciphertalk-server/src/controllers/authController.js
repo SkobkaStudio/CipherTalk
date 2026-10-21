@@ -15,7 +15,36 @@ class AuthController {
     this.db = getDatabase();
     // phone -> timestamp последней отправки (rate limit на отправку SMS/кодов)
     this.sendCooldowns = new Map();
-    // ip-like keying could be better, but per-phone is fine
+    // ключ (телефон+IP) -> { count, first } — защита от перебора пароля и OTP
+    this.loginAttempts = new Map();
+  }
+
+  /**
+   * Ограничитель попыток: не больше maxAttempts за окно windowMs.
+   */
+  checkRateLimit(key, maxAttempts, windowMs) {
+    const now = Date.now();
+    const record = this.loginAttempts.get(key);
+    if (!record || now - record.first > windowMs) {
+      this.loginAttempts.set(key, { count: 1, first: now });
+      return { ok: true, remaining: maxAttempts - 1 };
+    }
+    record.count += 1;
+    if (record.count > maxAttempts) {
+      const waitMs = windowMs - (now - record.first);
+      return { ok: false, waitMs: Math.ceil(waitMs / 1000) };
+    }
+    return { ok: true, remaining: maxAttempts - record.count };
+  }
+
+  clearRateLimit(key) {
+    this.loginAttempts.delete(key);
+  }
+
+  clientKey(req, phone) {
+    const ip = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim()
+      || req.socket?.remoteAddress || 'unknown';
+    return `${phone}|${ip}`;
   }
 
   // 1. Отправка кода
@@ -40,7 +69,8 @@ class AuthController {
       }
       this.sendCooldowns.set(phone, Date.now());
 
-      const code = String(Math.floor(100000 + Math.random() * 900000));
+      // Криптографически стойкий код (Math.random() был предсказуем)
+      const code = encryptionService.randomDigits(6);
       const expiresAt = Date.now() + config.codeExpiryMinutes * 60 * 1000;
 
       this.db.deleteVerificationCode(phone);
@@ -82,6 +112,14 @@ class AuthController {
         return res.status(400).json({ error: 'Укажите номер и код' });
       }
 
+      const rlKey = this.clientKey(req, phone);
+      const rl = this.checkRateLimit(rlKey, config.codeMaxAttempts, 15 * 60 * 1000);
+      if (!rl.ok) {
+        return res.status(429).json({
+          error: `Слишком много попыток. Повторите через ${rl.waitMs} сек.`
+        });
+      }
+
       const records = this.db.findVerificationCode(phone);
       if (!records.length) {
         return res.status(400).json({ error: 'Неверный или просроченный код' });
@@ -100,6 +138,7 @@ class AuthController {
         return res.status(400).json({ error: 'Неверный или просроченный код' });
       }
 
+      this.clearRateLimit(rlKey);
       this.db.deleteVerificationCode(phone);
       const existingUser = this.db.findUserByPhone(phone);
 
@@ -131,7 +170,7 @@ class AuthController {
   // 3. Регистрация
   register(req, res) {
     try {
-      const { firstName, lastName, username, password, publicKey, verifyToken } = req.body;
+      const { firstName, lastName, username, password, publicKey, verifyToken, email } = req.body;
       const phone = String(req.body.phone || '').trim();
 
       // Телефон должен быть подтверждён кодом из SMS
@@ -156,9 +195,21 @@ class AuthController {
         return res.status(400).json({ error: 'Username уже занят' });
       }
 
+      let cleanEmail = '';
+      if (email) {
+        cleanEmail = String(email).trim().toLowerCase().slice(0, 120);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+          return res.status(400).json({ error: 'Некорректный email' });
+        }
+        if (this.db.users.some(u => (u.email || '').toLowerCase() === cleanEmail)) {
+          return res.status(400).json({ error: 'Email уже используется' });
+        }
+      }
+
       const user = new User({
         id: this.db.nextId('users'),
         phone,
+        email: cleanEmail,
         first_name: String(firstName).trim(),
         last_name: lastName ? String(lastName).trim() : '',
         username: String(username).replace(/^@/, '').toLowerCase(),
@@ -201,6 +252,18 @@ class AuthController {
       const phone = String(req.body.phone || '').trim();
       const { password, publicKey } = req.body;
 
+      if (!phone || !password) {
+        return res.status(400).json({ error: 'Укажите номер и пароль' });
+      }
+
+      const rlKey = this.clientKey(req, phone);
+      const rl = this.checkRateLimit(rlKey, config.loginMaxAttempts, 15 * 60 * 1000);
+      if (!rl.ok) {
+        return res.status(429).json({
+          error: `Слишком много попыток входа. Повторите через ${rl.waitMs} сек.`
+        });
+      }
+
       const user = this.db.findUserByPhone(phone);
       if (!user) {
         return res.status(404).json({ error: 'Пользователь не найден' });
@@ -211,6 +274,8 @@ class AuthController {
       if (!user.verifyPassword(password)) {
         return res.status(400).json({ error: 'Неверный пароль' });
       }
+
+      this.clearRateLimit(rlKey);
 
       if (typeof publicKey === 'string' && publicKey.length <= 4096) {
         user.public_key = publicKey;
@@ -267,6 +332,42 @@ class AuthController {
   logout(req, res) {
     sessionService.revokeToken(req.token);
     res.json({ success: true });
+  }
+
+  // 6b. Активные устройства (сессии)
+  listSessions(req, res) {
+    try {
+      const sessions = this.db.sessions
+        .filter(s => s.user_id === req.userId && !s.isExpired())
+        .map(s => ({
+          id: s.id,
+          current: s.token_hash === encryptionService.hashToken(req.token),
+          user_agent: s.user_agent,
+          created_at: s.created_at,
+          expires_at: s.expires_at
+        }))
+        .sort((a, b) => b.created_at - a.created_at);
+      res.json(sessions);
+    } catch (error) {
+      console.error('List sessions error:', error);
+      res.status(500).json({ error: 'Ошибка получения сессий' });
+    }
+  }
+
+  // 6c. Завершение сессии конкретного устройства
+  revokeSession(req, res) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const session = this.db.sessions.find(s => s.id === id && s.user_id === req.userId);
+      if (!session) {
+        return res.status(404).json({ error: 'Сессия не найдена' });
+      }
+      this.db.deleteSessionByHash(session.token_hash);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Revoke session error:', error);
+      res.status(500).json({ error: 'Ошибка завершения сессии' });
+    }
   }
 
   // 7. Проверка username

@@ -36,6 +36,7 @@ module.exports = {
   codeExpiryMinutes: parseInt(process.env.CODE_EXPIRY_MINUTES, 10) || 5,
   codeMaxAttempts: 5,
   sendCodeCooldownMs: 60000,
+  loginMaxAttempts: 8,
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   passwordMinLength: parseInt(process.env.PASSWORD_MIN_LENGTH, 10) || 6,
   usernameMinLength: parseInt(process.env.USERNAME_MIN_LENGTH, 10) || 3,

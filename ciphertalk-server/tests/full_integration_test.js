@@ -398,7 +398,11 @@ async function main() {
     await new Promise(r => setTimeout(r, 300));
     const hist3 = await request('GET', `/api/messages/${chatId}`, { token: A.token });
     const deleted = hist3.json.find(m => m.id === lastId);
-    assert(deleted && deleted.encrypted_content === 'Сообщение удалено', 'Удалённое сообщение: REST отдаёт заглушку, не содержимое');
+    // Сервер не знает содержимого и не подставляет текст — только флаг удаления.
+    // Плашку "Сообщение удалено" рисует клиент.
+    assert(deleted && deleted.deleted_for_all === 1, 'Удалённое сообщение помечено deleted_for_all');
+    assert(deleted.encrypted_content === '' && deleted.iv === '',
+      'Удалённое сообщение: сервер не отдаёт ни шифротекст, ни IV');
 
     // 13. Сессии: logout инвалидирует токен
     console.log('\n— Сессии / logout —');

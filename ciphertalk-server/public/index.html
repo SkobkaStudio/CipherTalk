@@ -1345,7 +1345,7 @@ html[data-glass="on"] .login-box {
         <label>Номер телефона</label>
         <input type="tel" id="phone-input" placeholder="+7 (999) 123-45-67" value="+7">
       </div>
-      <button class="btn" id="send-code-btn" onclick="step1Next()">Далее</button>
+      <button class="btn" id="send-code-btn" data-action="step1Next">Далее</button>
     </div>
 
     <div class="login-step" id="step-2" style="display:none">
@@ -1356,8 +1356,8 @@ html[data-glass="on"] .login-box {
         <input type="text" id="code-input" placeholder="123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" autofocus>
         <div class="input-hint info">Код отображается в консоли сервера</div>
       </div>
-      <button class="btn" onclick="step2Next()">Подтвердить</button>
-      <button class="btn btn-secondary" onclick="goToStep(1)">← Изменить номер</button>
+      <button class="btn" data-action="step2Next">Подтвердить</button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Изменить номер</button>
     </div>
 
     <div class="login-step" id="step-3-register" style="display:none">
@@ -1373,8 +1373,8 @@ html[data-glass="on"] .login-box {
           <input type="text" id="lastname-input" placeholder="Иванов">
         </div>
       </div>
-      <button class="btn" onclick="step3RegNext()">Далее</button>
-      <button class="btn btn-secondary" onclick="goToStep(1)">← Назад</button>
+      <button class="btn" data-action="step3RegNext">Далее</button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Назад</button>
     </div>
 
     <div class="login-step" id="step-3-login" style="display:none">
@@ -1383,10 +1383,10 @@ html[data-glass="on"] .login-box {
       <div class="input-group">
         <label>Пароль</label>
         <input type="password" id="password-input" placeholder="Ваш пароль">
-        <button class="password-toggle" onclick="togglePassword('password-input', this)">👁️</button>
+        <button class="password-toggle" data-action="togglePassword" data-target="password-input">👁️</button>
       </div>
-      <button class="btn" onclick="step3LoginNext()">Войти</button>
-      <button class="btn btn-secondary" onclick="goToStep(1)">← Назад</button>
+      <button class="btn" data-action="step3LoginNext">Войти</button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="1">← Назад</button>
     </div>
 
     <div class="login-step" id="step-4" style="display:none">
@@ -1394,11 +1394,11 @@ html[data-glass="on"] .login-box {
       <div class="step-description">Так другие смогут вас найти. Только латиница, цифры и _</div>
       <div class="input-group">
         <label>Username</label>
-        <input type="text" id="username-input" placeholder="ivan_ivanov" oninput="checkUsername()">
+        <input type="text" id="username-input" placeholder="ivan_ivanov" data-action="checkUsername">
         <div class="input-hint info" id="username-hint">Минимум 3 символа</div>
       </div>
-      <button class="btn" id="username-next-btn" onclick="step4Next()" disabled>Далее</button>
-      <button class="btn btn-secondary" onclick="goToStep(3)">← Назад</button>
+      <button class="btn" id="username-next-btn" data-action="step4Next" disabled>Далее</button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="3">← Назад</button>
     </div>
 
     <div class="login-step" id="step-5" style="display:none">
@@ -1406,16 +1406,16 @@ html[data-glass="on"] .login-box {
       <div class="step-description">Минимум 6 символов. Он понадобится для входа</div>
       <div class="input-group">
         <label>Пароль</label>
-        <input type="password" id="new-password-input" placeholder="Минимум 6 символов" oninput="checkPasswordStrength()">
-        <button class="password-toggle" onclick="togglePassword('new-password-input', this)">👁️</button>
+        <input type="password" id="new-password-input" placeholder="Минимум 6 символов" data-action="checkPasswordStrength">
+        <button class="password-toggle" data-action="togglePassword" data-target="new-password-input">👁️</button>
       </div>
       <div class="input-group">
         <label>Повторите пароль</label>
         <input type="password" id="confirm-password-input" placeholder="Повторите пароль">
-        <button class="password-toggle" onclick="togglePassword('confirm-password-input', this)">👁️</button>
+        <button class="password-toggle" data-action="togglePassword" data-target="confirm-password-input">👁️</button>
       </div>
-      <button class="btn" onclick="step5Next()">Завершить регистрацию</button>
-      <button class="btn btn-secondary" onclick="goToStep(4)">← Назад</button>
+      <button class="btn" data-action="step5Next">Завершить регистрацию</button>
+      <button class="btn btn-secondary" data-action="goToStep" data-step="4">← Назад</button>
     </div>
   </div>
 </div>
@@ -1424,7 +1424,7 @@ html[data-glass="on"] .login-box {
 <div id="app">
   <div class="app-container" id="app-container">
     
-    <div class="menu-backdrop" id="menu-backdrop" onclick="toggleMenu()"></div>
+    <div class="menu-backdrop" id="menu-backdrop" data-action="toggleMenu"></div>
     <div class="side-menu" id="side-menu">
       <div class="side-menu-header">
         <div class="side-menu-avatar" id="menu-avatar">U</div>
@@ -1433,27 +1433,27 @@ html[data-glass="on"] .login-box {
         <div class="side-menu-phone" id="menu-phone">+7...</div>
       </div>
       <div class="side-menu-items">
-        <button class="side-menu-item" onclick="openNewGroup()">
+        <button class="side-menu-item" data-action="openNewGroup">
           <span class="icon">👥</span> Новая группа
         </button>
-        <button class="side-menu-item" onclick="openNewChannel()">
+        <button class="side-menu-item" data-action="openNewChannel">
           <span class="icon">📢</span> Новый канал
         </button>
-        <button class="side-menu-item" onclick="openSearch()">
+        <button class="side-menu-item" data-action="openSearch">
           <span class="icon">🔍</span> Найти пользователя
         </button>
-        <button class="side-menu-item" onclick="openSavedMessages()">
+        <button class="side-menu-item" data-action="openSavedMessages">
           <span class="icon">⭐</span> Избранное
         </button>
         <div class="side-menu-divider"></div>
-        <button class="side-menu-item" onclick="openSettings()">
+        <button class="side-menu-item" data-action="openSettings">
           <span class="icon">⚙️</span> Настройки
         </button>
-        <button class="side-menu-item" onclick="showEncryptionInfo()">
+        <button class="side-menu-item" data-action="showEncryptionInfo">
           <span class="icon">🔐</span> О шифровании
         </button>
         <div class="side-menu-divider"></div>
-        <button class="side-menu-item" onclick="logout()" style="color: var(--danger)">
+        <button class="side-menu-item" data-action="logout" style="color: var(--danger)">
           <span class="icon">🚪</span> Выйти
         </button>
       </div>
@@ -1461,9 +1461,9 @@ html[data-glass="on"] .login-box {
 
     <div class="sidebar">
       <div class="sidebar-header">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
+        <button class="menu-btn" data-action="toggleMenu">☰</button>
         <div class="search-box">
-          <input type="text" placeholder="Поиск" id="sidebar-search" oninput="searchChats(this.value)">
+          <input type="text" placeholder="Поиск" id="sidebar-search" data-action="searchChats">
         </div>
       </div>
       <div class="chat-list" id="chat-list"></div>
@@ -1481,7 +1481,7 @@ html[data-glass="on"] .login-box {
 
       <div id="active-chat" style="display:none; flex-direction:column; height:100%">
         <div class="chat-header">
-          <button class="menu-btn back-btn" onclick="closeChat()">←</button>
+          <button class="menu-btn back-btn" data-action="closeChat">←</button>
           <div class="chat-avatar" id="chat-header-avatar">U</div>
           <div class="chat-header-info">
             <div class="chat-header-name-row">
@@ -1491,20 +1491,19 @@ html[data-glass="on"] .login-box {
             <div class="chat-header-status" id="chat-header-status">в сети</div>
           </div>
           <div class="chat-header-actions">
-            <button class="menu-btn" onclick="showChatInfo()" title="Инфо">ℹ️</button>
+            <button class="menu-btn" data-action="showChatInfo" title="Инфо">ℹ️</button>
           </div>
         </div>
 
         <div class="messages-container" id="messages-container"></div>
 
         <div class="input-area" id="input-area">
-          <button class="attach-btn" id="attach-btn" onclick="attachFile()" title="Прикрепить">📎</button>
+          <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить">📎</button>
           <textarea class="message-input" id="message-input" placeholder="Сообщение..." rows="1"
-            oninput="autoResize(this); handleTyping()" 
-            onkeydown="handleKeyDown(event)"></textarea>
-          <button class="attach-btn" id="voice-btn" onclick="toggleVoiceRecording()" title="Голосовое">🎤</button>
-          <button class="attach-btn" id="video-btn" onclick="toggleVideoRecording()" title="Видеосообщение">📹</button>
-          <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+            data-action="messageInput"></textarea>
+          <button class="attach-btn" id="voice-btn" data-action="toggleVoiceRecording" title="Голосовое">🎤</button>
+          <button class="attach-btn" id="video-btn" data-action="toggleVideoRecording" title="Видеосообщение">📹</button>
+          <button class="send-btn" id="send-btn" data-action="sendMessage">➤</button>
         </div>
       </div>
     </div>
@@ -1524,8 +1523,8 @@ html[data-glass="on"] .login-box {
     <p>Введите PIN-код для разблокировки</p>
     <input type="password" id="pin-lock-input" class="pin-input" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
     <div class="pin-error" id="pin-lock-error"></div>
-    <button class="btn" onclick="unlockWithPin()">Разблокировать</button>
-    <button class="btn btn-secondary" onclick="logout()">Выйти из аккаунта</button>
+    <button class="btn" data-action="unlockWithPin">Разблокировать</button>
+    <button class="btn btn-secondary" data-action="logout">Выйти из аккаунта</button>
   </div>
 </div>
 

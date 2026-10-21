@@ -1,4 +1,5 @@
 const { getDatabase } = require('../db/database');
+const { maskPhone, maskEmail } = require('../utils/mask');
 
 const MAX_AVATAR_BYTES = 1.5 * 1024 * 1024;
 
@@ -10,7 +11,10 @@ class ProfileController {
   // Обновление профиля (только своего — userId берётся из сессии)
   updateProfile(req, res) {
     try {
-      const { firstName, lastName, name, username, avatar, bio, publicKey, oldPassword, newPassword, hideOnline } = req.body;
+      const {
+        firstName, lastName, name, username, avatar, bio, publicKey,
+        oldPassword, newPassword, hideOnline, email
+      } = req.body;
       const user = this.db.findUserById(req.userId);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -37,6 +41,18 @@ class ProfileController {
           return res.status(400).json({ error: 'Username некорректный (3-32, латиница/цифры/_)' });
         }
         user.username = clean;
+      }
+
+      if (email !== undefined) {
+        const clean = String(email).trim().toLowerCase().slice(0, 120);
+        if (clean && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+          return res.status(400).json({ error: 'Некорректный email' });
+        }
+        const taken = this.db.users.some(u => u.id !== req.userId && (u.email || '').toLowerCase() === clean);
+        if (clean && taken) {
+          return res.status(400).json({ error: 'Email уже используется' });
+        }
+        user.email = clean;
       }
 
       if (bio !== undefined) {
@@ -83,31 +99,46 @@ class ProfileController {
       if (!user) {
         return res.status(404).json({ error: 'Пользователь не найден' });
       }
-      res.json(user.toSafeJSON());
+      const json = user.toSafeJSON();
+      // Чужой телефон скрываем — публичная карточка не должна светить номер.
+      if (user.id !== req.userId) {
+        json.phone = maskPhone(user.phone);
+        json.email = maskEmail(user.email);
+      }
+      res.json(json);
     } catch (error) {
       console.error('Get profile error:', error);
       res.status(500).json({ error: 'Ошибка получения профиля' });
     }
   }
 
-  // Поиск пользователей (кроме себя)
+  /**
+   * Поиск пользователей по username / email / телефону / имени.
+   * Регистр не учитывается. Телефон и email в выдаче маскируются.
+   */
   searchUsers(req, res) {
     try {
       const query = String(req.query.query || req.query.q || req.query.search || '').trim();
       if (!query) return res.json([]);
 
-      const q = query.toLowerCase().replace(/^@/, '');
-      if (q.length < 1) return res.json([]);
+      const q = query.toLowerCase().replace(/^@/, '').trim();
+      if (!q) return res.json([]);
+
+      const digits = q.replace(/\D/g, '');
       const users = this.db.users
         .filter(u => u.id !== req.userId && (
-          (u.name || '').toLowerCase().includes(q) ||
-          (u.phone || '').toLowerCase().includes(q) ||
           (u.username || '').toLowerCase().includes(q) ||
-          (u.email || '').toLowerCase().includes(q)
+          (u.email || '').toLowerCase().includes(q) ||
+          (u.name || '').toLowerCase().includes(q) ||
+          (u.first_name || '').toLowerCase().includes(q) ||
+          (u.last_name || '').toLowerCase().includes(q) ||
+          (digits.length >= 3 && (u.phone || '').replace(/\D/g, '').includes(digits))
         ))
         .slice(0, 50)
         .map(u => {
           const json = u.toSafeJSON();
+          json.phone = maskPhone(u.phone);
+          json.email = maskEmail(u.email);
           if (u.hide_online) json.online = 0;
           return json;
         });

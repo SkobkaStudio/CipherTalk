@@ -10,8 +10,15 @@ router.get('/chats', authMiddleware.authenticate, c.getUserChats.bind(c));
 router.get('/chats/:userId', authMiddleware.authenticate, c.getUserChats.bind(c));
 
 router.get('/messages/:chatId', authMiddleware.authenticate, c.getMessages.bind(c));
+router.get('/pinned/:chatId', authMiddleware.authenticate, c.getPinnedMessages.bind(c));
 
 router.post('/create-group', authMiddleware.authenticate, c.createGroup.bind(c));
 router.post('/add-member', authMiddleware.authenticate, c.addMember.bind(c));
+
+// Папки чатов
+router.get('/folders', authMiddleware.authenticate, c.getFolders.bind(c));
+router.post('/folders', authMiddleware.authenticate, c.createFolder.bind(c));
+router.put('/folders/:id', authMiddleware.authenticate, c.updateFolder.bind(c));
+router.delete('/folders/:id', authMiddleware.authenticate, c.deleteFolder.bind(c));
 
 module.exports = router;

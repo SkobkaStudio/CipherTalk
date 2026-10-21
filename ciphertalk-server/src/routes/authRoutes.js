@@ -18,5 +18,7 @@ router.get('/check-username', c.checkUsername.bind(c));
 // Требуют сессию
 router.get('/me', authMiddleware.authenticate, c.me.bind(c));
 router.post('/logout', authMiddleware.authenticate, c.logout.bind(c));
+router.get('/sessions', authMiddleware.authenticate, c.listSessions.bind(c));
+router.delete('/sessions/:id', authMiddleware.authenticate, c.revokeSession.bind(c));
 
 module.exports = router;

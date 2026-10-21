@@ -8,6 +8,7 @@ const { getDatabase } = require('./db/database');
 const WebSocketService = require('./services/websocketService');
 const uploadMiddleware = require('./middleware/upload');
 const authMiddleware = require('./middleware/auth');
+const securityHeaders = require('./middleware/security');
 const sessionService = require('./services/sessionService');
 const File = require('./models/File');
 
@@ -29,6 +30,8 @@ class App {
   }
 
   setupMiddleware() {
+    this.app.use(securityHeaders);
+
     // CORS: по умолчанию same-origin. Разрешаем список через CORS_ORIGIN.
     const allowedOrigins = (process.env.CORS_ORIGIN || '')
       .split(',')

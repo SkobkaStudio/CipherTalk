@@ -1,14 +1,15 @@
 const WebSocket = require('ws');
 const config = require('../config');
 const presenceService = require('./presenceService');
+const { maskPhone } = require('../utils/mask');
 const sessionService = require('./sessionService');
-const encryptionService = require('./encryptionService');
 const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 
 const MAX_SOCKETS_PER_USER = 20;
 const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video']);
+const MAX_CIPHERTEXT_CHARS = 400 * 1024;
 
 class WebSocketService {
   constructor(server) {
@@ -81,13 +82,20 @@ class WebSocketService {
       'typing': () => this.handleTyping(ws, msg),
       'add_member': () => this.handleAddMember(ws, msg),
       'remove_member': () => this.handleRemoveMember(ws, msg),
+      'set_role': () => this.handleSetRole(ws, msg),
       'set_public_key': () => this.handleSetPublicKey(ws, msg),
       'forward_message': () => this.handleForwardMessage(ws, msg),
       'pin_message': () => this.handlePinMessage(ws, msg),
       'unpin_message': () => this.handlePinMessage(ws, msg, true),
       'react_message': () => this.handleReactMessage(ws, msg),
       'read_messages': () => this.handleReadMessages(ws, msg),
-      'set_privacy': () => this.handleSetPrivacy(ws, msg)
+      'set_privacy': () => this.handleSetPrivacy(ws, msg),
+      'set_group_key': () => this.handleSetGroupKey(ws, msg),
+      'get_group_key': () => this.handleGetGroupKey(ws, msg),
+      'create_folder': () => this.handleCreateFolder(ws, msg),
+      'update_folder': () => this.handleUpdateFolder(ws, msg),
+      'delete_folder': () => this.handleDeleteFolder(ws, msg),
+      'set_chat_folder': () => this.handleSetChatFolder(ws, msg)
     };
 
     const handler = handlers[msg.type];
@@ -130,6 +138,7 @@ class WebSocketService {
     }
 
     this.send(ws, { type: 'chats', chats: this.getUserChatsWithDetails(auth.user.id) });
+    this.send(ws, { type: 'folders', folders: this.db.getFolders(auth.user.id) });
   }
 
   // ==================== HANDLERS ====================
@@ -273,22 +282,30 @@ class WebSocketService {
     if (!content) {
       return this.sendError(ws, 'bad_request', 'Пустое сообщение');
     }
-    if (content.length > config.maxMessageLength * 10) {
+    if (content.length > MAX_CIPHERTEXT_CHARS) {
       return this.sendError(ws, 'too_large', 'Слишком большое сообщение');
     }
 
     const type = ALLOWED_MESSAGE_TYPES.has(msg.msgType) ? msg.msgType : 'text';
     const now = Date.now();
-    const iv = typeof msg.iv === 'string' ? msg.iv.slice(0, 1024) : '';
+    const iv = typeof msg.iv === 'string' ? msg.iv.slice(0, 256) : '';
+    const header = typeof msg.header === 'string' ? msg.header.slice(0, 4096) : '';
+    const replyTo = Number.isInteger(Number(msg.replyTo)) && Number(msg.replyTo) > 0
+      ? Number(msg.replyTo)
+      : null;
+
     const message = new Message({
       id: this.db.nextId('messages'),
       chat_id: chatId,
       sender_id: currentUserId,
       encrypted_content: content,
       iv: iv,
+      header: header,
       type,
-      reply_to: Number.isInteger(msg.replyTo) ? msg.replyTo : null,
-      forwarded_from: Number.isInteger(msg.forwardedFrom) ? msg.forwardedFrom : null,
+      reply_to: replyTo,
+      forwarded_from: Number.isInteger(Number(msg.forwardedFrom)) && Number(msg.forwardedFrom) > 0
+        ? Number(msg.forwardedFrom)
+        : null,
       created_at: now
     });
     this.db.addMessage(message);
@@ -303,14 +320,18 @@ class WebSocketService {
         chatId: message.chat_id,
         senderId: message.sender_id,
         senderName: sender?.name || '',
+        senderAvatar: sender?.avatar || '',
         content,
         ciphertext: content,
         iv: message.iv,
+        header: message.header,
         type: message.type,
         replyTo: message.reply_to,
         forwardedFrom: message.forwarded_from,
         edited: message.edited,
         deletedForAll: message.deleted_for_all,
+        reactions: message.reactions,
+        pinned: message.pinned,
         createdAt: message.created_at
       }
     });
@@ -319,6 +340,8 @@ class WebSocketService {
       type: 'chat_updated',
       chatId,
       lastMessage: content,
+      lastMessageIv: message.iv,
+      lastMessageHeader: message.header,
       lastMessageType: type,
       lastMessageTime: now,
       lastSenderId: currentUserId,
@@ -342,12 +365,13 @@ class WebSocketService {
     }
 
     const content = typeof msg.content === 'string' ? msg.content : '';
-    if (!content || content.length > config.maxMessageLength * 10) {
+    if (!content || content.length > MAX_CIPHERTEXT_CHARS) {
       return this.sendError(ws, 'bad_request', 'Некорректный текст');
     }
 
     message.encrypted_content = content;
-    if (typeof msg.iv === 'string') message.iv = msg.iv.slice(0, 1024);
+    if (typeof msg.iv === 'string') message.iv = msg.iv.slice(0, 256);
+    if (typeof msg.header === 'string') message.header = msg.header.slice(0, 4096);
     message.edited = 1;
     this.db.markDirty();
 
@@ -357,6 +381,7 @@ class WebSocketService {
       content,
       ciphertext: content,
       iv: message.iv,
+      header: message.header,
       chatId: message.chat_id
     });
   }
@@ -372,24 +397,22 @@ class WebSocketService {
     }
 
     const chatId = message.chat_id;
-    if (forAll && message.sender_id !== currentUserId) {
+    const isOwn = message.sender_id === currentUserId;
+
+    if (forAll && !isOwn) {
       const cm = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === currentUserId);
       if (!cm || (cm.role !== 'owner' && cm.role !== 'admin')) {
-        return this.sendError(ws, 'forbidden', 'Можно удалять у всех только свои или админ может?');
+        return this.sendError(ws, 'forbidden', 'Удалять у всех могут только автор или администратор');
       }
     }
 
-    if (forAll && message.sender_id === currentUserId) {
+    if (forAll) {
+      // Помечаем удалённым для всех: сам шифротекст стираем с диска.
       message.deleted_for_all = 1;
-      this.db.markDirty();
-      presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
-        type: 'message_deleted',
-        messageId,
-        chatId,
-        forAll: true
-      });
-    } else if (forAll) {
-      message.deleted_for_all = 1;
+      message.encrypted_content = '';
+      message.iv = '';
+      message.header = '';
+      message.pinned = 0;
       this.db.markDirty();
       presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
         type: 'message_deleted',
@@ -398,7 +421,7 @@ class WebSocketService {
         forAll: true
       });
     } else {
-      if (message.sender_id !== currentUserId) {
+      if (!isOwn) {
         return this.sendError(ws, 'forbidden', 'Можно удалять только свои сообщения');
       }
       this.db.deleteMessage(messageId);
@@ -421,49 +444,56 @@ class WebSocketService {
     const chatMessages = this.db.messages
       .filter(m => m.chat_id === chatId)
       .slice(-limit)
-      .map(m => {
-        if (m.deleted_for_all) {
-          return {
-            id: m.id,
-            chat_id: m.chat_id,
-            sender_id: m.sender_id,
-            sender_name: '',
-            sender_avatar: '',
-            encrypted_content: 'Сообщение удалено',
-            iv: '',
-            type: 'text',
-            reply_to: m.reply_to,
-            forwarded_from: m.forwarded_from,
-            edited: 0,
-            deleted_for_all: 1,
-            reactions: m.reactions || {},
-            created_at: m.created_at
-          };
-        }
-        const sender = this.db.findUserById(m.sender_id);
-        const content = encryptionService.decryptMessage(m.encrypted_content);
-        const outContent = content === null ? m.encrypted_content : content;
-        return {
-          id: m.id,
-          chat_id: m.chat_id,
-          sender_id: m.sender_id,
-          sender_name: sender?.name || '',
-          sender_avatar: sender?.avatar || '',
-          encrypted_content: outContent,
-          content: outContent,
-          ciphertext: outContent,
-          iv: m.iv,
-          type: m.type,
-          reply_to: m.reply_to,
-          forwarded_from: m.forwarded_from,
-          edited: m.edited,
-          deleted_for_all: m.deleted_for_all || 0,
-          reactions: m.reactions || {},
-          created_at: m.created_at
-        };
-      });
+      .map(m => this.serializeMessage(m));
 
     this.send(ws, { type: 'messages', chatId, messages: chatMessages });
+  }
+
+  /**
+   * Сериализация сообщения для WebSocket. Сервер отдаёт шифротекст как есть.
+   */
+  serializeMessage(m) {
+    const sender = this.db.findUserById(m.sender_id);
+    if (m.deleted_for_all) {
+      return {
+        id: m.id,
+        chat_id: m.chat_id,
+        sender_id: m.sender_id,
+        sender_name: '',
+        sender_avatar: '',
+        encrypted_content: '',
+        iv: '',
+        header: '',
+        type: 'text',
+        reply_to: m.reply_to,
+        forwarded_from: m.forwarded_from,
+        edited: 0,
+        deleted_for_all: 1,
+        reactions: m.reactions || {},
+        pinned: 0,
+        created_at: m.created_at
+      };
+    }
+    return {
+      id: m.id,
+      chat_id: m.chat_id,
+      sender_id: m.sender_id,
+      sender_name: sender?.name || '',
+      sender_avatar: sender?.avatar || '',
+      encrypted_content: m.encrypted_content,
+      content: m.encrypted_content,
+      ciphertext: m.encrypted_content,
+      iv: m.iv,
+      header: m.header || '',
+      type: m.type,
+      reply_to: m.reply_to,
+      forwarded_from: m.forwarded_from,
+      edited: m.edited,
+      deleted_for_all: m.deleted_for_all || 0,
+      reactions: m.reactions || {},
+      pinned: m.pinned || 0,
+      created_at: m.created_at
+    };
   }
 
   handleTyping(ws, msg) {
@@ -521,6 +551,18 @@ class WebSocketService {
       chatId,
       members
     });
+
+    // Новому участнику отправляем текущий групповой ключ (он завёрнут лично для него).
+    const gk = this.db.findGroupKey(chatId);
+    if (gk && gk.wrapped[userId]) {
+      presenceService.sendToUser(userId, {
+        type: 'group_key',
+        chatId,
+        version: gk.version,
+        wrapped: { [userId]: gk.wrapped[userId] },
+        createdBy: gk.created_by
+      });
+    }
   }
 
   handleRemoveMember(ws, msg) {
@@ -575,11 +617,17 @@ class WebSocketService {
     }
   }
 
+  /**
+   * Пересылка сообщения.
+   * Сервер НЕ расшифровывает оригинал: клиент сам шифрует текст
+   * ключом целевого чата и присылает готовый шифротекст.
+   */
   handleForwardMessage(ws, msg) {
     const currentUserId = ws.userId;
     const fromChatId = Number(msg.fromChatId);
     const toChatId = Number(msg.toChatId);
     const messageId = Number(msg.messageId);
+
     if (!this.db.isChatMember(fromChatId, currentUserId) || !this.db.isChatMember(toChatId, currentUserId)) {
       return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
     }
@@ -587,23 +635,27 @@ class WebSocketService {
     if (!orig || orig.chat_id !== fromChatId) {
       return this.sendError(ws, 'not_found', 'Сообщение не найдено');
     }
-    const content = encryptionService.decryptMessage(orig.encrypted_content);
-    if (content === null) {
-      return this.sendError(ws, 'error', 'Не удалось расшифровать');
+
+    const content = typeof msg.content === 'string' ? msg.content : '';
+    if (!content || content.length > MAX_CIPHERTEXT_CHARS) {
+      return this.sendError(ws, 'bad_request', 'Некорректное содержимое для пересылки');
     }
+
     const now = Date.now();
     const message = new Message({
       id: this.db.nextId('messages'),
       chat_id: toChatId,
       sender_id: currentUserId,
-      encrypted_content: encryptionService.encryptMessage(content),
-      iv: orig.iv,
+      encrypted_content: content,
+      iv: typeof msg.iv === 'string' ? msg.iv.slice(0, 256) : '',
+      header: typeof msg.header === 'string' ? msg.header.slice(0, 4096) : '',
       type: orig.type,
       forwarded_from: orig.id,
       reply_to: null,
       created_at: now
     });
     this.db.addMessage(message);
+
     const sender = this.db.findUserById(currentUserId);
     const members = this.getChatMemberIds(toChatId);
     presenceService.sendToChatMembers(members, {
@@ -613,32 +665,230 @@ class WebSocketService {
         chatId: message.chat_id,
         senderId: message.sender_id,
         senderName: sender?.name || '',
+        senderAvatar: sender?.avatar || '',
         content,
+        ciphertext: content,
         iv: message.iv,
+        header: message.header,
         type: message.type,
         replyTo: null,
         forwardedFrom: orig.id,
         edited: 0,
+        deletedForAll: 0,
+        reactions: {},
+        pinned: 0,
         createdAt: message.created_at
       }
     });
+    presenceService.sendToChatMembers(members, {
+      type: 'chat_updated',
+      chatId: toChatId,
+      lastMessage: content,
+      lastMessageIv: message.iv,
+      lastMessageHeader: message.header,
+      lastMessageType: message.type,
+      lastMessageTime: now,
+      lastSenderId: currentUserId,
+      senderName: sender?.name
+    });
   }
 
+  /**
+   * Закрепление сообщения (только админ/владелец).
+   */
   handlePinMessage(ws, msg, unpin = false) {
     const chatId = Number(msg.chatId);
     const currentUserId = ws.userId;
+    const messageId = Number(msg.messageId);
+
     if (!this.db.isChatMember(chatId, currentUserId)) return this.sendError(ws, 'forbidden', 'Нет доступа');
+
+    const message = this.db.findMessageById(messageId);
+    if (!message || message.chat_id !== chatId) {
+      return this.sendError(ws, 'not_found', 'Сообщение не найдено');
+    }
+    if (message.deleted_for_all) {
+      return this.sendError(ws, 'bad_request', 'Сообщение удалено');
+    }
+
+    const myRole = this.checkRole(chatId, currentUserId);
+    const chat = this.db.findChatById(chatId);
+    const isPrivate = chat && chat.type === 'private';
+    if (!isPrivate && myRole !== 'owner' && myRole !== 'admin') {
+      return this.sendError(ws, 'forbidden', 'Закреплять сообщения могут только администраторы');
+    }
+
+    message.pinned = unpin ? 0 : 1;
+    this.db.markDirty();
+
+    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+      type: 'message_pinned',
+      messageId,
+      chatId,
+      pinned: !!message.pinned
+    });
+  }
+
+  /**
+   * Роли участников: owner / admin / member.
+   */
+  handleSetRole(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const userId = Number(msg.userId);
+    const role = ['owner', 'admin', 'member'].includes(msg.role) ? msg.role : 'member';
+    const currentUserId = ws.userId;
+
+    if (!this.db.isChatMember(chatId, currentUserId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
     const chat = this.db.findChatById(chatId);
     if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
     const myRole = this.checkRole(chatId, currentUserId);
-    if (myRole !== 'owner' && myRole !== 'admin') return this.sendError(ws, 'forbidden', 'Только админ/владелец');
-    chat.is_pinned = !unpin;
+    if (myRole !== 'owner' && myRole !== 'admin') {
+      return this.sendError(ws, 'forbidden', 'Недостаточно прав');
+    }
+    const target = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === userId);
+    if (!target) return this.sendError(ws, 'not_found', 'Участник не найден');
+    if (target.role === 'owner' && role !== 'owner') {
+      return this.sendError(ws, 'forbidden', 'Нельзя забрать права владельца');
+    }
+    if (role === 'owner' && myRole !== 'owner') {
+      return this.sendError(ws, 'forbidden', 'Передавать владение может только владелец');
+    }
+
+    target.role = role;
+    if (role === 'owner') {
+      const previousOwner = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id !== userId && m.role === 'owner');
+      if (previousOwner) previousOwner.role = 'admin';
+      chat.owner_id = userId;
+    }
     this.db.markDirty();
+
+    const members = this.getChatMembersWithDetails(chatId);
     presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
-      type: 'chat_pinned',
+      type: 'member_role_changed',
       chatId,
-      isPinned: chat.is_pinned
+      userId,
+      role,
+      members
     });
+  }
+
+  /**
+   * Публикация группового ключа.
+   * Клиент присылает только «завёрнутые» копии ключа (по одной на участника),
+   * сервер их пересылает и НИКОГДА не видит сам ключ группы.
+   */
+  handleSetGroupKey(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const currentUserId = ws.userId;
+
+    if (!this.db.isChatMember(chatId, currentUserId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+    const chat = this.db.findChatById(chatId);
+    if (!chat || chat.type === 'private' || chat.type === 'saved') {
+      return this.sendError(ws, 'bad_request', 'Групповой ключ применим только к группам и каналам');
+    }
+
+    const wrapped = msg.wrapped;
+    if (!wrapped || typeof wrapped !== 'object' || Array.isArray(wrapped)) {
+      return this.sendError(ws, 'bad_request', 'Некорректные wrapped-ключи');
+    }
+
+    const clean = {};
+    const members = new Set(this.getChatMemberIds(chatId));
+    for (const [userId, blob] of Object.entries(wrapped)) {
+      const uid = Number(userId);
+      if (!Number.isInteger(uid) || !members.has(uid)) continue;
+      if (!blob || typeof blob.iv !== 'string' || typeof blob.ct !== 'string') continue;
+      clean[uid] = { iv: blob.iv.slice(0, 256), ct: blob.ct.slice(0, 4096) };
+    }
+    if (!Object.keys(clean).length) {
+      return this.sendError(ws, 'bad_request', 'Пустой набор ключей');
+    }
+
+    const version = Number.isInteger(Number(msg.version)) ? Number(msg.version) : 1;
+    this.db.saveGroupKey(chatId, version, clean, currentUserId);
+
+    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
+      type: 'group_key',
+      chatId,
+      version,
+      wrapped: clean,
+      createdBy: currentUserId
+    });
+  }
+
+  handleGetGroupKey(ws, msg) {
+    const chatId = Number(msg.chatId);
+    if (!this.db.isChatMember(chatId, ws.userId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+    const record = this.db.findGroupKey(chatId);
+    this.send(ws, {
+      type: 'group_key',
+      chatId,
+      version: record?.version || 0,
+      wrapped: record?.wrapped || {},
+      createdBy: record?.created_by || 0
+    });
+  }
+
+  // ==================== ПАПКИ ====================
+  handleCreateFolder(ws, msg) {
+    const name = String(msg.name || '').trim();
+    if (!name) return this.sendError(ws, 'bad_request', 'Введите название папки');
+    const folder = this.db.createFolder(ws.userId, name, msg.emoji, msg.color);
+    this.send(ws, { type: 'folder_created', folder });
+  }
+
+  handleUpdateFolder(ws, msg) {
+    const id = Number(msg.id);
+    const patch = {};
+    if (msg.name !== undefined) patch.name = msg.name;
+    if (msg.emoji !== undefined) patch.emoji = msg.emoji;
+    if (msg.color !== undefined) patch.color = msg.color;
+    if (Array.isArray(msg.chat_ids)) patch.chat_ids = msg.chat_ids;
+    const folder = this.db.updateFolder(id, ws.userId, patch);
+    if (!folder) return this.sendError(ws, 'not_found', 'Папка не найдена');
+    this.send(ws, { type: 'folder_updated', folder });
+  }
+
+  handleDeleteFolder(ws, msg) {
+    const id = Number(msg.id);
+    if (!this.db.deleteFolder(id, ws.userId)) {
+      return this.sendError(ws, 'not_found', 'Папка не найдена');
+    }
+    this.db.chats.forEach(c => { if (c.folder_id === id) c.folder_id = null; });
+    this.db.markDirty();
+    this.send(ws, { type: 'folder_deleted', id });
+  }
+
+  handleSetChatFolder(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const folderId = msg.folderId === null || msg.folderId === undefined ? null : Number(msg.folderId);
+    if (!this.db.isChatMember(chatId, ws.userId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+    const chat = this.db.findChatById(chatId);
+    if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
+
+    if (folderId !== null) {
+      const folder = this.db.findFolderById(folderId);
+      if (!folder || folder.user_id !== ws.userId) {
+        return this.sendError(ws, 'not_found', 'Папка не найдена');
+      }
+      if (!folder.chat_ids.includes(chatId)) folder.chat_ids.push(chatId);
+    } else {
+      this.db.folders.forEach(f => {
+        f.chat_ids = f.chat_ids.filter(id => id !== chatId);
+      });
+    }
+    chat.folder_id = folderId;
+    this.db.markDirty();
+
+    this.send(ws, { type: 'chat_folder_changed', chatId, folderId });
   }
 
   handleReactMessage(ws, msg) {
@@ -795,7 +1045,8 @@ class WebSocketService {
   getChatWithDetails(chat, members) {
     const chatMessages = this.db.messages.filter(m => m.chat_id === chat.id);
     const lastMsg = chatMessages[chatMessages.length - 1];
-    const lastContent = lastMsg ? (lastMsg.deleted_for_all ? '' : (encryptionService.decryptMessage(lastMsg.encrypted_content) || lastMsg.encrypted_content)) : '';
+    // Никакой расшифровки на сервере — только шифротекст.
+    const lastContent = lastMsg && !lastMsg.deleted_for_all ? lastMsg.encrypted_content : '';
     const lastReadBy = {};
     this.db.chatMembers
       .filter(m => m.chat_id === chat.id)
@@ -803,7 +1054,9 @@ class WebSocketService {
     return {
       ...(chat.toJSON ? chat.toJSON() : chat),
       members,
-      last_message: lastContent === null ? '' : lastContent,
+      last_message: lastContent || '',
+      last_message_iv: lastMsg && !lastMsg.deleted_for_all ? lastMsg.iv : '',
+      last_message_header: lastMsg && !lastMsg.deleted_for_all ? (lastMsg.header || '') : '',
       last_message_type: lastMsg?.type || null,
       last_message_time: lastMsg?.created_at || 0,
       last_sender_id: lastMsg?.sender_id || 0,
@@ -817,27 +1070,29 @@ class WebSocketService {
       .map(cm => {
         const chat = this.db.findChatById(cm.chat_id);
         if (!chat) return null;
-        const details = this.getChatWithDetails(chat, this.getChatMembersWithDetails(chat.id));
+        const details = this.getChatWithDetails(chat, this.getChatMembersWithDetails(chat.id, userId));
         return { ...details, role: cm.role };
       })
       .filter(Boolean)
       .sort((a, b) => b.last_message_time - a.last_message_time);
   }
 
-  getChatMembersWithDetails(chatId) {
+  getChatMembersWithDetails(chatId, requesterId = null) {
     return this.db.chatMembers
       .filter(m => m.chat_id === chatId)
       .map(m => {
         const u = this.db.findUserById(m.user_id);
         if (!u) return null;
+        const isSelf = requesterId === null || u.id === requesterId;
         return {
           id: u.id,
           name: u.name,
           firstName: u.first_name,
           lastName: u.last_name,
-          phone: u.phone,
+          phone: isSelf ? u.phone : maskPhone(u.phone),
           username: u.username,
           avatar: u.avatar,
+          bio: u.bio || '',
           public_key: u.public_key,
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,

@@ -6,3 +6,8 @@ ciphertalk-server/uploads/*
 !ciphertalk-server/uploads/.gitkeep
 *.log
 .DS_Store
+
+# Тестовые артефакты
+ciphertalk-server/test-*-db.json
+ciphertalk-server/test-*-uploads/
+ciphertalk-server/test-*.key

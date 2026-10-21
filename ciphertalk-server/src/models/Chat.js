@@ -8,6 +8,7 @@ class Chat {
     this.owner_id = data.owner_id || null;
     this.is_pinned = data.is_pinned || false;
     this.is_channel = data.is_channel || (this.type === 'channel') || false;
+    this.folder_id = data.folder_id === undefined ? null : data.folder_id;
     this.created_at = data.created_at || Date.now();
   }
 
@@ -21,6 +22,7 @@ class Chat {
       owner_id: this.owner_id,
       is_pinned: this.is_pinned,
       is_channel: this.is_channel,
+      folder_id: this.folder_id,
       created_at: this.created_at
     };
   }
