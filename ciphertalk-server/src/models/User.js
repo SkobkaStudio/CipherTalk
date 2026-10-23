@@ -1,4 +1,5 @@
 const encryptionService = require('../services/encryptionService');
+const { isOwnerPhone } = require('../utils/owner');
 
 class User {
   constructor(data) {
@@ -16,7 +17,13 @@ class User {
     this.online = data.online || 0;
     this.last_seen = data.last_seen || 0;
     this.hide_online = data.hide_online || 0;
+    this.is_owner = isOwnerPhone(this.phone) ? 1 : 0;
     this.created_at = data.created_at || Date.now();
+  }
+
+  /** Аккаунт создателя CipherTalk (телефон из OWNER_PHONE). */
+  isOwner() {
+    return isOwnerPhone(this.phone);
   }
 
   // Единый источник хеширования паролей (AES-независимо, PBKDF2-SHA512)
@@ -52,6 +59,7 @@ class User {
       online: this.online,
       last_seen: this.last_seen,
       hide_online: this.hide_online || 0,
+      is_owner: isOwnerPhone(this.phone) ? 1 : 0,
       created_at: this.created_at
     };
   }

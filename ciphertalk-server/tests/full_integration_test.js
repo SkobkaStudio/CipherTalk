@@ -16,8 +16,14 @@ const path = require('path');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 
+// Подчистка от прошлых прогонов ДО загрузки App (иначе SQLite уже открыта).
+for (const f of ['test-integration-db.json', 'test-integration-db.json.key', 'test-integration-db.json.tmp', 'test-integration-db.json.dbkey', 'test-integration-db.sqlite', 'test-integration-db.sqlite-wal', 'test-integration-db.sqlite-shm']) {
+  try { fs.unlinkSync(path.join(__dirname, '..', f)); } catch (e) {}
+}
+
 // Перехватываем OTP: подменяем sendCode, чтобы код попал в переменную
 const smsService = require('../src/services/smsService');
+const dbEncryptionService = require('../src/services/dbEncryptionService');
 let lastOtp = null;
 smsService.sendCode = async (phone, code) => { lastOtp = code; return { success: true }; };
 
@@ -178,11 +184,6 @@ async function registerUser(phone, username, firstName) {
 async function main() {
   console.log('=== CipherTalk Full Integration Test ===\n');
 
-  // Подчистка от прошлых прогонов
-  for (const f of ['test-integration-db.json', 'test-integration-db.json.key', 'test-integration-db.json.tmp']) {
-    try { fs.unlinkSync(path.join(__dirname, '..', f)); } catch (e) {}
-  }
-
   const app = new App();
   const server = app.start();
   await new Promise(r => setTimeout(r, 800));
@@ -247,10 +248,10 @@ async function main() {
     assert(!!selfA, 'A тоже получил эхо своего сообщения');
 
     // Сервер хранит только шифротекст
-    await new Promise(r => setTimeout(r, 400)); // ждём debounce-сохранение БД
-    const dbRaw = fs.readFileSync(path.join(__dirname, '..', 'test-integration-db.json'), 'utf8');
-    assert(!dbRaw.includes(secretText), 'На диске БД нет открытого текста (только шифротекст CTV1)');
-    assert(dbRaw.includes('CTV1.') || dbRaw.includes(enc.content.slice(0, 20)), 'В БД лежит шифротекст');
+    await new Promise(r => setTimeout(r, 800));
+    const dbFile = path.join(__dirname, '..', 'test-integration-db.sqlite');
+    const dbRaw = fs.readFileSync(dbFile);
+    assert(!dbRaw.includes(Buffer.from(secretText)), 'На диске SQLite БД нет открытого текста');
 
     // REST history: должен отдать шифротекст (E2EE), не plaintext
     const hist = await request('GET', `/api/messages/${chatId}`, { token: B.token });
@@ -453,7 +454,7 @@ async function main() {
 
     // 16. Персистентность пароля: password_hash выживает в БД и не утекает в API
     console.log('\n— Персистентность пароля —');
-    const dbObj = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test-integration-db.json'), 'utf8'));
+    const dbMod = require('../src/db/database'); const dbInst = dbMod.getDatabase(); const dbObj = { users: dbInst.users.map(u=>u.toJSON?u.toJSON():u) };
     const userA = dbObj.users.find(u => u.id === A.user.id);
     assert(userA && typeof userA.password_hash === 'string' && userA.password_hash.length > 0,
       'password_hash сохраняется в БД (не стирается toJSON)');

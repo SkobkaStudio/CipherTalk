@@ -42,9 +42,14 @@ class AuthController {
   }
 
   clientKey(req, phone) {
-    const ip = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim()
-      || req.socket?.remoteAddress || 'unknown';
+    // req.ip учитывает trust proxy. X-Forwarded-For нельзя брать напрямую:
+    // клиент может подставить заголовок и обойти rate limit.
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     return `${phone}|${ip}`;
+  }
+
+  normalizeUsername(value) {
+    return String(value || '').replace(/^@/, '').trim().toLowerCase();
   }
 
   // 1. Отправка кода
@@ -73,6 +78,19 @@ class AuthController {
       const code = encryptionService.randomDigits(6);
       const expiresAt = Date.now() + config.codeExpiryMinutes * 60 * 1000;
 
+      // Сначала отправляем код: если провайдер недоступен, код не создаём,
+      // иначе пользователь получил бы «код отправлен», которого никто не отправил.
+      try {
+        await smsService.sendCode(phone, code);
+      } catch (e) {
+        console.error('Ошибка отправки SMS:', e.message);
+        // Не засчитываем cooldown: пользователь должен иметь право повторить сразу.
+        this.sendCooldowns.delete(phone);
+        return res.status(503).json({
+          error: 'Не удалось отправить код. Попробуйте позже или используйте другой способ входа.'
+        });
+      }
+
       this.db.deleteVerificationCode(phone);
       this.db.verificationCodes.push(new VerificationCode({
         phone,
@@ -81,18 +99,7 @@ class AuthController {
       }));
       this.db.markDirty();
 
-      // Пытаемся отправить через smsService, но главное - вывести в терминал
-      try {
-        await smsService.sendCode(phone, code);
-      } catch (e) {
-        // ignore
-      }
-
-      console.log('\n' + '='.repeat(60));
-      console.log('[MANUAL OTP] Code: ' + code);
-      console.log('Phone: ' + phone);
-      console.log('Expires in ' + config.codeExpiryMinutes + ' min');
-      console.log('='.repeat(60) + '\n');
+      console.log(`📨 Код подтверждения отправлен (${smsService.provider}) на ${phone}`);
 
       const existingUser = this.db.findUserByPhone(phone);
       res.json({ success: true, message: 'Код отправлен', exists: !!existingUser });
@@ -170,8 +177,9 @@ class AuthController {
   // 3. Регистрация
   register(req, res) {
     try {
-      const { firstName, lastName, username, password, publicKey, verifyToken, email } = req.body;
+      const { firstName, lastName, password, publicKey, verifyToken, email } = req.body;
       const phone = String(req.body.phone || '').trim();
+      const username = this.normalizeUsername(req.body.username);
 
       // Телефон должен быть подтверждён кодом из SMS
       const proof = this.consumeRegisterProof(phone, verifyToken);
@@ -182,8 +190,10 @@ class AuthController {
       if (!firstName || String(firstName).trim().length < 2) {
         return res.status(400).json({ error: 'Имя обязательно (минимум 2 символа)' });
       }
-      if (!username || username.length < config.usernameMinLength) {
-        return res.status(400).json({ error: `Username минимум ${config.usernameMinLength} символов` });
+      if (!new RegExp(`^[a-z0-9_]{${config.usernameMinLength},32}$`).test(username)) {
+        return res.status(400).json({
+          error: `Username ${config.usernameMinLength}-32 символа: латиница, цифры и _`
+        });
       }
       if (!password || password.length < config.passwordMinLength) {
         return res.status(400).json({ error: `Пароль минимум ${config.passwordMinLength} символов` });
@@ -212,7 +222,7 @@ class AuthController {
         email: cleanEmail,
         first_name: String(firstName).trim(),
         last_name: lastName ? String(lastName).trim() : '',
-        username: String(username).replace(/^@/, '').toLowerCase(),
+        username,
         public_key: typeof publicKey === 'string' ? publicKey.slice(0, 4096) : ''
       });
       user.setPassword(password);

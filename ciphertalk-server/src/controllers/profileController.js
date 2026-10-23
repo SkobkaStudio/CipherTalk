@@ -8,7 +8,9 @@ class ProfileController {
     this.db = getDatabase();
   }
 
-  // Обновление профиля (только своего — userId берётся из сессии)
+  // Обновление профиля (только своего — userId берётся из сессии).
+  // Сначала валидируем все поля, потом применяем: при ошибке профиль
+  // не должен остаться частично изменённым.
   updateProfile(req, res) {
     try {
       const {
@@ -20,27 +22,29 @@ class ProfileController {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      if (hideOnline !== undefined) {
-        user.hide_online = hideOnline ? 1 : 0;
-      }
+      const updates = {};
 
-      if (firstName !== undefined) user.first_name = String(firstName).trim().slice(0, 60);
-      if (lastName !== undefined) user.last_name = String(lastName).trim().slice(0, 60);
+      if (firstName !== undefined) {
+        const clean = String(firstName).trim().slice(0, 60);
+        if (clean.length < 2) return res.status(400).json({ error: 'Имя минимум 2 символа' });
+        updates.first_name = clean;
+      }
+      if (lastName !== undefined) updates.last_name = String(lastName).trim().slice(0, 60);
       if (name !== undefined) {
-        user.name = String(name).trim().slice(0, 120);
-      } else if (firstName !== undefined || lastName !== undefined) {
-        user.name = user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name;
+        const clean = String(name).trim().slice(0, 120);
+        if (!clean) return res.status(400).json({ error: 'Имя не может быть пустым' });
+        updates.name = clean;
       }
 
       if (username !== undefined) {
-        const clean = String(username).replace(/^@/, '').toLowerCase();
+        const clean = String(username).replace(/^@/, '').trim().toLowerCase();
+        if (!/^[a-z0-9_]{3,32}$/.test(clean)) {
+          return res.status(400).json({ error: 'Username некорректный (3-32, латиница/цифры/_)' });
+        }
         if (this.db.isUsernameTaken(clean, req.userId)) {
           return res.status(400).json({ error: 'Username занят' });
         }
-        if (clean && !/^[a-z0-9_]{3,32}$/.test(clean)) {
-          return res.status(400).json({ error: 'Username некорректный (3-32, латиница/цифры/_)' });
-        }
-        user.username = clean;
+        updates.username = clean;
       }
 
       if (email !== undefined) {
@@ -48,29 +52,25 @@ class ProfileController {
         if (clean && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
           return res.status(400).json({ error: 'Некорректный email' });
         }
-        const taken = this.db.users.some(u => u.id !== req.userId && (u.email || '').toLowerCase() === clean);
-        if (clean && taken) {
-          return res.status(400).json({ error: 'Email уже используется' });
-        }
-        user.email = clean;
+        const taken = clean && this.db.users.some(u => u.id !== req.userId && (u.email || '').toLowerCase() === clean);
+        if (taken) return res.status(400).json({ error: 'Email уже используется' });
+        updates.email = clean;
       }
 
-      if (bio !== undefined) {
-        user.bio = String(bio).trim().slice(0, 500);
-      }
+      if (bio !== undefined) updates.bio = String(bio).trim().slice(0, 500);
 
       if (avatar !== undefined) {
         if (!this.isValidAvatar(avatar)) {
           return res.status(400).json({ error: 'Некорректное изображение профиля' });
         }
-        user.avatar = avatar;
+        updates.avatar = avatar;
       }
 
       if (publicKey !== undefined) {
         if (typeof publicKey !== 'string' || publicKey.length > 4096) {
           return res.status(400).json({ error: 'Некорректный public key' });
         }
-        user.public_key = publicKey;
+        updates.public_key = publicKey;
       }
 
       if (newPassword || oldPassword) {
@@ -80,8 +80,17 @@ class ProfileController {
         if (!user.verifyPassword(oldPassword)) {
           return res.status(400).json({ error: 'Неверный текущий пароль' });
         }
-        user.setPassword(newPassword);
       }
+
+      // Валидация пройдена — применяем изменения атомарно.
+      Object.assign(user, updates);
+      if (updates.first_name !== undefined || updates.last_name !== undefined) {
+        if (name === undefined) {
+          user.name = user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name;
+        }
+      }
+      if (hideOnline !== undefined) user.hide_online = hideOnline ? 1 : 0;
+      if (newPassword || oldPassword) user.setPassword(newPassword);
 
       this.db.markDirty();
       res.json({ success: true, user: user.toSafeJSON() });

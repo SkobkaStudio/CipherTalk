@@ -1,7 +1,22 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 process.env.PORT = '3498';
 process.env.DB_FILE = './test-smoke-db.json';
 process.env.UPLOADS_DIR = './test-smoke-uploads';
+
+// Удаляем остатки прошлого прогона до загрузки приложения:
+// sessionService создаёт БД при require, и старый зашифрованный файл без ключа
+// приводит к fail-closed.
+for (const name of [
+  'test-smoke-db.json', 'test-smoke-db.json.dbkey', 'test-smoke-db.json.tmp',
+  'test-smoke-db.sqlite', 'test-smoke-db.sqlite-wal', 'test-smoke-db.sqlite-shm',
+  'test-smoke-db.sqlite.dbkey'
+]) {
+  try { fs.unlinkSync(path.join(__dirname, '..', name)); } catch (e) { /* ignore */ }
+}
+try { fs.rmSync(path.join(__dirname, '..', 'test-smoke-uploads'), { recursive: true, force: true }); } catch (e) { /* ignore */ }
+
 const App = require('../src/app');
 
 jest.setTimeout(15000);

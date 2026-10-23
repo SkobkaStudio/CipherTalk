@@ -10,6 +10,9 @@ const uploadMiddleware = require('./middleware/upload');
 const authMiddleware = require('./middleware/auth');
 const securityHeaders = require('./middleware/security');
 const sessionService = require('./services/sessionService');
+const iceService = require('./services/iceService');
+const tunnelService = require('./services/tunnelService');
+const qrService = require('./services/qrService');
 const File = require('./models/File');
 
 // Роуты
@@ -30,6 +33,12 @@ class App {
   }
 
   setupMiddleware() {
+    // За обратным прокси включается явно через TRUST_PROXY (число хопов).
+    if (process.env.TRUST_PROXY) {
+      const hops = Number(process.env.TRUST_PROXY);
+      this.app.set('trust proxy', Number.isInteger(hops) && hops > 0 ? hops : 1);
+    }
+
     this.app.use(securityHeaders);
 
     // CORS: по умолчанию same-origin. Разрешаем список через CORS_ORIGIN.
@@ -39,7 +48,8 @@ class App {
       .filter(Boolean);
 
     this.app.use(cors({
-      origin: allowedOrigins.length ? allowedOrigins : true,
+      // Без CORS_ORIGIN браузерный cross-origin доступ запрещён (same-origin).
+      origin: allowedOrigins.length ? allowedOrigins : false,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
     }));
@@ -103,12 +113,55 @@ class App {
 
     // Health check
     this.app.get('/api/health', (req, res) => {
+      const tunnel = tunnelService.getState();
       res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
         users: this.db.users.length,
         chats: this.db.chats.length,
-        messages: this.db.messages.length
+        messages: this.db.messages.length,
+        publicUrl: tunnel.available ? tunnel.url : null
+      });
+    });
+
+    // Публичный адрес мессенджера: чтобы открыть его с любого устройства
+    // и любой сети. Данные не секретные — только адрес входа.
+    this.app.get('/api/public-url', (req, res) => {
+      const tunnel = tunnelService.getState();
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        url: tunnel.available ? tunnel.url : null,
+        mode: tunnel.mode,
+        updatedAt: tunnel.updatedAt,
+        available: tunnel.available
+      });
+    });
+
+    // QR-код с адресом входа: отсканировать камерой телефона и открыть
+    // мессенджер с любого устройства и любой сети.
+    this.app.get('/api/public-url/qr.svg', (req, res) => {
+      const tunnel = tunnelService.getState();
+      if (!tunnel.available) {
+        return res.status(503).type('text/plain').send('Туннель не запущен');
+      }
+      try {
+        const svg = qrService.qrSvg(tunnel.url, { ec: 'M', quiet: 3 });
+        res.set('Cache-Control', 'no-store');
+        res.type('image/svg+xml').send(svg);
+      } catch (e) {
+        res.status(500).type('text/plain').send('Не удалось построить QR');
+      }
+    });
+
+    // ICE-серверы для WebRTC: клиент получает STUN и (если настроен) TURN
+    // с одноразовыми учётными данными (пароль TURN-сервера не раскрывается).
+    // Доступ только авторизованным: иначе анонимы могли бы злоупотреблять
+    // ретрансляцией через TURN.
+    this.app.get('/api/ice-servers', authMiddleware.authenticate, (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        iceServers: iceService.getIceServers(),
+        turnAvailable: iceService.hasTurn()
       });
     });
 
@@ -127,6 +180,7 @@ class App {
     this.wsService = new WebSocketService(this.server);
     this.wsService.startHeartbeat();
     this.wsService.startOnlinePing();
+    this.wsService.startExpirySweep();
   }
 
   setupErrorHandling() {
@@ -180,7 +234,7 @@ class App {
 
     this.server.listen(PORT, () => {
       console.log(`\n🚀 CipherTalk сервер запущен на порту ${PORT}`);
-      console.log(`📦 База данных: ${config.dbFile}`);
+      console.log(`📦 База данных: ${config.dbFile.replace(/\.json$/, '.sqlite')}${config.dbEncryption ? ' (SQLCipher)' : ''}`);
       console.log(`📁 Загрузки: ${config.uploadsPath}`);
       console.log(`🖥️  Клиент: http://localhost:${PORT}/`);
       console.log(`🌐 API: http://localhost:${PORT}/api/`);

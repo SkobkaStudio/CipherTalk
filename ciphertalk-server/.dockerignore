@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.env
+*.log
+*.key
+*.jwt-secret
+*.dbkey
+*-db.json
+test-*
+tests
+uploads
+.git
+.gitignore
+Dockerfile
+docker-compose.yml

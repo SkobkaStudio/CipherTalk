@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CipherTalk — КипяТок</title>
 <link rel="stylesheet" href="/features.css">
+<link rel="stylesheet" href="/motion.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#17212b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+<link rel="apple-touch-icon" href="/icons/icon.svg">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -24,10 +31,22 @@
   --success: #4caf50;
   --online: #4caf50;
   --sidebar-width: 380px;
+  --accent-2: #3a7bd5;
+  --glass-rgb: 20, 30, 44;
+  --glass-blur: 14px;
+  --glass-alpha: 0.55;
+  --glass-saturate: 140%;
+  --glow-strength: 0px;
+  --radius: 12px;
+  --msg-font-size: 14px;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --msg-font-family: var(--font-family);
+  --msg-font-weight: 400;
+  --msg-line-height: 1.45;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   background: var(--bg-primary);
   color: var(--text-primary);
   height: 100vh;
@@ -237,13 +256,15 @@ body {
   outline: none;
 }
 
-.search-box::before {
-  content: '🔍';
+.search-box .mq-icon {
   position: absolute;
   left: 11px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 13px;
+  width: 14px;
+  height: 14px;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .chat-list {
@@ -373,14 +394,15 @@ body {
 }
 
 .message {
-  max-width: 75%;
-  padding: 7px 11px;
+  max-width: 78%;
+  width: fit-content;
+  padding: 8px 12px;
   border-radius: 12px;
   position: relative;
   word-wrap: break-word;
-  animation: msgIn 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
-  transition: background-color 0.15s ease;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  animation: messageSlide 0.2s ease-out;
 }
 
 @keyframes msgIn {
@@ -391,13 +413,13 @@ body {
 .message.in {
   background: var(--bg-message-in);
   align-self: flex-start;
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: calc(var(--radius, 12px) * 0.34);
 }
 
 .message.out {
   background: var(--bg-message-out);
   align-self: flex-end;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: calc(var(--radius, 12px) * 0.34);
 }
 
 /* Telegram-подобные «хвостики» у последнего сообщения в группе */
@@ -446,7 +468,7 @@ body {
   margin-bottom: 2px;
 }
 
-.message-text { font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+.message-text { font-size: 14px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 
 .message-meta {
   display: flex;
@@ -541,6 +563,7 @@ body {
 
 .message-input {
   flex: 1;
+  min-width: 0;
   background: var(--bg-primary);
   border: none;
   border-radius: 20px;
@@ -1045,9 +1068,11 @@ body {
 
 /* ==================== ТЕМЫ ==================== */
 /* Пресеты переопределяют CSS-переменные. Тёмная — базовая. */
-html[data-theme="dark"] { /* базовые значения из :root */ }
+html[data-theme="dark"] { --glass-rgb: 20, 30, 44; }
 
 html[data-theme="cyberpunk"] {
+  --glass-rgb: 24, 11, 46;
+  --accent-2: #ff2e97;
   --bg-primary: #0d0221;
   --bg-secondary: #180b2e;
   --bg-chat: #0d0221;
@@ -1063,6 +1088,8 @@ html[data-theme="cyberpunk"] {
 }
 
 html[data-theme="neon"] {
+  --glass-rgb: 10, 15, 28;
+  --accent-2: #00b4ff;
   --bg-primary: #05070d;
   --bg-secondary: #0a0f1c;
   --bg-chat: #05070d;
@@ -1078,6 +1105,8 @@ html[data-theme="neon"] {
 }
 
 html[data-theme="amoled"] {
+  --glass-rgb: 0, 0, 0;
+  --accent-2: #1a3a5c;
   --bg-primary: #000000;
   --bg-secondary: #0a0a0a;
   --bg-chat: #000000;
@@ -1105,6 +1134,8 @@ html[data-theme="amoled"] .login-box h1 { background: linear-gradient(135deg, #f
 html[data-theme="amoled"] .message.out .message-meta { color: rgba(255,255,255,0.6); }
 
 html[data-theme="light"] {
+  --glass-rgb: 255, 255, 255;
+  --accent-2: #2b7fd4;
   --bg-primary: #ffffff;
   --bg-secondary: #f2f4f7;
   --bg-chat: #e7ecf2;
@@ -1117,6 +1148,125 @@ html[data-theme="light"] {
   --border: #d6dde5;
   --hover: #e6ebf1;
   --online: #28a745;
+}
+
+html[data-theme="dracula"] {
+  --glass-rgb: 40, 42, 54;
+  --accent-2: #ff79c6;
+  --bg-primary: #282a36;
+  --bg-secondary: #21222c;
+  --bg-chat: #282a36;
+  --bg-message-in: #343746;
+  --bg-message-out: #44475a;
+  --text-primary: #f8f8f2;
+  --text-secondary: #9aa0b5;
+  --accent: #bd93f9;
+  --accent-hover: #a579ef;
+  --border: #44475a;
+  --hover: #343746;
+  --online: #50fa7b;
+}
+
+html[data-theme="nord"] {
+  --glass-rgb: 46, 52, 64;
+  --accent-2: #88c0d0;
+  --bg-primary: #2e3440;
+  --bg-secondary: #272c36;
+  --bg-chat: #2e3440;
+  --bg-message-in: #3b4252;
+  --bg-message-out: #4c566a;
+  --text-primary: #eceff4;
+  --text-secondary: #a3abb8;
+  --accent: #88c0d0;
+  --accent-hover: #6fa9ba;
+  --border: #434c5e;
+  --hover: #3b4252;
+  --online: #a3be8c;
+}
+
+html[data-theme="mono"] {
+  --glass-rgb: 20, 20, 20;
+  --accent-2: #4d4d4d;
+  --bg-primary: #141414;
+  --bg-secondary: #0d0d0d;
+  --bg-chat: #141414;
+  --bg-message-in: #202020;
+  --bg-message-out: #3a3a3a;
+  --text-primary: #e6e6e6;
+  --text-secondary: #8a8a8a;
+  --accent: #e6e6e6;
+  --accent-hover: #cccccc;
+  --border: #2a2a2a;
+  --hover: #202020;
+  --online: #bdbdbd;
+}
+
+html[data-theme="rose"] {
+  --glass-rgb: 26, 16, 22;
+  --accent-2: #ff6fae;
+  --bg-primary: #1a1016;
+  --bg-secondary: #140b11;
+  --bg-chat: #1a1016;
+  --bg-message-in: #2b1a24;
+  --bg-message-out: #a83c6d;
+  --text-primary: #ffe9f3;
+  --text-secondary: #c494ad;
+  --accent: #ff6fae;
+  --accent-hover: #f0589c;
+  --border: #3d2432;
+  --hover: #2b1a24;
+  --online: #ff9ec8;
+}
+
+html[data-theme="ice"] {
+  --glass-rgb: 11, 26, 36;
+  --accent-2: #5ec8f0;
+  --bg-primary: #0b1a24;
+  --bg-secondary: #07131b;
+  --bg-chat: #0b1a24;
+  --bg-message-in: #132b3a;
+  --bg-message-out: #1e5f7d;
+  --text-primary: #eaf9ff;
+  --text-secondary: #8fb7c9;
+  --accent: #5ec8f0;
+  --accent-hover: #43b4de;
+  --border: #1a3a4d;
+  --hover: #132b3a;
+  --online: #7ff0d0;
+}
+
+html[data-theme="sunset"] {
+  --glass-rgb: 26, 15, 30;
+  --accent-2: #ff7849;
+  --bg-primary: #1a0f1e;
+  --bg-secondary: #130a17;
+  --bg-chat: #1a0f1e;
+  --bg-message-in: #2c1930;
+  --bg-message-out: #a94420;
+  --text-primary: #fff1e6;
+  --text-secondary: #c3a4ac;
+  --accent: #ff7849;
+  --accent-hover: #f4632f;
+  --border: #3f2238;
+  --hover: #2c1930;
+  --online: #ffd166;
+}
+
+html[data-theme="matrix"] {
+  --glass-rgb: 2, 10, 2;
+  --accent-2: #00ff41;
+  --bg-primary: #020a02;
+  --bg-secondary: #010601;
+  --bg-chat: #020a02;
+  --bg-message-in: #0a1a0a;
+  --bg-message-out: #145c14;
+  --text-primary: #d8ffd8;
+  --text-secondary: #6fae6f;
+  --accent: #00ff41;
+  --accent-hover: #00d636;
+  --border: #0d2b0d;
+  --hover: #0a1a0a;
+  --online: #00ff41;
 }
 
 /* ==================== ФОН ЧАТА ==================== */
@@ -1138,33 +1288,50 @@ html[data-theme="light"] {
     linear-gradient(90deg, rgba(94,181,247,0.08) 1px, transparent 1px);
   background-size: 28px 28px;
 }
+.chat-area[data-bg="dots"] {
+  background-image: radial-gradient(rgba(94,181,247,0.16) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+.chat-area[data-bg="waves"] {
+  background-image:
+    repeating-linear-gradient(135deg, rgba(94,181,247,0.07) 0 2px, transparent 2px 22px),
+    repeating-linear-gradient(45deg, rgba(58,213,155,0.06) 0 2px, transparent 2px 22px);
+}
+.chat-area[data-bg="stars"] {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.55), transparent 100%),
+    radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,0.45), transparent 100%),
+    radial-gradient(1.5px 1.5px at 45% 80%, rgba(255,255,255,0.35), transparent 100%),
+    radial-gradient(1px 1px at 85% 20%, rgba(255,255,255,0.45), transparent 100%),
+    radial-gradient(1px 1px at 35% 15%, rgba(255,255,255,0.3), transparent 100%);
+  background-size: 240px 240px;
+}
 
 /* ==================== GLASSMORPHISM ==================== */
 html[data-glass="on"] .sidebar,
 html[data-glass="on"] .chat-header,
 html[data-glass="on"] .input-area,
-html[data-glass="on"] .side-menu {
-  background: rgba(20, 30, 44, 0.55) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur, 14px)) saturate(140%);
-  backdrop-filter: blur(var(--glass-blur, 14px)) saturate(140%);
-}
-html[data-glass="on"][data-theme="light"] .sidebar,
-html[data-glass="on"][data-theme="light"] .chat-header,
-html[data-glass="on"][data-theme="light"] .input-area,
-html[data-glass="on"][data-theme="light"] .side-menu {
-  background: rgba(255, 255, 255, 0.6) !important;
-}
-html[data-glass="on"][data-theme="amoled"] .sidebar,
-html[data-glass="on"][data-theme="amoled"] .chat-header,
-html[data-glass="on"][data-theme="amoled"] .input-area,
-html[data-glass="on"][data-theme="amoled"] .side-menu {
-  background: rgba(0, 0, 0, 0.6) !important;
+html[data-glass="on"] .side-menu,
+html[data-glass="on"] .modal,
+html[data-glass="on"] .toast,
+html[data-glass="on"] .ctx-menu,
+html[data-glass="on"] .react-bar {
+  background: rgba(var(--glass-rgb), var(--glass-alpha)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 html[data-glass="on"] .login-box {
-  background: rgba(20, 30, 44, 0.6) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur, 16px)) saturate(140%);
-  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(140%);
+  background: rgba(var(--glass-rgb), calc(var(--glass-alpha) + 0.05)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
+html[data-glass="on"] .chat-avatar,
+html[data-glass="on"] .send-btn,
+html[data-glass="on"] .btn,
+html[data-glass="on"] .voice-play-btn {
+  box-shadow: 0 0 var(--glow-strength) color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
 
 /* ==================== SIDEBAR: ПУЛЬСАЦИЯ ОНЛАЙН ==================== */
 .chat-avatar.online::after {
@@ -1342,14 +1509,399 @@ html[data-glass="on"] .login-box {
 /* Галочки прочтения */
 .tick-marks { font-size: 10px; }
 .tick-marks.read { color: var(--accent); }
+
+/* ==================== ТИПОГРАФИКА ==================== */
+.preset-row,
+.anim-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.preset-chip,
+.anim-chip {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.preset-chip:hover,
+.anim-chip:hover { color: var(--text-primary); border-color: var(--accent); }
+.preset-chip.active,
+.anim-chip.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, var(--accent)));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
+}
+.font-row { margin-top: -2px; }
+.message-text,
+.message-input {
+  font-size: var(--msg-font-size, 14px);
+}
+/* Шрифт, начертание и межстрочный интервал сообщений настраиваются пользователем */
+.message-text {
+  font-family: var(--msg-font-family, var(--font-family, inherit));
+  font-weight: var(--msg-font-weight, 400);
+  line-height: var(--msg-line-height, 1.45);
+}
+.message-input { font-family: var(--font-family, inherit); }
+
+/* Настройки типографики */
+.row-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  align-self: center;
+  margin-right: 2px;
+}
+.custom-font-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius, 12px);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+.custom-font-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.font-preview {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius, 12px);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Хвостики сообщений можно отключить */
+html[data-tails="off"] .message.in:last-child::after,
+html[data-tails="off"] .message.out:last-child::after { display: none; }
+html[data-tails="off"] .message.in:last-child,
+html[data-tails="off"] .message.out:last-child { border-radius: var(--radius, 12px); }
+
+/* Уровни анимации */
+html[data-anim="off"] *,
+html[data-anim="off"] *::before,
+html[data-anim="off"] *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+}
+html[data-anim="full"] .chat-avatar.online::after { animation-duration: 1.2s; }
+html[data-anim="full"] .message { animation-duration: 0.32s; }
+
+/* Дополнительные превью фонов */
+.bg-swatch[data-preview="dots"] {
+  background-image: radial-gradient(rgba(94,181,247,0.5) 1px, transparent 1px), #0e1621;
+  background-size: 10px 10px;
+}
+.bg-swatch[data-preview="waves"] {
+  background-image:
+    repeating-linear-gradient(135deg, rgba(94,181,247,0.4) 0 1px, transparent 1px 10px),
+    repeating-linear-gradient(45deg, rgba(58,213,155,0.35) 0 1px, transparent 1px 10px),
+    #0e1621;
+}
+.bg-swatch[data-preview="stars"] {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, #fff, transparent),
+    radial-gradient(1px 1px at 70% 60%, #cbe8ff, transparent),
+    radial-gradient(1.5px 1.5px at 45% 80%, #fff, transparent),
+    radial-gradient(1px 1px at 85% 20%, #9fd4ff, transparent),
+    #0e1621;
+  background-size: 70px 70px;
+}
+
+/* ==================== ВЗРЫВ РЕАКЦИЙ ==================== */
+.reaction-burst {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 6000;
+  font-size: 22px;
+  will-change: transform, opacity;
+  transform: translate(-50%, -50%);
+  animation: reactionFloat 0.95s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes reactionFloat {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, -70px))) scale(1.35) rotate(var(--rot, 0deg));
+  }
+}
+
+/* ==================== 3 КОЛОНКИ НА ПК ==================== */
+@media (min-width: 1100px) {
+  .app-container { flex-direction: row; }
+  .side-menu {
+    position: relative;
+    top: auto;
+    bottom: auto;
+    left: 0;
+    width: 260px;
+    height: 100vh;
+    z-index: 1;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+  }
+  .side-menu.open { left: 0; }
+  .side-menu .menu-backdrop { display: none !important; }
+  .menu-backdrop { display: none !important; }
+  .sidebar { width: 340px; }
+}
+
+/* ==================== WEBRTC ЗВОНКИ ==================== */
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.62);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+.call-overlay.show { display: flex; }
+.call-card {
+  position: relative;
+  width: 420px;
+  max-width: 100%;
+  min-height: 420px;
+  border-radius: 26px;
+  overflow: hidden;
+  background: linear-gradient(160deg, rgba(var(--glass-rgb), 0.92), rgba(var(--glass-rgb), 0.72));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), 0 0 40px var(--glow-strength) rgba(var(--glass-rgb), 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+#call-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  z-index: 0;
+}
+#call-local {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 108px;
+  height: 144px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: #111;
+  border: 1px solid rgba(255,255,255,.2);
+  z-index: 3;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45);
+}
+.call-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 30%, rgba(var(--glass-rgb), 0.05), rgba(0, 0, 0, 0.55));
+}
+.call-top {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 30px 20px 14px;
+  text-align: center;
+}
+.call-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 38px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, var(--accent)));
+  box-shadow: 0 0 0 6px rgba(var(--glass-rgb), 0.35), 0 0 30px var(--accent);
+}
+.call-name { font-size: 22px; font-weight: 700; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+.call-status { font-size: 14px; color: rgba(255,255,255,.8); min-height: 20px; }
+.call-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 14px;
+  padding: 16px 20px 30px;
+  margin-top: auto;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.call-btn-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.14);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s ease, background .15s ease;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.call-btn-circle:hover { transform: translateY(-2px); background: rgba(255,255,255,.24); }
+.call-btn-circle.accept { background: #2ecc71; border-color: transparent; }
+.call-btn-circle.danger { background: #e53935; border-color: transparent; }
+.call-btn-circle.off { background: rgba(255,255,255,.3); }
+.call-overlay.audio #call-remote { display: none; }
+.call-overlay.audio .call-card { background: linear-gradient(160deg, rgba(var(--glass-rgb), 0.95), rgba(var(--glass-rgb), 0.75)); }
+.call-header-btn { font-size: 16px !important; }
+
+@media (max-width: 600px) {
+  .call-card { min-height: 100%; height: 100%; border-radius: 0; }
+  .call-overlay { padding: 0; }
+  #call-local { width: 92px; height: 124px; }
+}
+
+.safety-block {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(var(--glass-rgb), 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.safety-title { font-weight: 700; margin-bottom: 8px; }
+.safety-number {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  line-height: 1.7;
+  text-align: center;
+  padding: 10px 0;
+  word-spacing: 6px;
+  color: var(--accent);
+  user-select: all;
+}
+.safety-hint { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5; }
 </style>
+
+<!-- Адаптивные версии интерфейса (ПК / планшет / телефон) и кастомный курсор.
+     Подключаются после базовых стилей, поэтому переопределяют их. -->
+<link rel="stylesheet" href="/icons.css">
+<link rel="stylesheet" href="/layout.css">
+<link rel="stylesheet" href="/cursor.css">
+<link rel="stylesheet" href="/owner.css">
 </head>
 <body>
+
+  <svg id="mq-icon-sprite" class="mq-sprite" aria-hidden="true" focusable="false">
+    <symbol id="mq-i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+    <symbol id="mq-i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="mq-i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+    <symbol id="mq-i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+    <symbol id="mq-i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></symbol>
+    <symbol id="mq-i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16 16"/></symbol>
+    <symbol id="mq-i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.6"/><path d="M12 5.2V2.5M12 18.8v2.7M5.2 12H2.5M18.8 12h2.7M7.2 7.2L5.3 5.3M18.7 18.7l-1.9-1.9M16.8 7.2l1.9-1.9M5.3 18.7l1.9-1.9"/></symbol>
+    <symbol id="mq-i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="mq-i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+    <symbol id="mq-i-message" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></symbol>
+    <symbol id="mq-i-message-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="mq-i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M5 17h14M6 3h12l-2 8 3 3H5l3-3z"/></symbol>
+    <symbol id="mq-i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6l2.95 5.98 6.55.95-4.74 4.66 1.12 6.51L12 17.62l-5.88 3.08 1.12-6.51L2.5 9.53l6.55-.95z"/></symbol>
+    <symbol id="mq-i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+    <symbol id="mq-i-megaphone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M14 7.5a5 5 0 0 1 0 9M17 4.5a9 9 0 0 1 0 15"/></symbol>
+    <symbol id="mq-i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="mq-i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol>
+    <symbol id="mq-i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="16" r="4"/><path d="M11 13L21 3M17 7l2 2M14 10l2 2"/></symbol>
+    <symbol id="mq-i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="mq-i-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="mq-i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="mq-i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 5.2A9.9 9.9 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.3 6.4A17.6 17.6 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 4.1-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/></symbol>
+    <symbol id="mq-i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="mq-i-paperclip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+    <symbol id="mq-i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.4 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z"/></symbol>
+    <symbol id="mq-i-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+    <symbol id="mq-i-video-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v-2a2 2 0 0 0-2-2h-2M2 8.5v8.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V11"/><path d="M22 8v6M3 3l18 18"/></symbol>
+    <symbol id="mq-i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></symbol>
+    <symbol id="mq-i-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9v3a3 3 0 0 0 5.1 2.1M15 9V5a3 3 0 0 0-5.9-1.2"/><path d="M19 10v2a7 7 0 0 1-10.6 6M5 10v2a7 7 0 0 0 11.4 5.4M12 19v3M8 22h8M3 3l18 18"/></symbol>
+    <symbol id="mq-i-volume-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></symbol>
+    <symbol id="mq-i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="mq-i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="mq-i-camera-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5h6l2 3h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2M3 3l18 18"/></symbol>
+    <symbol id="mq-i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></symbol>
+    <symbol id="mq-i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+    <symbol id="mq-i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+    <symbol id="mq-i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="mq-i-file-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 4h1M10 7h1M10 10h1M12 13h1M12 16h1"/></symbol>
+    <symbol id="mq-i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="mq-i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+    <symbol id="mq-i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+    <symbol id="mq-i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></symbol>
+    <symbol id="mq-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="mq-i-check-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L7 17l-5-5"/><path d="M22 10l-8.5 8.5-2-2"/></symbol>
+    <symbol id="mq-i-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16.5h.01"/></symbol>
+    <symbol id="mq-i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16.5v-5M12 7.5h.01"/></symbol>
+    <symbol id="mq-i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></symbol>
+    <symbol id="mq-i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.7-4 3-9 3s-9-1.3-9-3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/></symbol>
+    <symbol id="mq-i-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c1 3 4 4.5 4 8a4 4 0 0 1-8 0c0-1 .3-1.8.3-1.8S6 10.5 6 14a6 6 0 0 0 12 0c0-6-6-12-6-12z"/></symbol>
+    <symbol id="mq-i-thumbs-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21V10l5-8a2.5 2.5 0 0 1 2.4 3.2L13.5 9H19a2 2 0 0 1 2 2.4l-1.5 7A2 2 0 0 1 17.5 20H7z"/><path d="M7 10H4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3"/></symbol>
+    <symbol id="mq-i-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21.5l8.8-8.8a5 5 0 0 0 0-7.1z"/></symbol>
+    <symbol id="mq-i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+    <symbol id="mq-i-frown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+    <symbol id="mq-i-laugh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M7.5 13.5a5.5 5.5 0 0 0 9 0z"/><path d="M9 9h.01M15 9h.01"/></symbol>
+    <symbol id="mq-i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18.5 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></symbol>
+    <symbol id="mq-i-hands" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4 15a1.6 1.6 0 0 1 2.4-2.1L8 14"/></symbol>
+    <symbol id="mq-i-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.2-9.4L1 10"/></symbol>
+    <symbol id="mq-i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9z"/></symbol>
+    <symbol id="mq-i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="mq-i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="mq-i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="mq-i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z"/><path d="M5 5h3v3H5zM16 5h3v3h-3zM5 16h3v3H5z" fill="currentColor" stroke="none"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 18h1M18 14h1M21 14v1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="mq-i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+    <symbol id="mq-i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
+    <symbol id="mq-i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6.5V12l3.5 2"/></symbol>
+    <symbol id="mq-i-at-sign" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.9 7.9"/></symbol>
+    <symbol id="mq-i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></symbol>
+    <symbol id="mq-i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h8l-1 8 10-12h-8z"/></symbol>
+    <symbol id="mq-i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></symbol>
+    <symbol id="mq-i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1.2"/><path d="M9 13h.01M15 13h.01M9.5 16.5h5"/></symbol>
+    <symbol id="mq-i-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="mq-i-layout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
+    <symbol id="mq-i-sticker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="9.5" cy="13" r="1"/><circle cx="14.5" cy="13" r="1"/><path d="M9 16a3 3 0 0 0 6 0"/></symbol>
+    <symbol id="mq-i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18h1.5a1.5 1.5 0 0 0 0-3H12a2 2 0 0 1 0-4h3a6 6 0 0 0 6-6c0-2.8-4-5-9-5z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="14" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="17.5" cy="9.5" r="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="mq-i-shield-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+    <symbol id="mq-i-toggle-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="22" height="12" rx="6"/><circle cx="8" cy="12" r="2.6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="mq-i-toggle-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="22" height="12" rx="6"/><circle cx="16" cy="12" r="2.6" fill="currentColor" stroke="none"/></symbol>
+  </svg>
 
 <!-- ==================== ЭКРАН ВХОДА ==================== -->
 <div id="login-screen">
   <div class="login-box">
-    <div class="login-logo">🔐</div>
+    <div class="login-logo"><svg class="mq-icon mq-icon--lg" aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg></div>
     <h1>CipherTalk</h1>
     <p class="subtitle" data-i18n="app.tagline"></p>
     
@@ -1406,7 +1958,7 @@ html[data-glass="on"] .login-box {
       <div class="input-group">
         <label data-i18n="auth.password"></label>
         <input type="password" id="password-input" placeholder="Ваш пароль" data-i18n-placeholder="auth.password.placeholder">
-        <button class="password-toggle" data-action="togglePassword" data-target="password-input">👁️</button>
+        <button class="password-toggle" data-action="togglePassword" data-target="password-input"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-eye"></use></svg></button>
       </div>
       <button class="btn" data-action="step3LoginNext" data-i18n="auth.login"></button>
       <button class="btn btn-secondary" data-action="goToStep" data-step="1" data-i18n="auth.back"></button>
@@ -1430,15 +1982,25 @@ html[data-glass="on"] .login-box {
       <div class="input-group">
         <label data-i18n="auth.password"></label>
         <input type="password" id="new-password-input" placeholder="Минимум 6 символов" data-i18n-placeholder="auth.newpass.min" data-action="checkPasswordStrength">
-        <button class="password-toggle" data-action="togglePassword" data-target="new-password-input">👁️</button>
+        <button class="password-toggle" data-action="togglePassword" data-target="new-password-input"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-eye"></use></svg></button>
       </div>
       <div class="input-group">
         <label data-i18n="auth.newpass.repeat"></label>
         <input type="password" id="confirm-password-input" placeholder="Повторите пароль" data-i18n-placeholder="auth.newpass.repeat.placeholder">
-        <button class="password-toggle" data-action="togglePassword" data-target="confirm-password-input">👁️</button>
+        <button class="password-toggle" data-action="togglePassword" data-target="confirm-password-input"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-eye"></use></svg></button>
       </div>
       <button class="btn" data-action="step5Next" data-i18n="auth.finish"></button>
       <button class="btn btn-secondary" data-action="goToStep" data-step="4" data-i18n="auth.back"></button>
+    </div>
+
+    <!-- Публичный адрес: открыть мессенджер с любого устройства и сети -->
+    <div class="public-access" id="public-access" style="display:none">
+      <div class="public-access-title" data-i18n="public.title"></div>
+      <div class="public-access-row">
+        <span class="public-access-url" id="public-access-url"></span>
+        <button class="public-access-copy" data-action="copyPublicUrl" data-i18n-title="public.copy" title="Копировать"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-copy"></use></svg></button>
+      </div>
+      <div class="public-access-note" data-i18n="public.note"></div>
     </div>
   </div>
 </div>
@@ -1457,19 +2019,19 @@ html[data-glass="on"] .login-box {
       </div>
       <div class="side-menu-items">
         <button class="side-menu-item" data-action="openNewGroup">
-          <span class="icon">👥</span> <span data-i18n="menu.group"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-users"></use></svg></span> <span data-i18n="menu.group"></span>
         </button>
         <button class="side-menu-item" data-action="openNewChannel">
-          <span class="icon">📢</span> <span data-i18n="menu.channel"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-megaphone"></use></svg></span> <span data-i18n="menu.channel"></span>
         </button>
         <button class="side-menu-item" data-action="openSearch">
-          <span class="icon">🔍</span> <span data-i18n="menu.search"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-search"></use></svg></span> <span data-i18n="menu.search"></span>
         </button>
         <button class="side-menu-item" data-action="openSavedMessages">
-          <span class="icon">⭐</span> <span data-i18n="menu.saved"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-star"></use></svg></span> <span data-i18n="menu.saved"></span>
         </button>
         <button class="side-menu-item" data-action="openProfileEditor">
-          <span class="icon">🧑</span> <span data-i18n="menu.profile"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-user"></use></svg></span> <span data-i18n="menu.profile"></span>
         </button>
         <div class="side-menu-divider"></div>
         <div class="side-menu-lang">
@@ -1477,22 +2039,23 @@ html[data-glass="on"] .login-box {
           <button class="lang-chip" data-action="setLang" data-id="en" id="lang-en">EN</button>
         </div>
         <button class="side-menu-item" data-action="openSettings">
-          <span class="icon">⚙️</span> <span data-i18n="menu.settings"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-settings"></use></svg></span> <span data-i18n="menu.settings"></span>
         </button>
         <button class="side-menu-item" data-action="showEncryptionInfo">
-          <span class="icon">🔐</span> <span data-i18n="menu.encryption"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg></span> <span data-i18n="menu.encryption"></span>
         </button>
         <div class="side-menu-divider"></div>
         <button class="side-menu-item" data-action="logout" style="color: var(--danger)">
-          <span class="icon">🚪</span> <span data-i18n="menu.logout"></span>
+          <span class="icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-logout"></use></svg></span> <span data-i18n="menu.logout"></span>
         </button>
       </div>
     </div>
 
     <div class="sidebar">
       <div class="sidebar-header">
-        <button class="menu-btn" data-action="toggleMenu">☰</button>
+        <button class="menu-btn" data-action="toggleMenu"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-menu"></use></svg></button>
         <div class="search-box">
+          <svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-search"></use></svg>
           <input type="text" placeholder="Поиск" id="sidebar-search" data-action="searchChats" data-i18n-placeholder="search.placeholder">
         </div>
       </div>
@@ -1502,7 +2065,7 @@ html[data-glass="on"] .login-box {
 
     <div class="chat-area" id="chat-area">
       <div class="empty-state" id="empty-state">
-        <div class="empty-state-icon">💬</div>
+        <div class="empty-state-icon"><svg class="mq-icon mq-icon--xl" aria-hidden="true" focusable="false"><use href="#mq-i-message"></use></svg></div>
         <h2 data-i18n="app.empty.title"></h2>
         <p data-i18n="app.empty.text"></p>
         <div class="encryption-badge" style="margin-top: 14px">
@@ -1512,42 +2075,70 @@ html[data-glass="on"] .login-box {
 
       <div id="active-chat" style="display:none; flex-direction:column; height:100%">
         <div class="chat-header">
-          <button class="menu-btn back-btn" data-action="closeChat">←</button>
+          <button class="menu-btn back-btn" data-action="closeChat"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-arrow-left"></use></svg></button>
           <div class="chat-avatar" id="chat-header-avatar">U</div>
           <div class="chat-header-info">
             <div class="chat-header-name-row">
               <span class="chat-header-name" id="chat-header-name" data-i18n="chat.generic">Чат</span>
-              <span class="enc-badge secured" id="enc-badge" style="display:none">🔒 E2EE</span>
+              <span class="owner-badge-slot" id="chat-header-owner"></span>
+              <span class="chat-header-ttl" id="chat-header-ttl" hidden></span>
+              <span class="enc-badge secured" id="enc-badge" style="display:none"><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg><span>E2EE</span></span>
             </div>
             <div class="chat-header-status" id="chat-header-status" data-i18n="chat.online">в сети</div>
           </div>
           <div class="chat-header-actions">
-            <button class="menu-btn" data-action="openPinnedModal" title="Закреплённые" data-i18n-title="chat.pinned">📌</button>
-            <button class="menu-btn" data-action="showChatInfo" title="Инфо" data-i18n-title="chat.info">ℹ️</button>
+            <button class="menu-btn call-header-btn" id="call-audio-btn" data-action="startAudioCall" title="Аудиозвонок" data-i18n-title="call.audio"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-phone"></use></svg></button>
+            <button class="menu-btn call-header-btn" id="call-video-btn" data-action="startVideoCall" title="Видеозвонок" data-i18n-title="call.video"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-video"></use></svg></button>
+            <button class="menu-btn" data-action="openPinnedModal" title="Закреплённые" data-i18n-title="chat.pinned"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-pin"></use></svg></button>
+            <button class="menu-btn" data-action="showChatInfo" title="Инфо" data-i18n-title="chat.info"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-info"></use></svg></button>
           </div>
         </div>
 
         <div class="messages-container" id="messages-container"></div>
+
+        <button id="scroll-down-fab" class="mq-fab" data-action="scrollToBottom" title="Вниз" data-i18n-title="chat.scrollDown" aria-label="Scroll down">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6"></path>
+          </svg>
+          <span class="mq-fab-badge" id="scroll-fab-badge" style="display:none">0</span>
+        </button>
 
         <div class="reply-bar" id="reply-bar" style="display:none">
           <div class="rb-info">
             <div class="rb-title" id="reply-bar-title" data-i18n="reply.title">Ответ</div>
             <div class="rb-text" id="reply-bar-text"></div>
           </div>
-          <button class="rb-close" data-action="cancelReply" title="Отменить" data-i18n-title="reply.cancel">✕</button>
+          <button class="rb-close" data-action="cancelReply" title="Отменить" data-i18n-title="reply.cancel"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
         </div>
 
         <div class="input-area" id="input-area">
-          <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить" data-i18n-title="chat.attach">📎</button>
+          <button class="attach-btn" id="attach-btn" data-action="attachFile" title="Прикрепить" data-i18n-title="chat.attach"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-paperclip"></use></svg></button>
+          <button class="attach-btn sticker-btn" id="sticker-btn" data-action="openStickerPicker" title="Стикеры" data-i18n-title="chat.stickers"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-sticker"></use></svg></button>
           <textarea class="message-input" id="message-input" placeholder="Сообщение..." rows="1" data-i18n-placeholder="chat.placeholder"
             data-action="messageInput"></textarea>
-          <button class="attach-btn" id="voice-btn" data-action="toggleVoiceRecording" title="Голосовое" data-i18n-title="chat.voice">🎤</button>
-          <button class="attach-btn" id="video-btn" data-action="toggleVideoRecording" title="Видеосообщение" data-i18n-title="chat.video">📹</button>
-          <button class="send-btn" id="send-btn" data-action="sendMessage">➤</button>
+          <button class="attach-btn" id="voice-btn" data-action="toggleVoiceRecording" title="Голосовое" data-i18n-title="chat.voice"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-mic"></use></svg></button>
+          <button class="attach-btn" id="video-btn" data-action="toggleVideoRecording" title="Видеосообщение" data-i18n-title="chat.video"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-video"></use></svg></button>
+          <button class="send-btn" id="send-btn" data-action="sendMessage"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-send"></use></svg></button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- Нижняя навигация — версия для телефона -->
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Навигация">
+    <button class="tab-item active" data-action="mobileChats" data-i18n-title="nav.chats">
+      <span class="tab-icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-message"></use></svg></span><span class="label" data-i18n="nav.chats"></span>
+    </button>
+    <button class="tab-item" data-action="openSearch" data-i18n-title="nav.search">
+      <span class="tab-icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-search"></use></svg></span><span class="label" data-i18n="nav.search"></span>
+    </button>
+    <button class="tab-item" data-action="openNewGroup" data-i18n-title="nav.group">
+      <span class="tab-icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-users"></use></svg></span><span class="label" data-i18n="nav.group"></span>
+    </button>
+    <button class="tab-item" data-action="openProfileEditor" data-i18n-title="nav.profile">
+      <span class="tab-icon"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-user"></use></svg></span><span class="label" data-i18n="nav.profile"></span>
+    </button>
+  </nav>
 </div>
 
 <div class="modal-overlay" id="modal-overlay">
@@ -1558,7 +2149,7 @@ html[data-glass="on"] .login-box {
 
 <div id="pin-lock-screen">
   <div class="pin-lock-box">
-    <div class="pin-logo">🔒</div>
+    <div class="pin-logo"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg></div>
     <h2 data-i18n="pin.title"></h2>
     <p data-i18n="pin.desc"></p>
     <input type="password" id="pin-lock-input" class="pin-input" maxlength="8" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
@@ -1571,8 +2162,12 @@ html[data-glass="on"] .login-box {
 <canvas id="snow-canvas" aria-hidden="true"></canvas>
 
 <script src="/i18n.js"></script>
+<script src="/icons.js"></script>
+<script src="/motion.js"></script>
+<script src="/cursor.js"></script>
 <script src="/e2ee.js"></script>
 <script src="/app.js"></script>
 <script src="/chat-features.js"></script>
+<script src="/calls.js"></script>
 </body>
 </html>

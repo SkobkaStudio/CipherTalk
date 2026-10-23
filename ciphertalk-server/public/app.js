@@ -32,7 +32,34 @@ let regState = {
 
 // ==================== ВНЕШНИЙ ВИД (темы/фон/стекло) ====================
 const APPEARANCE_KEY = 'ciphertalk_appearance';
+
+// ==================== ШРИФТЫ И ТИПОГРАФИКА ====================
+const FONT_FAMILIES = [
+  { id: 'system',   label: 'settings.fontSystem',   stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  { id: 'compact',  label: 'settings.fontCompact',  stack: "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" },
+  { id: 'humanist', label: 'settings.fontHumanist', stack: "'Trebuchet MS', 'Segoe UI', Verdana, sans-serif" },
+  { id: 'serif',    label: 'settings.fontSerif',    stack: "Georgia, 'Times New Roman', 'Noto Serif', serif" },
+  { id: 'mono',     label: 'settings.fontMono',     stack: "'SFMono-Regular', 'JetBrains Mono', Consolas, 'Liberation Mono', monospace" },
+  { id: 'rounded',  label: 'settings.fontRounded',  stack: "Nunito, Quicksand, 'Trebuchet MS', sans-serif" },
+  { id: 'classic',  label: 'settings.fontClassic',  stack: "'PT Serif', 'Noto Serif', 'Times New Roman', serif" },
+  { id: 'custom',   label: 'settings.fontCustom',   stack: '' }
+];
+const FONT_WEIGHTS = ['400', '500', '600', '700'];
+const LINE_HEIGHT = { min: 1.2, max: 2, step: 0.05 };
+const APPEARANCE_NUM_RANGES = {
+  msgFontSize: [12, 24], blur: [0, 40], bgOpacity: [0, 100],
+  saturate: [0, 300], glow: [0, 30], roundness: [0, 28], msgLineHeight: [1.2, 2]
+};
+const APPEARANCE_IDS = {
+  theme: ['auto', 'dark', 'light', 'amoled', 'cyberpunk', 'neon', 'dracula', 'nord', 'mono', 'rose', 'ice', 'sunset', 'matrix'],
+  chatBg: ['default', 'aurora', 'sunset', 'forest', 'grid', 'dots', 'waves', 'stars'],
+  animLevel: ['off', 'normal', 'full'],
+  fontFamily: FONT_FAMILIES.map(f => f.id),
+  msgFontWeight: FONT_WEIGHTS,
+  fontScope: ['app', 'messages']
+};
 const THEMES = [
+  { id: 'auto', name: I18N.t('theme.auto'), colors: ['#ffffff', '#17212b', '#5eb5f7'] },
   { id: 'dark', name: I18N.t('theme.dark'), colors: ['#0e1621', '#2b5278', '#5eb5f7'] },
   { id: 'light', name: I18N.t('theme.light'), colors: ['#ffffff', '#4a9de0', '#2b7fd4'] },
   { id: 'amoled', name: 'AMOLED', colors: ['#000000', '#1a3a5c', '#ffffff'] },
@@ -64,45 +91,161 @@ const STYLE_PRESETS = [
   { id: 'vapor', name: 'Vaporwave', patch: { theme: 'rose', glass: true, snow: false, blur: 18, bgOpacity: 50, saturate: 180, glow: 10, roundness: 20 } },
   { id: 'matrix', name: 'Matrix', patch: { theme: 'matrix', glass: true, snow: false, blur: 10, bgOpacity: 65, saturate: 120, glow: 16, roundness: 4 } }
 ];
-let appearance = {
-  theme: 'dark', chatBg: 'default', glass: false, snow: true, blur: 14,
-  bgOpacity: 55, saturate: 140, glow: 0, roundness: 12,
-  customBg: '', animLevel: 'normal'
-};
-let privacy = { pinHash: '', hideOnline: false };
+function defaultAppearance() {
+  return {
+    theme: 'dark', chatBg: 'default', glass: true, snow: true, blur: 14,
+    bgOpacity: 55, saturate: 140, glow: 0, roundness: 12,
+    customBg: '', animLevel: 'normal', msgFontSize: 14, fontFamily: 'system',
+    fontCustom: '', msgFontWeight: '400', msgLineHeight: 1.45, fontScope: 'app',
+    tails: true, customCursor: true
+  };
+}
+let appearance = defaultAppearance();
+const BADGE_CHOICES = [
+  { id: '', icon: '', label: 'settings.badgeNone' },
+  { id: 'star', icon: 'star', label: 'settings.badgeStar' },
+  { id: 'shield', icon: 'shield', label: 'settings.badgeShield' },
+  { id: 'flame', icon: 'flame', label: 'settings.badgeFlame' },
+  { id: 'zap', icon: 'zap', label: 'settings.badgeZap' },
+  { id: 'heart', icon: 'heart', label: 'settings.badgeHeart' },
+  { id: 'sparkle', icon: 'sparkle', label: 'settings.badgeSparkle' }
+];
+const BADGE_IDS = BADGE_CHOICES.map(b => b.id);
+let privacy = { pinHash: '', hideOnline: false, ghost: false, screenshotGuard: false, badge: '' };
 const PRIVACY_KEY = 'ciphertalk_privacy';
+let appearanceTimerStarted = false;
+
+// Шрифтовой стек из localStorage нельзя подставлять в CSS «как есть»:
+// оставляем только безопасные символы (буквы, цифры, пробелы, кавычки, запятые).
+function sanitizeFontStack(value) {
+  return String(value == null ? '' : value)
+    .replace(/[^a-zA-Z0-9\s'",.\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+// Валидация настроек из localStorage: неизвестные ключи отбрасываем,
+// числа ограничиваем диапазоном, строки — списком допустимых.
+function sanitizeAppearance(saved) {
+  const out = {};
+  if (!saved || typeof saved !== 'object') return out;
+  for (const key of Object.keys(APPEARANCE_NUM_RANGES)) {
+    const v = Number(saved[key]);
+    if (typeof saved[key] === 'number' && isFinite(v)) {
+      const range = APPEARANCE_NUM_RANGES[key];
+      out[key] = Math.min(range[1], Math.max(range[0], v));
+    }
+  }
+  for (const key of Object.keys(APPEARANCE_IDS)) {
+    if (typeof saved[key] === 'string' && APPEARANCE_IDS[key].includes(saved[key])) {
+      out[key] = saved[key];
+    }
+  }
+  for (const key of ['glass', 'snow', 'tails', 'customCursor']) {
+    if (typeof saved[key] === 'boolean') out[key] = saved[key];
+  }
+  if (typeof saved.customBg === 'string' && saved.customBg.startsWith('data:image/')) {
+    out.customBg = saved.customBg.slice(0, 4500000);
+  }
+  if (typeof saved.fontCustom === 'string') out.fontCustom = sanitizeFontStack(saved.fontCustom);
+  return out;
+}
+
+function readStoredAppearance(key) {
+  try { return sanitizeAppearance(JSON.parse(localStorage.getItem(key) || '{}')); }
+  catch (e) { return {}; }
+}
+
+// Настройки внешнего вида и приватности привязаны к аккаунту:
+// общие настройки устройства живут под APPEARANCE_KEY/PRIVACY_KEY,
+// аккаунтные — под <key>_u<userId> (scopedStorageKey).
+function appearanceStorageKey() { return scopedStorageKey(APPEARANCE_KEY); }
+function privacyStorageKey() { return scopedStorageKey(PRIVACY_KEY); }
 
 function loadAppearance() {
+  appearance = Object.assign(defaultAppearance(), readStoredAppearance(APPEARANCE_KEY));
+
+  const scopedKey = appearanceStorageKey();
+  if (scopedKey !== APPEARANCE_KEY) {
+    const scoped = readStoredAppearance(scopedKey);
+    if (Object.keys(scoped).length) {
+      appearance = Object.assign(appearance, scoped);
+    } else {
+      // Первый вход: переносим общие настройки устройства в аккаунт.
+      try { localStorage.setItem(scopedKey, JSON.stringify(appearance)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  privacy = { pinHash: '', hideOnline: false, ghost: false, screenshotGuard: false, badge: '' };
   try {
-    const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}');
-    appearance = Object.assign(appearance, saved);
+    privacy = Object.assign(privacy, JSON.parse(localStorage.getItem(PRIVACY_KEY) || '{}'));
   } catch (e) { /* ignore */ }
-  try {
-    const saved = JSON.parse(localStorage.getItem(PRIVACY_KEY) || '{}');
-    privacy = Object.assign(privacy, saved);
-  } catch (e) { /* ignore */ }
+  const pKey = privacyStorageKey();
+  if (pKey !== PRIVACY_KEY) {
+    let scopedPrivacy = {};
+    try { scopedPrivacy = JSON.parse(localStorage.getItem(pKey) || '{}'); } catch (e) { /* ignore */ }
+    if (!scopedPrivacy || typeof scopedPrivacy !== 'object' || !Object.keys(scopedPrivacy).length) {
+      try { localStorage.setItem(pKey, JSON.stringify(privacy)); } catch (e) { /* ignore */ }
+    } else {
+      privacy = Object.assign(privacy, scopedPrivacy);
+    }
+  }
+
   applyAppearance();
+  if (!appearanceTimerStarted) {
+    appearanceTimerStarted = true;
+    setInterval(() => {
+      if (appearance.theme === 'auto') applyAppearance();
+    }, 60000);
+  }
+}
+
+// Перечитать настройки после входа/выхода (смена аккаунта)
+function reloadAppearanceForUser() {
+  loadAppearance();
 }
 
 function saveAppearance() {
-  try { localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance)); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(appearanceStorageKey(), JSON.stringify(appearance)); } catch (e) { /* ignore */ }
 }
 
 function savePrivacy() {
-  try { localStorage.setItem(PRIVACY_KEY, JSON.stringify(privacy)); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(privacyStorageKey(), JSON.stringify(privacy)); } catch (e) { /* ignore */ }
+}
+
+function resolveTheme() {
+  if (appearance.theme !== 'auto') return appearance.theme;
+  const hour = new Date().getHours();
+  return hour >= 7 && hour < 19 ? 'light' : 'dark';
 }
 
 function applyAppearance() {
   const html = document.documentElement;
-  html.setAttribute('data-theme', appearance.theme);
+  const theme = resolveTheme();
+  html.setAttribute('data-theme', theme);
   html.setAttribute('data-glass', appearance.glass ? 'on' : 'off');
   html.setAttribute('data-anim', appearance.animLevel || 'normal');
+  html.setAttribute('data-tails', appearance.tails === false ? 'off' : 'on');
+  const customCursor = appearance.customCursor !== false;
+  if (window.Cursor && typeof window.Cursor.setEnabled === 'function') {
+    window.Cursor.setEnabled(customCursor);
+  } else {
+    html.setAttribute('data-custom-cursor', customCursor ? 'on' : 'off');
+  }
   const root = document.documentElement.style;
   root.setProperty('--glass-blur', (Number(appearance.blur) || 14) + 'px');
   root.setProperty('--glass-alpha', ((Number(appearance.bgOpacity) || 55) / 100).toFixed(2));
   root.setProperty('--glass-saturate', (Number(appearance.saturate) || 140) + '%');
   root.setProperty('--glow-strength', (Number(appearance.glow) || 0) + 'px');
-  root.setProperty('--radius', (Number(appearance.roundness) || 12) + 'px');
+  root.setProperty('--radius', (Number(appearance.roundness) || 0) + 'px');
+  root.setProperty('--msg-font-size', (Number(appearance.msgFontSize) || 14) + 'px');
+  // Шрифт приложения и шрифт сообщений могут различаться (область применения).
+  const chosenStack = resolveFontStack();
+  root.setProperty('--font-family', appearance.fontScope === 'messages' ? FONT_FAMILIES[0].stack : chosenStack);
+  root.setProperty('--msg-font-family', chosenStack);
+  root.setProperty('--msg-font-weight', appearance.msgFontWeight || '400');
+  root.setProperty('--msg-line-height', String(Number(appearance.msgLineHeight) || 1.45));
   document.querySelectorAll('.chat-area').forEach(el => {
     el.setAttribute('data-bg', appearance.chatBg);
     if (appearance.customBg) {
@@ -114,7 +257,8 @@ function applyAppearance() {
     }
   });
   if (snow) {
-    if (appearance.snow) snow.resume();
+    const animOff = (appearance.animLevel || 'normal') === 'off';
+    if (appearance.snow && !animOff) snow.resume();
     else { snow.pause(); if (snow.ctx) snow.ctx.clearRect(0, 0, window.innerWidth, window.innerHeight); }
   }
 }
@@ -175,7 +319,12 @@ function setFloat(prop, value, labelId, suffix) {
 function setTheme(id) {
   appearance.theme = id;
   saveAppearance();
-  applyAppearance();
+  // Плавный переход темы через View Transitions API (если поддерживается)
+  if (typeof Motion !== 'undefined' && Motion.withTransition) {
+    Motion.withTransition(function () { applyAppearance(); });
+  } else {
+    applyAppearance();
+  }
   document.querySelectorAll('.theme-swatch').forEach(el =>
     el.classList.toggle('active', el.dataset.theme === id));
 }
@@ -196,6 +345,19 @@ function toggleGlass() {
   if (sw) sw.classList.toggle('on', appearance.glass);
 }
 
+// Кастомный курсор-стрелка (CSS-курсоры в cursor.css, включение — здесь)
+function toggleCursor() {
+  appearance.customCursor = appearance.customCursor === false;
+  saveAppearance();
+  applyAppearance();
+  const sw = document.getElementById('cursor-switch');
+  if (sw) sw.classList.toggle('on', appearance.customCursor !== false);
+  showToast(
+    I18N.t(appearance.customCursor !== false ? 'toast.cursorOn' : 'toast.cursorOff'),
+    'success', 'palette'
+  );
+}
+
 function toggleSnow() {
   appearance.snow = !appearance.snow;
   saveAppearance();
@@ -210,6 +372,124 @@ function setBlur(value) {
   applyAppearance();
   const label = document.getElementById('blur-value');
   if (label) label.textContent = appearance.blur + 'px';
+}
+
+function resolveFontStack() {
+  const fam = FONT_FAMILIES.find(f => f.id === appearance.fontFamily);
+  if (!fam) return FONT_FAMILIES[0].stack;
+  if (fam.id === 'custom') {
+    const custom = sanitizeFontStack(appearance.fontCustom);
+    return custom || FONT_FAMILIES[0].stack;
+  }
+  return fam.stack;
+}
+
+function updateFontPreview() {
+  const el = document.getElementById('font-preview');
+  if (!el) return;
+  el.style.fontFamily = resolveFontStack();
+  el.style.fontSize = (Number(appearance.msgFontSize) || 14) + 'px';
+  el.style.fontWeight = appearance.msgFontWeight || '400';
+  el.style.lineHeight = String(Number(appearance.msgLineHeight) || 1.45);
+}
+
+function setFontSize(value) {
+  appearance.msgFontSize = Math.max(12, Math.min(24, Number(value) || 14));
+  saveAppearance();
+  applyAppearance();
+  const label = document.getElementById('font-size-value');
+  if (label) label.textContent = appearance.msgFontSize + 'px';
+  updateFontPreview();
+}
+
+function setFontFamily(id) {
+  if (!FONT_FAMILIES.some(f => f.id === id)) return;
+  appearance.fontFamily = id;
+  saveAppearance();
+  applyAppearance();
+  document.querySelectorAll('.font-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.font === id));
+  const row = document.getElementById('custom-font-row');
+  if (row) row.style.display = id === 'custom' ? 'block' : 'none';
+  updateFontPreview();
+}
+
+function setCustomFont(value) {
+  appearance.fontCustom = sanitizeFontStack(value);
+  saveAppearance();
+  applyAppearance();
+  updateFontPreview();
+}
+
+function setFontWeight(value) {
+  const w = String(value);
+  if (!FONT_WEIGHTS.includes(w)) return;
+  appearance.msgFontWeight = w;
+  saveAppearance();
+  applyAppearance();
+  document.querySelectorAll('.weight-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.weight === w));
+  updateFontPreview();
+}
+
+function setLineHeight(value) {
+  const v = Number(value);
+  if (!isFinite(v)) return;
+  const step = LINE_HEIGHT.step;
+  const clamped = Math.min(LINE_HEIGHT.max, Math.max(LINE_HEIGHT.min, v));
+  appearance.msgLineHeight = Math.round(clamped / step) * step;
+  appearance.msgLineHeight = Math.round(appearance.msgLineHeight * 100) / 100;
+  saveAppearance();
+  applyAppearance();
+  const label = document.getElementById('line-height-value');
+  if (label) label.textContent = appearance.msgLineHeight.toFixed(2);
+  updateFontPreview();
+}
+
+function setFontScope(scope) {
+  if (!['app', 'messages'].includes(scope)) return;
+  appearance.fontScope = scope;
+  saveAppearance();
+  applyAppearance();
+  document.querySelectorAll('.scope-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.scope === scope));
+  updateFontPreview();
+}
+
+function resetTypography() {
+  const d = defaultAppearance();
+  appearance.msgFontSize = d.msgFontSize;
+  appearance.fontFamily = d.fontFamily;
+  appearance.fontCustom = '';
+  appearance.msgFontWeight = d.msgFontWeight;
+  appearance.msgLineHeight = d.msgLineHeight;
+  appearance.fontScope = d.fontScope;
+  saveAppearance();
+  applyAppearance();
+  document.querySelectorAll('.font-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.font === appearance.fontFamily));
+  document.querySelectorAll('.weight-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.weight === appearance.msgFontWeight));
+  document.querySelectorAll('.scope-chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.scope === appearance.fontScope));
+  const row = document.getElementById('custom-font-row');
+  if (row) row.style.display = 'none';
+  const input = document.getElementById('custom-font-input');
+  if (input) input.value = '';
+  const sizeLabel = document.getElementById('font-size-value');
+  if (sizeLabel) sizeLabel.textContent = appearance.msgFontSize + 'px';
+  const lhLabel = document.getElementById('line-height-value');
+  if (lhLabel) lhLabel.textContent = appearance.msgLineHeight.toFixed(2);
+  updateFontPreview();
+  showToast(I18N.t('toast.typographyReset'), 'success');
+}
+
+function toggleTails() {
+  appearance.tails = appearance.tails === false;
+  saveAppearance();
+  applyAppearance();
+  const sw = document.getElementById('tails-switch');
+  if (sw) sw.classList.toggle('on', appearance.tails !== false);
 }
 
 // ==================== PIN-КОД ====================
@@ -274,13 +554,21 @@ async function resetE2EE() {
   if (!confirm(I18N.t('confirm.resetKeys'))) return;
   try {
     identity = await E2EE.generateIdentity();
-    localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
-    localStorage.removeItem(SESSIONS_KEY);
+    writeIdentity(identityStorageKey(currentUser.id), identity);
+    localStorage.setItem(IDENTITY_OWNER_KEY, String(currentUser.id));
+    localStorage.removeItem(scopedStorageKey(SESSIONS_KEY));
     chatKeys = {};
     groupKeyBlobs = {};
-    localStorage.removeItem(GROUP_KEYS_KEY);
+    localStorage.removeItem(scopedStorageKey(GROUP_KEYS_KEY));
     clearPlaintextCache();
     await publishOwnPublicKey();
+    // Владелец групп/каналов перевыпускает ключи: иначе старые группы
+    // остались бы без ключа и перестали бы расшифровываться.
+    for (const chat of chats.filter(c =>
+      (c.type === 'group' || c.type === 'supergroup' || c.type === 'channel') &&
+      c.owner_id === currentUser.id)) {
+      try { await createAndPublishGroupKey(chat); } catch (e) { /* не критично */ }
+    }
     showToast(I18N.t('toast.keysReset'), 'success');
     if (currentChatId) renderMessages(currentChatId);
   } catch (e) {
@@ -296,10 +584,13 @@ function updateEncryptionBadge() {
   if (chat.type === 'private') {
     const other = chat.members?.find(m => m.id !== currentUser.id);
     const hasKey = other && other.public_key;
-    badge.textContent = hasKey ? '🔒 E2EE' : I18N.t('chat.waitingKey');
     badge.className = 'enc-badge' + (hasKey ? ' secured' : ' pending');
+    badge.innerHTML = (hasKey ? Icons.svg('lock', { className: 'mq-icon--xs' }) : Icons.svg('clock', { className: 'mq-icon--xs' })) +
+      `<span></span>`;
+    badge.querySelector('span').textContent = hasKey ? 'E2EE' : I18N.t('chat.waitingKey');
   } else {
-    badge.textContent = I18N.t('chat.encGroup');
+    badge.innerHTML = Icons.svg('shield-check', { className: 'mq-icon--xs' }) + `<span></span>`;
+    badge.querySelector('span').textContent = I18N.t('chat.encGroup');
     badge.className = 'enc-badge secured';
   }
   badge.style.display = 'inline-flex';
@@ -323,16 +614,23 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function showToast(text, type = '') {
+function showToast(text, type = '', iconName = '') {
   const container = document.getElementById('toast-container');
+  if (!container) return;
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.textContent = text;
+  if (iconName) {
+    toast.innerHTML = Icons.svg(iconName, { className: 'mq-icon--sm toast-icon' }) +
+      `<span class="toast-text"></span>`;
+    toast.querySelector('.toast-text').textContent = text;
+  } else {
+    toast.textContent = text;
+  }
   container.appendChild(toast);
   setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transition = 'all 0.3s';
-    setTimeout(() => toast.remove(), 300);
+    // Анимация выхода перед удалением
+    toast.classList.add('closing');
+    setTimeout(() => toast.remove(), 220);
   }, 3500);
 }
 
@@ -449,6 +747,149 @@ function normalizeChat(chat) {
   };
 }
 
+// ==================== ВЛАДЕЛЕЦ ПРОЕКТА ====================
+// Только серверный флаг is_owner. Телефон на клиенте не сравниваем:
+// у чужих участников он замаскирован, а у обычных аккаунтов может
+// случайно совпасть после нормализации.
+function isOwnerUser(user) {
+  if (!user) return false;
+  return Number(user.is_owner) === 1 || user.is_owner === true;
+}
+
+// Бейдж в шапке — только для личного чата с владельцем.
+// Названия групп/каналов и «Избранное» владельцем не являются.
+function chatOwner(chat) {
+  if (!chat || chat.type !== 'private' || !currentUser) return null;
+  return (chat.members || []).find(m => m.id !== currentUser.id && isOwnerUser(m)) || null;
+}
+
+function ownerBadgeHtml() {
+  const label = escapeHtml(I18N.t('owner.badge'));
+  return '<span class="owner-badge" role="img" aria-label="' + label + '" data-tooltip="' + label + '">' +
+    '<svg class="owner-badge__crown" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<path d="M3 8.2l4.4 3.2L12 4l4.6 7.4L21 8.2 19.4 19H4.6L3 8.2z"/>' +
+    '<path d="M8 22h8"/></svg>' +
+    '<svg class="owner-badge__check" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<path d="M5 12.5l4.2 4.2L19 7"/></svg></span>';
+}
+
+function appendOwnerBadge(parent, target) {
+  if (!parent || !isOwnerUser(target)) return false;
+  const slot = document.createElement('span');
+  slot.className = 'owner-badge-slot';
+  slot.innerHTML = ownerBadgeHtml();
+  parent.appendChild(slot);
+  return true;
+}
+function customBadgeHtml() {
+  const badge = BADGE_CHOICES.find(b => b.id === privacy.badge);
+  if (!badge || !badge.icon) return '';
+  const label = escapeHtml(I18N.t(badge.label));
+  return '<span class="user-badge" role="img" aria-label="' + label + '" data-tooltip="' + label + '">' +
+    Icons.svg(badge.icon, { className: 'user-badge__icon' }) + '</span>';
+}
+
+let privacyGuardBound = false;
+
+// Защита от скриншотов: blur при уходе из вкладки и на PrintScreen.
+// Полностью ОС-скриншоты не блокирует, но скрывает содержимое в эти моменты.
+function applyPrivacyFeatures() {
+  const root = document.documentElement;
+  root.classList.toggle('mq-screenshot-guard', !!privacy.screenshotGuard);
+  if (!privacy.screenshotGuard) root.classList.remove('mq-privacy-blur');
+  if (!privacyGuardBound && privacy.screenshotGuard) {
+    privacyGuardBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (!privacy.screenshotGuard) return;
+      document.documentElement.classList.toggle('mq-privacy-blur', document.visibilityState !== 'visible');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!privacy.screenshotGuard || e.key !== 'PrintScreen') return;
+      const root = document.documentElement;
+      root.classList.add('mq-privacy-blur');
+      setTimeout(() => {
+        if (document.visibilityState === 'visible') root.classList.remove('mq-privacy-blur');
+      }, 1200);
+    });
+  }
+}
+
+function panicLock() {
+  try {
+    if (typeof clearPlaintextCache === 'function') clearPlaintextCache();
+  } catch (e) { /* ignore */ }
+  try { sessionStorage.clear(); } catch (e) { /* ignore */ }
+  try {
+    localStorage.removeItem('ciphertalk_token');
+    localStorage.removeItem('ciphertalk_user');
+  } catch (e) { /* ignore */ }
+  clearSession(false);
+  location.replace(location.pathname);
+}
+
+// ==================== АВТОУДАЛЕНИЕ СООБЩЕНИЙ ====================
+const CHAT_TTL_KEY = 'ciphertalk_chat_ttl';
+const TTL_CHOICES = [0, 60, 300, 3600, 86400];
+const TTL_LABEL_KEYS = { 0: 'ttl.off', 60: 'ttl.1m', 300: 'ttl.5m', 3600: 'ttl.1h', 86400: 'ttl.1d' };
+
+function readChatTtlMap() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CHAT_TTL_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function getChatTtl(chatId) {
+  const value = Number(readChatTtlMap()[String(chatId)]);
+  return TTL_CHOICES.includes(value) ? value : 0;
+}
+
+function ttlLabel(seconds) {
+  return I18N.t(TTL_LABEL_KEYS[Number(seconds)] || 'ttl.off');
+}
+
+function setChatTtl(chatId, seconds) {
+  const value = TTL_CHOICES.includes(Number(seconds)) ? Number(seconds) : 0;
+  const map = readChatTtlMap();
+  if (value) map[String(chatId)] = value;
+  else delete map[String(chatId)];
+  try { localStorage.setItem(CHAT_TTL_KEY, JSON.stringify(map)); } catch (e) {}
+  updateChatHeader();
+}
+
+const expiryTimers = new Map();
+
+function expiryKey(chatId, messageId) {
+  return String(chatId) + ':' + String(messageId);
+}
+
+function scheduleMessageExpiry(chatId, message) {
+  const expiresAt = Number(message && message.expires_at);
+  if (!chatId || !expiresAt) return;
+  const key = expiryKey(chatId, message.id);
+  if (expiryTimers.has(key)) clearTimeout(expiryTimers.get(key));
+  const delay = Math.max(0, expiresAt - Date.now());
+  const timer = setTimeout(() => {
+    expiryTimers.delete(key);
+    const list = messages[chatId];
+    if (!list) return;
+    const index = list.findIndex(m => m.id === message.id);
+    if (index < 0) return;
+    list.splice(index, 1);
+    if (currentChatId === Number(chatId)) renderMessages(Number(chatId));
+  }, Math.min(delay, 2147483647));
+  expiryTimers.set(key, timer);
+}
+
+function cancelMessageExpiry(chatId, messageId) {
+  const key = expiryKey(chatId, messageId);
+  const timer = expiryTimers.get(key);
+  if (timer) clearTimeout(timer);
+  expiryTimers.delete(key);
+}
+
 function normalizeMessage(m) {
   return {
     id: Number(m.id),
@@ -466,6 +907,7 @@ function normalizeMessage(m) {
     forwarded_from: m.forwarded_from ?? m.forwardedFrom ?? null,
     reactions: m.reactions || {},
     pinned: m.pinned || 0,
+    expires_at: Number(m.expires_at ?? m.expiresAt) || null,
     created_at: Number(m.created_at ?? m.createdAt ?? Date.now())
   };
 }
@@ -486,9 +928,27 @@ function getChatName(chat) {
 }
 
 function getChatAvatar(chat) {
-  if (chat.type === 'saved') return '⭐';
+  if (chat.type === 'saved') return '';
   const name = getChatName(chat);
   return name[0]?.toUpperCase() || '?';
+}
+
+// Иконка аватара чата (для «Избранного» — звезда вместо буквы)
+function getChatAvatarIcon(chat) {
+  return chat && chat.type === 'saved' ? 'star' : null;
+}
+
+function chatAvatarMarkup(chat) {
+  const icon = getChatAvatarIcon(chat);
+  if (icon) return Icons.svg(icon, { className: 'mq-icon--lg' });
+  return escapeHtml(getChatAvatar(chat));
+}
+
+function setChatAvatar(el, chat) {
+  if (!el) return;
+  const icon = getChatAvatarIcon(chat);
+  if (icon) el.innerHTML = Icons.svg(icon, { className: 'mq-icon--lg' });
+  else el.textContent = getChatAvatar(chat);
 }
 
 function isChatOnline(chat) {
@@ -520,12 +980,35 @@ async function api(path, options = {}) {
 const E2EE = window.CipherTalkE2EE;
 
 const IDENTITY_KEY = 'ciphertalk_identity';
+const IDENTITY_OWNER_KEY = 'ciphertalk_identity_owner';
 const SESSIONS_KEY = 'ciphertalk_sessions';
 const GROUP_KEYS_KEY = 'ciphertalk_group_keys';
 
 let identity = null;         // { publicKey, privateKey } в base64
 let chatKeys = {};           // chatId -> { kind: 'direct'|'group', session?, groupKey? }
 let groupKeyBlobs = {};      // chatId -> { version, wrapped, createdBy }
+
+// Ключи, сессии и кэш расшифровок привязаны к аккаунту. Иначе на одном
+// устройстве второй пользователь мог бы использовать чужой приватный ключ.
+function identityStorageKey(userId) {
+  return `${IDENTITY_KEY}_u${userId}`;
+}
+
+function scopedStorageKey(base) {
+  return currentUser ? `${base}_u${currentUser.id}` : base;
+}
+
+function readIdentity(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    if (parsed && parsed.publicKey && parsed.privateKey) return parsed;
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function writeIdentity(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
 
 function assertWebCrypto() {
   if (!window.crypto || !window.crypto.subtle) {
@@ -535,20 +1018,49 @@ function assertWebCrypto() {
 }
 
 async function getOrCreateIdentity() {
-  const saved = localStorage.getItem(IDENTITY_KEY);
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (parsed && parsed.publicKey && parsed.privateKey) return parsed;
-    } catch (e) { /* пересоздадим */ }
-  }
+  const saved = readIdentity(IDENTITY_KEY);
+  if (saved) return saved;
   const created = await E2EE.generateIdentity();
-  localStorage.setItem(IDENTITY_KEY, JSON.stringify(created));
+  writeIdentity(IDENTITY_KEY, created);
   return created;
 }
 
 async function ensureLocalIdentity() {
   if (!identity) identity = await getOrCreateIdentity();
+  return identity;
+}
+
+// При входе закрепляем личность за конкретным аккаунтом. Первый пользователь
+// на устройстве может унаследовать уже созданную пару, остальные получают
+// собственную — приватный ключ одного аккаунта не достаётся другому.
+async function ensureIdentityForUser(userId) {
+  const key = identityStorageKey(userId);
+  let saved = readIdentity(key);
+
+  if (!saved) {
+    const legacy = readIdentity(IDENTITY_KEY);
+    const owner = Number(localStorage.getItem(IDENTITY_OWNER_KEY) || 0);
+    if (legacy && (!owner || owner === userId)) {
+      saved = legacy;
+      // Однократно переносим состояние старого формата в пространство аккаунта.
+      for (const base of [SESSIONS_KEY, GROUP_KEYS_KEY, PLAINTEXT_CACHE_KEY]) {
+        const oldValue = localStorage.getItem(base);
+        const newKey = `${base}_u${userId}`;
+        if (oldValue && !localStorage.getItem(newKey)) localStorage.setItem(newKey, oldValue);
+      }
+    } else {
+      saved = await E2EE.generateIdentity();
+    }
+    writeIdentity(key, saved);
+  }
+
+  localStorage.setItem(IDENTITY_OWNER_KEY, String(userId));
+  identity = saved;
+  chatKeys = {};
+  plaintextCache.clear();
+  persistedPlaintext = null;
+  // Групповые ключи тоже хранятся в пространстве аккаунта.
+  groupKeyBlobs = loadGroupKeyBlobs();
   return identity;
 }
 
@@ -560,7 +1072,7 @@ async function getOrCreateLocalKeyPair() {
 
 function loadSessionMap() {
   try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY)) || {};
+    return JSON.parse(localStorage.getItem(scopedStorageKey(SESSIONS_KEY))) || {};
   } catch (e) {
     return {};
   }
@@ -569,7 +1081,7 @@ function loadSessionMap() {
 function saveSession(chatId, session) {
   const all = loadSessionMap();
   all[chatId] = E2EE.serializeSession(session);
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(all));
+  localStorage.setItem(scopedStorageKey(SESSIONS_KEY), JSON.stringify(all));
 }
 
 function loadSession(chatId) {
@@ -579,14 +1091,14 @@ function loadSession(chatId) {
 
 function loadGroupKeyBlobs() {
   try {
-    return JSON.parse(localStorage.getItem(GROUP_KEYS_KEY)) || {};
+    return JSON.parse(localStorage.getItem(scopedStorageKey(GROUP_KEYS_KEY))) || {};
   } catch (e) {
     return {};
   }
 }
 
 function saveGroupKeyBlobs() {
-  localStorage.setItem(GROUP_KEYS_KEY, JSON.stringify(groupKeyBlobs));
+  localStorage.setItem(scopedStorageKey(GROUP_KEYS_KEY), JSON.stringify(groupKeyBlobs));
 }
 
 // Ожидание группового ключа от сервера
@@ -783,7 +1295,7 @@ let persistedPlaintext = null;         // { cacheKey: plaintext }
 function loadPersistedPlaintext() {
   if (persistedPlaintext) return persistedPlaintext;
   try {
-    persistedPlaintext = JSON.parse(localStorage.getItem(PLAINTEXT_CACHE_KEY)) || {};
+    persistedPlaintext = JSON.parse(localStorage.getItem(scopedStorageKey(PLAINTEXT_CACHE_KEY))) || {};
   } catch (e) {
     persistedPlaintext = {};
   }
@@ -806,14 +1318,14 @@ function persistPlaintext(chatId, content, text) {
     }
   }
   try {
-    localStorage.setItem(PLAINTEXT_CACHE_KEY, JSON.stringify(store));
+    localStorage.setItem(scopedStorageKey(PLAINTEXT_CACHE_KEY), JSON.stringify(store));
   } catch (e) { /* хранилище переполнено — пропускаем */ }
 }
 
 function clearPlaintextCache() {
   plaintextCache.clear();
   persistedPlaintext = {};
-  try { localStorage.removeItem(PLAINTEXT_CACHE_KEY); } catch (e) { /* ignore */ }
+  try { localStorage.removeItem(scopedStorageKey(PLAINTEXT_CACHE_KEY)); } catch (e) { /* ignore */ }
 }
 
 // Кэш только что отправленных сообщений: подстраховка для расшифровки
@@ -1069,7 +1581,7 @@ async function step3LoginNext() {
 
     if (ok && data.success) {
       await enterApp(data, kp);
-      showToast(I18N.t('auth.welcome', { name: currentUser.name }) + ' 🔐', 'success');
+      showToast(I18N.t('auth.welcome', { name: currentUser.name }), 'success', 'shield-check');
     } else {
       showToast(data.error || I18N.t('err.login'), 'error');
     }
@@ -1089,7 +1601,7 @@ async function loginWithToken() {
 
     if (ok && data.success) {
       await enterApp(data, kp);
-      showToast(I18N.t('auth.welcome', { name: currentUser.name }) + ' 🔐', 'success');
+      showToast(I18N.t('auth.welcome', { name: currentUser.name }), 'success', 'shield-check');
     } else {
       showToast(data.error || I18N.t('err.login'), 'error');
       if (data && /просроч|недействительн/i.test(data.error || '')) goToStep(1);
@@ -1132,7 +1644,7 @@ async function checkUsername() {
         btn.disabled = false;
         regState.username = value;
       } else {
-        hint.textContent = '❌ ' + (data.error || I18N.t('err.usernameTaken'));
+        hint.textContent = data.error || I18N.t('err.usernameTaken');
         hint.className = 'input-hint error';
         input.classList.add('error');
         input.classList.remove('success');
@@ -1205,15 +1717,20 @@ function togglePassword(inputId, btn) {
   const input = document.getElementById(inputId);
   if (input.type === 'password') {
     input.type = 'text';
-    btn.textContent = '🙈';
+    btn.innerHTML = Icons.svg('eye-off', { className: 'mq-icon--sm' });
+    btn.setAttribute('aria-label', I18N.t('auth.hidePassword') || 'Hide password');
   } else {
     input.type = 'password';
-    btn.textContent = '👁️';
+    btn.innerHTML = Icons.svg('eye', { className: 'mq-icon--sm' });
+    btn.setAttribute('aria-label', I18N.t('auth.showPassword') || 'Show password');
   }
 }
 
 async function enterApp(data) {
   currentUser = normalizeUser(data.user);
+  await ensureIdentityForUser(currentUser.id);
+  // Настройки внешнего вида и приватности привязаны к аккаунту
+  reloadAppearanceForUser();
   if (data.token) {
     authToken = data.token;
     localStorage.setItem('ciphertalk_token', authToken);
@@ -1231,13 +1748,117 @@ async function enterApp(data) {
 }
 
 // ==================== ПРИЛОЖЕНИЕ ====================
+
+/**
+ * Определяет тип устройства и записывает его в <html data-device>:
+ *   phone   — телефон (одна колонка, нижняя навигация)
+ *   tablet  — планшет (две колонки)
+ *   desktop — ПК (три колонки)
+ * Также помечает тип указателя: fine (мышь) или coarse (палец).
+ */
+function detectDevice() {
+  const w = window.innerWidth;
+  const coarse = typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches;
+  let device = 'desktop';
+  if (w <= 640) device = 'phone';
+  else if (w <= 1024) device = 'tablet';
+
+  const html = document.documentElement;
+  html.setAttribute('data-device', device);
+  html.setAttribute('data-pointer', coarse ? 'coarse' : 'fine');
+  return device;
+}
+
+/** Следит за сменой размера окна — версия переключается на лету. */
+function watchDevice() {
+  detectDevice();
+  let timer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(timer);
+    timer = setTimeout(detectDevice, 120);
+  });
+}
+
+/** Нижняя навигация телефона: активная вкладка. */
+function updateMobileNav() {
+  const nav = document.getElementById('mobile-nav');
+  if (!nav) return;
+  const chatOpen = document.getElementById('app-container').classList.contains('chat-open');
+  const chatsTab = nav.querySelector('[data-action="mobileChats"]');
+  if (chatsTab) chatsTab.classList.toggle('active', !chatOpen);
+}
+
 function initApp() {
   updateMenuProfile();
+  setupMessagesScroll();
   connectWebSocket();
+  refreshPublicAccess();
+  updateMobileNav();
+}
+
+// ==================== ПРОКРУТКА СПИСКА СООБЩЕНИЙ ====================
+let scrollRafPending = 0;
+
+function setupMessagesScroll() {
+  const container = getMessagesContainer();
+  if (!container || container.dataset.mqScroll === '1') return;
+  container.dataset.mqScroll = '1';
+  container.addEventListener('scroll', function () {
+    if (scrollRafPending) return;
+    const run = () => { scrollRafPending = 0; onMessagesScroll(); };
+    if (typeof requestAnimationFrame === 'function') scrollRafPending = requestAnimationFrame(run);
+    else scrollRafPending = setTimeout(run, 60);
+  }, { passive: true });
+}
+
+function onMessagesScroll() {
+  const container = getMessagesContainer();
+  if (!container) return;
+  // Подгружаем историю, когда пользователь доскроллил вверх
+  if (container.scrollTop <= 60) loadOlderMessages();
+  if (isScrolledToBottom(container, 160)) hideScrollFab();
+  else showScrollFab();
+}
+
+let fabBadgeCount = 0;
+
+function showScrollFab() {
+  const fab = document.getElementById('scroll-down-fab');
+  if (fab) fab.classList.add('visible');
+}
+
+// Счётчик непрочитанных сообщений на кнопке «вниз»
+function bumpScrollFabBadge() {
+  fabBadgeCount++;
+  const badge = document.getElementById('scroll-fab-badge');
+  if (badge) {
+    badge.textContent = fabBadgeCount > 99 ? '99+' : String(fabBadgeCount);
+    badge.style.display = '';
+  }
+  const fab = document.getElementById('scroll-down-fab');
+  if (fab) fab.classList.add('pulse');
+}
+
+function hideScrollFab() {
+  const fab = document.getElementById('scroll-down-fab');
+  if (fab) fab.classList.remove('visible', 'pulse');
+  fabBadgeCount = 0;
+  const badge = document.getElementById('scroll-fab-badge');
+  if (badge) {
+    badge.style.display = 'none';
+    badge.textContent = '0';
+  }
+}
+
+function scrollToBottom() {
+  scrollMessagesToBottom(getMessagesContainer(), true);
 }
 
 function updateMenuProfile() {
-  document.getElementById('menu-name').textContent = currentUser.name || I18N.t('chat.user');
+  const menuName = document.getElementById('menu-name');
+  menuName.innerHTML = escapeHtml(currentUser.name || I18N.t('chat.user')) +
+    customBadgeHtml() + (isOwnerUser(currentUser) ? ownerBadgeHtml() : '');
   document.getElementById('menu-username').textContent = '@' + (currentUser.username || 'username');
   document.getElementById('menu-phone').textContent = currentUser.phone || '';
   const avatarEl = document.getElementById('menu-avatar');
@@ -1304,6 +1925,27 @@ async function handleWSMessage(msg) {
       if (currentChatId && !getChatById(currentChatId)) closeChat();
       break;
 
+    case 'chat_deleted':
+      {
+        const chatId = Number(msg.chatId);
+        chats = (chats || []).filter(c => Number(c.id) !== chatId);
+        if (messages && messages[chatId]) delete messages[chatId];
+        if (currentChatId === chatId) closeChat();
+        delete chatKeys[chatId];
+        // Очищаем все таймеры истечения для этого чата
+        for (const k of Array.from(expiryTimers.keys())) {
+          if (String(k).startsWith(String(chatId) + ':')) {
+            const t = expiryTimers.get(k);
+            if (t) clearTimeout(t);
+            expiryTimers.delete(k);
+          }
+        }
+        delete expiryTimers[chatId];
+        pendingGroupKeys.delete(chatId);
+        renderChatList();
+      }
+      break;
+
     case 'new_chat':
       upsertChat(msg.chat);
       renderChatList();
@@ -1356,10 +1998,26 @@ async function handleWSMessage(msg) {
 
     case 'messages': {
       const chatId = Number(msg.chatId);
-      messages[chatId] = (msg.messages || []).map(normalizeMessage);
-      if (currentChatId === chatId) {
-        renderMessages(chatId);
-        markChatRead(chatId);
+      const incoming = (msg.messages || []).map(normalizeMessage);
+      chatPager.set(chatId, { hasMore: !!msg.hasMore, beforeId: msg.beforeId || null });
+      loadingOlder.delete(chatId);
+      if (msg.older) {
+        // Подгрузка старых сообщений: дополняем историю без дублей
+        const list = messages[chatId] || (messages[chatId] = []);
+        const known = new Set(list.map(m => m.id));
+        const fresh = incoming.filter(m => !known.has(m.id));
+        if (fresh.length) {
+          list.unshift(...fresh);
+          fresh.forEach(m => scheduleMessageExpiry(chatId, m));
+          if (currentChatId === chatId) await refreshWindowPreservingScroll(chatId);
+        }
+      } else {
+        messages[chatId] = incoming;
+        incoming.forEach(m => scheduleMessageExpiry(chatId, m));
+        if (currentChatId === chatId) {
+          await renderMessages(chatId);
+          markChatRead(chatId);
+        }
       }
       break;
     }
@@ -1370,6 +2028,7 @@ async function handleWSMessage(msg) {
       const isNew = !messages[message.chat_id].some(m => m.id === message.id);
       if (isNew) {
         messages[message.chat_id].push(message);
+        scheduleMessageExpiry(message.chat_id, message);
         if (currentChatId === message.chat_id) appendMessage(message);
       }
       updateChatPreview(message.chat_id, message);
@@ -1392,6 +2051,7 @@ async function handleWSMessage(msg) {
 
     case 'message_deleted': {
       const chatId = Number(msg.chatId);
+      cancelMessageExpiry(chatId, Number(msg.messageId));
       if (messages[chatId]) {
         messages[chatId] = messages[chatId].filter(m => m.id !== Number(msg.messageId));
         if (currentChatId === chatId) renderMessages(chatId);
@@ -1503,6 +2163,28 @@ async function handleWSMessage(msg) {
       handlePublicKey(msg.userId, msg.publicKey);
       break;
 
+    case 'call_offer':
+      if (typeof handleCallOffer === 'function') handleCallOffer(msg);
+      break;
+    case 'call_answer':
+      if (typeof handleCallAnswer === 'function') handleCallAnswer(msg);
+      break;
+    case 'call_ice':
+      if (typeof handleCallIce === 'function') handleCallIce(msg);
+      break;
+    case 'call_reject':
+      if (typeof handleCallReject === 'function') handleCallReject(msg);
+      break;
+    case 'call_end':
+      if (typeof handleCallEnd === 'function') handleCallEnd(msg);
+      break;
+    case 'call_ringing':
+      if (typeof handleCallRinging === 'function') handleCallRinging(msg);
+      break;
+    case 'call_unavailable':
+      if (typeof handleCallUnavailable === 'function') handleCallUnavailable(msg);
+      break;
+
     case 'error':
       showToast(msg.error || I18N.t('err.server'), 'error');
       break;
@@ -1561,65 +2243,174 @@ function rebuildOnlineSet() {
   onlineUsers = set;
 }
 
-function renderChatList(filter = '') {
-  const container = document.getElementById('chat-list');
+// Список чатов тоже пересобирается инкрементально: раньше каждое новое сообщение
+// перерисовывало весь список (innerHTML) и запускало расшифровку превью у всех чатов.
+const chatListNodes = new Map(); // chatId -> HTMLElement
+const previewCache = new Map();  // chatId -> { sig, text }
+
+function previewSig(chat) {
+  return `${chat.last_message || ''}|${chat.last_message_iv || ''}|${chat.last_message_header || ''}|${chat.last_message_type || ''}`;
+}
+
+// Элемент чата строится через DOM API: это быстрее разбора HTML-строки
+// и не требует экранирования (текст попадает через textContent).
+function buildChatItem(chat) {
+  const el = document.createElement('div');
+  el.className = 'chat-item' + (currentChatId === chat.id ? ' active' : '');
+  el.setAttribute('data-action', 'openChat');
+  el.setAttribute('data-id', String(chat.id));
+  el.setAttribute('data-chat-id', String(chat.id));
+
+  const avatar = document.createElement('div');
+  avatar.className = 'chat-avatar' + (isChatOnline(chat) ? ' online' : '');
+  setChatAvatar(avatar, chat);
+
+  const info = document.createElement('div');
+  info.className = 'chat-info';
+
+  const top = document.createElement('div');
+  top.className = 'chat-top';
+  const nameWrap = document.createElement('span');
+  nameWrap.className = 'chat-name-wrap';
+  const name = document.createElement('span');
+  name.className = 'chat-name';
+  name.textContent = getChatName(chat);
+  nameWrap.appendChild(name);
+  appendOwnerBadge(nameWrap, chatOwner(chat));
+  const time = document.createElement('span');
+  time.className = 'chat-time';
+  time.textContent = chat.last_message_time ? formatTime(chat.last_message_time) : '';
+  top.appendChild(nameWrap);
+  top.appendChild(time);
+
+  const bottom = document.createElement('div');
+  bottom.className = 'chat-bottom';
+  const preview = document.createElement('span');
+  preview.className = 'chat-preview';
+  preview.setAttribute('data-preview-chat', String(chat.id));
+  preview.textContent = chatPreview(chat);
+  bottom.appendChild(preview);
+
+  info.appendChild(top);
+  info.appendChild(bottom);
+  el.appendChild(avatar);
+  el.appendChild(info);
+  return el;
+}
+
+function getFilteredChats(filter) {
   const folderId = typeof activeFolderId !== 'undefined' ? activeFolderId : null;
-  const filtered = chats.filter(c => {
+  return chats.filter(c => {
     if (folderId !== null) {
       const folder = (folders || []).find(f => Number(f.id) === Number(folderId));
       if (!folder || !(folder.chat_ids || []).includes(c.id)) return false;
     }
     return !filter || getChatName(c).toLowerCase().includes(filter.toLowerCase());
   });
+}
 
-  container.innerHTML = filtered.map(chat => {
-    const name = getChatName(chat);
-    const avatar = getChatAvatar(chat);
-    const isOnline = isChatOnline(chat);
+function updateChatItem(el, chat) {
+  if (!el) return;
+  const timeEl = el.querySelector ? el.querySelector('.chat-time') : null;
+  if (timeEl) {
     const time = chat.last_message_time ? formatTime(chat.last_message_time) : '';
-    return `
-      <div class="chat-item ${currentChatId === chat.id ? 'active' : ''}"
-           data-action="openChat" data-id="${chat.id}" data-chat-id="${chat.id}">
-        <div class="chat-avatar ${isOnline ? 'online' : ''}">${escapeHtml(avatar)}</div>
-        <div class="chat-info">
-          <div class="chat-top">
-            <span class="chat-name">${escapeHtml(name)}</span>
-            <span class="chat-time">${time}</span>
-          </div>
-          <div class="chat-bottom">
-            <span class="chat-preview" data-preview-chat="${chat.id}">${chatPreview(chat)}</span>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
+    if (timeEl.textContent !== time) timeEl.textContent = time;
+  }
+  const avatarEl = el.querySelector ? el.querySelector('.chat-avatar') : null;
+  if (avatarEl) avatarEl.classList.toggle('online', isChatOnline(chat));
+  const previewEl = el.querySelector ? el.querySelector('.chat-preview') : null;
+  if (previewEl) {
+    const cached = previewCache.get(chat.id);
+    if (cached && cached.sig === previewSig(chat)) {
+      if (previewEl.textContent !== cached.text) previewEl.textContent = cached.text;
+    } else {
+      const placeholder = chatPreview(chat);
+      if (previewEl.textContent !== placeholder) previewEl.textContent = placeholder;
+    }
+  }
+  el.classList.toggle('active', currentChatId === chat.id);
+}
+
+function renderChatList(filter = '') {
+  const container = document.getElementById('chat-list');
+  if (!container) return;
+  const filtered = getFilteredChats(filter);
+  const ids = filtered.map(c => c.id);
+  const prevIds = Array.from(chatListNodes.keys());
+  const sameOrder = prevIds.length === ids.length && prevIds.every((id, i) => id === ids[i]);
+  const sameSet = prevIds.length === ids.length && ids.every(id => chatListNodes.has(id));
+
+  if (!sameOrder && sameSet) {
+    // Порядок изменился (чат всплыл вверх) — переставляем готовые узлы
+    for (const id of ids) {
+      const el = chatListNodes.get(id);
+      if (el) container.appendChild(el);
+    }
+    for (const chat of filtered) updateChatItem(chatListNodes.get(chat.id), chat);
+  } else if (!sameOrder) {
+    const wasEmpty = !container.children || container.children.length === 0;
+    container.innerHTML = '';
+    chatListNodes.clear();
+    for (const chat of filtered) {
+      const el = buildChatItem(chat);
+      container.appendChild(el);
+      chatListNodes.set(chat.id, el);
+    }
+    // Каскадное появление — только при первой отрисовке списка
+    if (wasEmpty && typeof Motion !== 'undefined' && Motion.stagger) {
+      Motion.stagger(container, { max: 18 });
+    }
+  } else {
+    for (const chat of filtered) updateChatItem(chatListNodes.get(chat.id), chat);
+  }
 
   // Расшифровываем превью последнего сообщения (сервер хранит только шифротекст)
-  filtered.forEach(chat => refreshChatPreview(chat));
+  schedulePreviewRefresh(filtered);
+}
+
+// Превью расшифровываются в свободное время и только для видимых чатов
+function schedulePreviewRefresh(filtered) {
+  const run = () => {
+    for (const chat of filtered.slice(0, 24)) refreshChatPreview(chat);
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 900 });
+  else setTimeout(run, 80);
 }
 
 function chatPreview(chat) {
   if (!chat.last_message) return I18N.t('chat.noMessages');
   const labels = {
-    voice: I18N.t('chat.voiceMsg'),
-    video: I18N.t('chat.videoMsg'),
-    image: I18N.t('chat.imageMsg'),
-    file: I18N.t('chat.fileMsg')
+    voice: { icon: 'mic', text: I18N.t('chat.voiceMsg') },
+    video: { icon: 'video', text: I18N.t('chat.videoMsg') },
+    image: { icon: 'image', text: I18N.t('chat.imageMsg') },
+    file: { icon: 'paperclip', text: I18N.t('chat.fileMsg') }
   };
-  return labels[chat.last_message_type] || I18N.t('chat.loading');
+  const hit = labels[chat.last_message_type];
+  return hit ? hit.text : I18N.t('chat.loading');
 }
 
 async function refreshChatPreview(chat) {
   const el = document.querySelector(`.chat-preview[data-preview-chat="${chat.id}"]`);
   if (!el || !chat.last_message) return;
+  const sig = previewSig(chat);
+  const hit = previewCache.get(chat.id);
+  if (hit && hit.sig === sig) {
+    if (el.textContent !== hit.text) el.textContent = hit.text;
+    return;
+  }
   const labels = {
-    voice: I18N.t('chat.voiceMsg'),
-    video: I18N.t('chat.videoMsg'),
-    image: I18N.t('chat.imageMsg'),
-    file: I18N.t('chat.fileMsg')
+    voice: { icon: 'mic', text: I18N.t('chat.voiceMsg') },
+    video: { icon: 'video', text: I18N.t('chat.videoMsg') },
+    image: { icon: 'image', text: I18N.t('chat.imageMsg') },
+    file: { icon: 'paperclip', text: I18N.t('chat.fileMsg') }
   };
   if (labels[chat.last_message_type]) {
-    el.textContent = labels[chat.last_message_type];
+    const label = labels[chat.last_message_type];
+    previewCache.set(chat.id, { sig, text: label.text });
+    el.innerHTML = Icons.svg(label.icon, { className: 'mq-icon--xs mq-inline-icon' }) +
+      '<span class="cp-text"></span>';
+    const span = el.querySelector('.cp-text');
+    if (span) span.textContent = label.text;
     return;
   }
   try {
@@ -1629,12 +2420,18 @@ async function refreshChatPreview(chat) {
       iv: chat.last_message_iv,
       header: chat.last_message_header
     }, chat.id, chat.last_sender_id === currentUser.id);
-    el.textContent = String(text).slice(0, 80);
+    const preview = String(text).slice(0, 80);
+    previewCache.set(chat.id, { sig, text: preview });
+    el.textContent = preview;
   } catch (e) {
-    el.textContent = I18N.t('chat.encryptedMessage');
+    const fallback = I18N.t('chat.encryptedMessage');
+    previewCache.set(chat.id, { sig, text: fallback });
+    el.innerHTML = Icons.svg('lock', { className: 'mq-icon--xs mq-inline-icon' }) +
+      '<span class="cp-text"></span>';
+    const span = el.querySelector('.cp-text');
+    if (span) span.textContent = fallback;
   }
 }
-
 function searchChats(query) {
   renderChatList(query);
 }
@@ -1667,7 +2464,7 @@ function markChatRead(chatId) {
   if (!chat.last_read_by) chat.last_read_by = {};
   if ((chat.last_read_by[currentUser.id] || 0) >= lastId) return;
   chat.last_read_by[currentUser.id] = lastId;
-  sendWs({ type: 'read_messages', chatId, lastReadId: lastId });
+  if (!privacy.ghost) sendWs({ type: 'read_messages', chatId, lastReadId: lastId });
   updateTicksForChat(chatId);
 }
 
@@ -1684,10 +2481,16 @@ function updateTicksForChat(chatId) {
   const list = messages[chatId] || [];
   list.forEach(msg => {
     if (msg.sender_id !== currentUser?.id) return;
-    const el = document.querySelector(`.message[data-msg-id="${msg.id}"] .tick-marks`);
+    // Берём узел из кэша рендера: querySelector на каждое сообщение — лишний обход DOM
+    const node = msgRender.nodes.get(msg.id) ||
+      document.querySelector(`.message[data-msg-id="${msg.id}"]`);
+    if (!node) return;
+    const el = node.querySelector ? node.querySelector('.tick-marks') : null;
     if (!el) return;
     const read = isMessageReadByOthers(msg, chat);
-    el.textContent = read ? '✓✓' : '✓';
+    el.innerHTML = read
+      ? Icons.svg('check-check', { className: 'mq-icon--xs mq-icon--inherit' })
+      : Icons.svg('check', { className: 'mq-icon--xs mq-icon--inherit' });
     el.classList.toggle('read', read);
   });
 }
@@ -1705,10 +2508,11 @@ async function openChat(chatId) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('active-chat').style.display = 'flex';
   document.getElementById('app-container').classList.add('chat-open');
+  updateMobileNav();
 
-  document.querySelectorAll('.chat-item').forEach(el => {
-    el.classList.toggle('active', parseInt(el.dataset.chatId, 10) === chatId);
-  });
+  for (const [id, el] of chatListNodes) {
+    el.classList.toggle('active', Number(id) === chatId);
+  }
 
   updateChatHeader();
   sendWs({ type: 'get_messages', chatId, limit: 50 });
@@ -1719,7 +2523,19 @@ function updateChatHeader() {
   if (!chat) return;
 
   document.getElementById('chat-header-name').textContent = getChatName(chat);
-  document.getElementById('chat-header-avatar').textContent = getChatAvatar(chat);
+  const ownerSlot = document.getElementById('chat-header-owner');
+  if (ownerSlot) ownerSlot.innerHTML = chatOwner(chat) ? ownerBadgeHtml() : '';
+  const ttlEl = document.getElementById('chat-header-ttl');
+  const ttl = getChatTtl(chat.id);
+  if (ttlEl) {
+    ttlEl.innerHTML = ttl
+      ? Icons.svg('clock', { className: 'mq-icon--xs mq-icon--inherit' }) +
+        '<span>' + escapeHtml(ttlLabel(ttl)) + '</span>'
+      : '';
+    ttlEl.hidden = !ttl;
+    ttlEl.title = ttl ? I18N.t('ttl.header', { label: ttlLabel(ttl) }) : '';
+  }
+  setChatAvatar(document.getElementById('chat-header-avatar'), chat);
 
   const statusEl = document.getElementById('chat-header-status');
   if (chat.type === 'private') {
@@ -1740,36 +2556,233 @@ function updateChatHeader() {
     statusEl.textContent = I18N.t('chat.notes');
   }
   updateEncryptionBadge();
+
+  const isPrivate = chat.type === 'private';
+  const audioBtn = document.getElementById('call-audio-btn');
+  const videoBtn = document.getElementById('call-video-btn');
+  if (audioBtn) audioBtn.style.display = isPrivate ? '' : 'none';
+  if (videoBtn) videoBtn.style.display = isPrivate ? '' : 'none';
 }
 
-// ==================== ОТРИСОВКА СООБЩЕНИЙ ====================
-async function renderMessages(chatId) {
-  const container = document.getElementById('messages-container');
-  const chat = getChatById(chatId);
-  if (!chat) return;
+// ==================== ОТРИСОВКА СООБЩЕНИЙ (ОПТИМИЗИРОВАННАЯ) ====================
+// Раньше любое событие (новое сообщение, реакция, правка, чтение) пересобирало
+// весь список сообщений заново — это главный источник лагов в длинных чатах.
+// Теперь DOM-узлы переиспользуются: пересобирается только то, что изменилось.
+const MSG_WINDOW = 150;      // максимум сообщений, удерживаемых в DOM
+const MSG_WINDOW_DROP = 40;  // сколько узлов выбрасываем, когда окно переполнено
+const RENDER_CHUNK = 12;     // размер порции при параллельной сборке узлов
 
-  const list = messages[chatId] || [];
-  let key = null;
-  try { key = await getChatKey(chatId, chat); } catch (e) { key = null; }
+const msgRender = {
+  chatId: null,
+  order: [],       // id сообщений в порядке DOM
+  nodes: new Map() // id -> HTMLElement
+};
 
-  container.innerHTML = '';
+// Пагинация истории: hasMore/beforeId на чат + защита от повторных запросов
+const chatPager = new Map();
+const loadingOlder = new Set();
+
+function msgSig(msg) {
+  return `${msg.encrypted_content || ''}|${msg.iv || ''}|${msg.header || ''}|${msg.type || 'text'}`;
+}
+
+function reactionsSig(msg) {
+  const r = msg.reactions;
+  if (!r) return '';
+  return Object.keys(r).sort().map(k => `${k}:${(r[k] || []).length}`).join(',');
+}
+
+function getMessagesContainer() {
+  return document.getElementById('messages-container');
+}
+
+async function getChatKeySafe(chatId, chat) {
+  try { return await getChatKey(chatId, chat); } catch (e) { return null; }
+}
+
+function isScrolledToBottom(container, threshold = 140) {
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+
+function scrollMessagesToBottom(container, smooth = false) {
+  if (!container) return;
+  if (smooth && typeof container.scrollTo === 'function') {
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+  } else {
+    container.scrollTop = container.scrollHeight;
+  }
+  if (typeof hideScrollFab === 'function') hideScrollFab();
+}
+
+// Планировщик: несколько событий в одном кадре => один рендер
+const renderTasks = new Set();
+let renderScheduled = false;
+function scheduleRender(fn) {
+  renderTasks.add(fn);
+  if (renderScheduled) return;
+  renderScheduled = true;
+  const run = () => {
+    renderScheduled = false;
+    const tasks = Array.from(renderTasks);
+    renderTasks.clear();
+    for (const t of tasks) {
+      try { t(); } catch (e) { /* рендер не должен ломать UI */ }
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 16);
+}
+
+async function buildMessageNodes(list, chat, key) {
+  const out = [];
+  for (let i = 0; i < list.length; i += RENDER_CHUNK) {
+    const chunk = list.slice(i, i + RENDER_CHUNK);
+    const built = await Promise.all(chunk.map(async (msg) => {
+      const sig = msgSig(msg);
+      const rsig = reactionsSig(msg);
+      const old = msgRender.nodes.get(msg.id);
+      // Узел актуален — переиспользуем (ни расшифровки, ни пересоздания DOM)
+      if (old && old.dataset && old.dataset.sig === sig && old.dataset.rsig === rsig) {
+        return { msg, el: old };
+      }
+      const el = await buildMessageElement(msg, chat, key, false);
+      if (el && el.dataset) {
+        el.dataset.sig = sig;
+        el.dataset.rsig = rsig;
+      }
+      return { msg, el };
+    }));
+    out.push(...built);
+  }
+  return out;
+}
+
+function applyMessageNodes(container, built) {
+  const nodes = [];
+  const map = new Map();
   let lastDate = '';
-  for (const msg of list) {
-    const date = formatDate(msg.created_at);
+  for (const item of built) {
+    if (!item || !item.msg) continue;
+    const date = formatDate(item.msg.created_at);
     if (date !== lastDate) {
-      container.appendChild(buildDateSeparator(date));
+      nodes.push(buildDateSeparator(date));
       lastDate = date;
     }
-    const el = await buildMessageElement(msg, chat, key);
-    if (el) container.appendChild(el);
+    if (item.el) {
+      nodes.push(item.el);
+      map.set(item.msg.id, item.el);
+    }
   }
-  container.scrollTop = container.scrollHeight;
+  container.innerHTML = '';
+  if (typeof document.createDocumentFragment === 'function') {
+    const frag = document.createDocumentFragment();
+    for (const n of nodes) frag.appendChild(n);
+    container.appendChild(frag);
+  } else {
+    for (const n of nodes) container.appendChild(n);
+  }
+  msgRender.nodes = map;
+  msgRender.order = built.filter(b => b && b.el).map(b => b.msg.id);
+}
+
+async function renderMessages(chatId, opts = {}) {
+  const container = getMessagesContainer();
+  const chat = getChatById(chatId);
+  if (!chat || !container) return;
+
+  const list = messages[chatId] || [];
+  const key = await getChatKeySafe(chatId, chat);
+  const start = Math.max(0, list.length - MSG_WINDOW);
+  const view = list.slice(start);
+  const ids = view.map(m => m.id);
+
+  const sameOrder = msgRender.chatId === chatId &&
+    msgRender.order.length === ids.length &&
+    msgRender.order.every((id, i) => id === ids[i]);
+
+  if (sameOrder) {
+    // Окно не изменилось — обновляем только изменённые сообщения
+    const dirty = view.filter((m) => {
+      const el = msgRender.nodes.get(m.id);
+      if (!el || !el.dataset) return true;
+      return el.dataset.sig !== msgSig(m) || el.dataset.rsig !== reactionsSig(m);
+    });
+    // Точечно правим только если все узлы на месте — иначе нужна пересборка
+    const patchable = dirty.every((m) => {
+      const el = msgRender.nodes.get(m.id);
+      return !!(el && el.parentNode);
+    });
+    if (dirty.length && patchable) {
+      const built = await buildMessageNodes(dirty, chat, key);
+      for (const item of built) {
+        const old = msgRender.nodes.get(item.msg.id);
+        if (!item.el || !old) continue;
+        if (typeof old.replaceWith === 'function') old.replaceWith(item.el);
+        else if (old.parentNode) old.parentNode.replaceChild(item.el, old);
+        msgRender.nodes.set(item.msg.id, item.el);
+      }
+      updateTicksForChat(chatId);
+      if (opts.scroll !== false) scrollMessagesToBottom(container, opts.smooth);
+      return;
+    }
+    if (!dirty.length) {
+      updateTicksForChat(chatId);
+      if (opts.scroll !== false) scrollMessagesToBottom(container, opts.smooth);
+      return;
+    }
+    // узлы потеряны (чат переключили) — падаем в полную пересборку ниже
+  }
+
+  // Окно изменилось: пересобираем, но переиспользуем готовые узлы
+  const prevTop = container.scrollTop;
+  const prevHeight = container.scrollHeight;
+  const keepPosition = prevTop <= 8; // пользователь наверху — подгрузились старые
+
+  const built = await buildMessageNodes(view, chat, key);
+  applyMessageNodes(container, built);
+  msgRender.chatId = chatId;
+
+  if (keepPosition) {
+    const delta = container.scrollHeight - prevHeight;
+    if (delta > 0) container.scrollTop = container.scrollTop + delta;
+  } else if (opts.scroll !== false) {
+    scrollMessagesToBottom(container, opts.smooth);
+  }
+}
+
+// Пересобирает окно сообщений, сохраняя позицию скролла (подгрузка старых)
+async function refreshWindowPreservingScroll(chatId) {
+  const container = getMessagesContainer();
+  const chat = getChatById(chatId);
+  if (!container || !chat) return;
+  const prevHeight = container.scrollHeight;
+  const prevTop = container.scrollTop;
+  const list = messages[chatId] || [];
+  const start = Math.max(0, list.length - MSG_WINDOW);
+  const view = list.slice(start);
+  const key = await getChatKeySafe(chatId, chat);
+  const built = await buildMessageNodes(view, chat, key);
+  applyMessageNodes(container, built);
+  msgRender.chatId = chatId;
+  const delta = container.scrollHeight - prevHeight;
+  if (delta > 0) container.scrollTop = prevTop + delta;
+}
+
+// Догрузка старых сообщений при прокрутке вверх
+function loadOlderMessages() {
+  const chatId = currentChatId;
+  if (!chatId || loadingOlder.has(chatId)) return;
+  const pager = chatPager.get(chatId);
+  if (!pager || !pager.hasMore || !pager.beforeId) return;
+  loadingOlder.add(chatId);
+  sendWs({ type: 'get_messages', chatId, limit: 50, beforeId: pager.beforeId });
 }
 
 async function appendMessage(msg) {
-  const container = document.getElementById('messages-container');
+  const container = getMessagesContainer();
   const chat = getChatById(currentChatId);
-  if (!chat) return;
+  if (!chat || !container) return;
 
   const list = messages[currentChatId] || [];
   const prev = list[list.length - 2];
@@ -1777,20 +2790,34 @@ async function appendMessage(msg) {
     container.appendChild(buildDateSeparator(formatDate(msg.created_at)));
   }
 
-  const shouldScroll = container.scrollHeight - container.scrollTop - container.clientHeight < 180;
-  let key = null;
-  try { key = await getChatKey(currentChatId, chat); } catch (e) { key = null; }
+  const shouldScroll = isScrolledToBottom(container, 180);
+  const key = await getChatKeySafe(currentChatId, chat);
   // «Печатная машинка» только для свежих входящих текстовых сообщений.
   const animate = msg.sender_id !== currentUser.id && (msg.type === 'text' || !msg.type);
   const el = await buildMessageElement(msg, chat, key, animate);
   if (el) {
+    if (el.dataset) {
+      el.dataset.sig = msgSig(msg);
+      el.dataset.rsig = reactionsSig(msg);
+    }
     container.appendChild(el);
+    msgRender.chatId = currentChatId;
+    msgRender.order.push(msg.id);
+    msgRender.nodes.set(msg.id, el);
+    // Окно переполнено — выбрасываем самые старые узлы
+    while (msgRender.order.length > MSG_WINDOW) {
+      const oldId = msgRender.order.shift();
+      const oldEl = msgRender.nodes.get(oldId);
+      if (oldEl && oldEl.remove) oldEl.remove();
+      msgRender.nodes.delete(oldId);
+    }
     if (msg.sender_id === currentUser.id) {
       el.classList.add('sent-pop');
       setTimeout(() => el.classList.remove('sent-pop'), 360);
     }
   }
-  if (shouldScroll) container.scrollTop = container.scrollHeight;
+  if (shouldScroll) scrollMessagesToBottom(container);
+  else { showScrollFab(); bumpScrollFabBadge(); }
 }
 
 function buildDateSeparator(date) {
@@ -1802,6 +2829,16 @@ function buildDateSeparator(date) {
   return div;
 }
 
+// Плейсхолдеры, которые показываются вместо текста сообщения.
+// Раньше это были эмодзи в тексте — теперь у них отдельная SVG-иконка.
+function placeholderIcon(text) {
+  if (!text) return null;
+  if (text === I18N.t('chat.noKey')) return 'lock';
+  if (text === I18N.t('chat.decryptFailed')) return 'alert-circle';
+  if (text === I18N.t('chat.waitingKey')) return 'clock';
+  return null;
+}
+
 async function buildMessageElement(msg, chat, key, animate = false) {
   const isOut = msg.sender_id === currentUser.id;
   const wrapper = document.createElement('div');
@@ -1809,9 +2846,11 @@ async function buildMessageElement(msg, chat, key, animate = false) {
   wrapper.dataset.msgId = String(msg.id);
 
   if (!isOut && chat.type !== 'private' && chat.type !== 'saved') {
+    const senderMember = chat.members?.find(m => m.id === msg.sender_id);
     const senderEl = document.createElement('div');
     senderEl.className = 'message-sender';
-    senderEl.textContent = msg.sender_name || chat.members?.find(m => m.id === msg.sender_id)?.name || '';
+    senderEl.textContent = msg.sender_name || senderMember?.name || '';
+    appendOwnerBadge(senderEl, senderMember);
     wrapper.appendChild(senderEl);
   }
 
@@ -1822,11 +2861,18 @@ async function buildMessageElement(msg, chat, key, animate = false) {
       const preview = document.createElement('div');
       preview.className = 'reply-preview';
       let author = original.sender_name || I18N.t('chat.peer');
-      let text = '🔒';
+      let text = '';
+      let icon = 'lock';
       try {
-        if (key) text = await decryptChatText(key, original, chat.id, original.sender_id === currentUser.id);
-      } catch (e) { text = '🔒'; }
-      preview.innerHTML = `<span class="rp-name">${escapeHtml(author)}</span><span class="rp-text">${escapeHtml(String(text).slice(0, 80))}</span>`;
+        if (key) {
+          text = await decryptChatText(key, original, chat.id, original.sender_id === currentUser.id);
+          icon = placeholderIcon(text) || null;
+          if (!icon) text = String(text);
+        }
+      } catch (e) { text = ''; icon = 'lock'; }
+      preview.innerHTML = `<span class="rp-name">${escapeHtml(author)}</span>` +
+        (icon ? Icons.svg(icon, { className: 'mq-icon--xs mq-icon--inherit' }) : '') +
+        `<span class="rp-text">${escapeHtml(String(text).slice(0, 80))}</span>`;
       preview.addEventListener('click', () => {
         const el = document.querySelector(`.message[data-msg-id="${original.id}"]`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1844,7 +2890,13 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     Object.entries(msg.reactions).forEach(([emoji, users]) => {
       const chip = document.createElement('button');
       chip.className = 'reaction-chip' + ((users || []).includes(currentUser.id) ? ' mine' : '');
-      chip.textContent = `${emoji} ${(users || []).length}`;
+      const iconName = Icons.REACTION_ICONS[emoji];
+      if (iconName) {
+        chip.innerHTML = Icons.svg(iconName, { className: 'mq-icon--xs reaction-icon' }) +
+          `<span class="rc-count">${(users || []).length}</span>`;
+      } else {
+        chip.textContent = `${emoji} ${(users || []).length}`;
+      }
       chip.title = `${(users || []).length}`;
       chip.addEventListener('click', () => sendReaction(msg.id, emoji));
       row.appendChild(chip);
@@ -1860,6 +2912,13 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     edited.textContent = I18N.t('chat.edited');
     meta.appendChild(edited);
   }
+  if (msg.expires_at) {
+    const ttl = document.createElement('span');
+    ttl.className = 'message-ttl';
+    ttl.title = I18N.t('ttl.messageHint');
+    ttl.innerHTML = Icons.svg('clock', { className: 'mq-icon--xs mq-icon--inherit' });
+    meta.appendChild(ttl);
+  }
   const time = document.createElement('span');
   time.textContent = formatMessageTime(msg.created_at);
   meta.appendChild(time);
@@ -1867,7 +2926,9 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     const ticks = document.createElement('span');
     const read = isMessageReadByOthers(msg, chat);
     ticks.className = 'tick-marks' + (read ? ' read' : '');
-    ticks.textContent = read ? '✓✓' : '✓';
+    ticks.innerHTML = read
+      ? Icons.svg('check-check', { className: 'mq-icon--xs mq-icon--inherit' })
+      : Icons.svg('check', { className: 'mq-icon--xs mq-icon--inherit' });
     meta.appendChild(ticks);
   }
   wrapper.appendChild(meta);
@@ -1878,14 +2939,14 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     if (msg.type === 'text') {
       const editBtn = document.createElement('button');
       editBtn.className = 'msg-action-btn';
-      editBtn.textContent = '✏️';
+      editBtn.innerHTML = Icons.svg('edit', { className: 'mq-icon--sm' });
       editBtn.title = I18N.t('msg.edit');
       editBtn.onclick = () => editMessage(msg.id);
       actions.appendChild(editBtn);
     }
     const delBtn = document.createElement('button');
     delBtn.className = 'msg-action-btn';
-    delBtn.textContent = '🗑️';
+    delBtn.innerHTML = Icons.svg('trash', { className: 'mq-icon--sm' });
     delBtn.title = I18N.t('msg.delete');
     delBtn.onclick = () => deleteMessage(msg.id);
     actions.appendChild(delBtn);
@@ -1901,7 +2962,9 @@ async function buildMessageContent(msg, chat, key, animate = false) {
   if (msg.deleted_for_all) {
     const div = document.createElement('div');
     div.className = 'message-text message-deleted';
-    div.textContent = I18N.t('chat.deleted');
+    div.innerHTML = Icons.svg('trash', { className: 'mq-icon--xs mq-inline-icon' }) +
+      '<span class="cp-text"></span>';
+    div.querySelector('.cp-text').textContent = I18N.t('chat.deleted');
     return div;
   }
 
@@ -1920,10 +2983,12 @@ async function buildMessageContent(msg, chat, key, animate = false) {
         text = I18N.t('chat.decryptFailed');
       }
     }
-    if (animate && text && !text.startsWith('🔒') && !text.startsWith('⚠️')) {
+    const phIcon = placeholderIcon(text);
+    if (animate && text && !phIcon) {
       typewriter(div, text);
     } else {
-      div.innerHTML = formatMessageText(text);
+      div.innerHTML = (phIcon ? Icons.svg(phIcon, { className: 'mq-icon--xs mq-icon--inherit' }) : '') +
+        formatMessageText(text);
     }
     return div;
   }
@@ -1932,17 +2997,19 @@ async function buildMessageContent(msg, chat, key, animate = false) {
   if (key && msg.encrypted_content) {
     try {
       const decrypted = await decryptChatText(key, msg, chatId, isOwn);
-      if (decrypted && !decrypted.startsWith('🔒') && !decrypted.startsWith('⚠️')) payload = JSON.parse(decrypted);
+      if (decrypted && !placeholderIcon(decrypted)) payload = JSON.parse(decrypted);
     } catch (e) { payload = null; }
   }
 
   if (!payload || !payload.url) {
     const div = document.createElement('div');
-    div.className = 'message-text';
-    div.textContent = I18N.t('chat.mediaUnavailable');
+    div.className = 'message-media-unavailable';
+    div.innerHTML = Icons.svg('image', { className: 'mq-icon--sm mq-inline-icon' }) +
+      '<span class="cp-text">' + escapeHtml(I18N.t('chat.mediaUnavailable')) + '</span>';
     return div;
   }
 
+  if (msg.type === 'sticker') return buildSticker(payload, key);
   if (msg.type === 'image') return buildImage(payload, key);
   if (msg.type === 'voice') return buildVoice(payload, key);
   if (msg.type === 'video') return buildVideo(payload, key);
@@ -1989,7 +3056,9 @@ function buildImage(payload, key) {
       img.onclick = () => window.open(src, '_blank', 'noopener');
       placeholder.replaceWith(img);
     } catch (e) {
-      placeholder.textContent = I18N.t('chat.imageUnavailable');
+      placeholder.innerHTML = Icons.svg('image', { className: 'mq-icon--sm mq-inline-icon' }) +
+        '<span class="cp-text">' + escapeHtml(I18N.t('chat.imageUnavailable')) + '</span>';
+      placeholder.classList.add('media-error');
     }
   };
   lazyLoad(wrap, load);
@@ -2002,7 +3071,7 @@ function buildVoice(payload, key) {
 
   const btn = document.createElement('button');
   btn.className = 'voice-play-btn';
-  btn.textContent = '▶';
+  btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' });
 
   const wave = document.createElement('div');
   wave.className = 'voice-waveform';
@@ -2024,9 +3093,9 @@ function buildVoice(payload, key) {
         btn.disabled = true;
         const src = await getMediaObjectUrl(payload, key);
         audio = new Audio(src);
-        audio.onplay = () => { btn.textContent = '⏸'; };
-        audio.onpause = () => { btn.textContent = '▶'; };
-        audio.onended = () => { btn.textContent = '▶'; };
+        audio.onplay = () => { btn.innerHTML = Icons.svg('pause', { className: 'mq-icon--sm' }); };
+        audio.onpause = () => { btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' }); };
+        audio.onended = () => { btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' }); };
         btn.disabled = false;
       }
       if (audio.paused) await audio.play();
@@ -2051,7 +3120,7 @@ function buildVideo(payload, key) {
 
   const play = document.createElement('div');
   play.className = 'video-play';
-  play.textContent = '▶';
+  play.innerHTML = Icons.svg('play', { className: 'mq-icon--lg' });
 
   const duration = document.createElement('div');
   duration.className = 'video-duration';
@@ -2078,7 +3147,9 @@ function buildVideo(payload, key) {
       if (video.paused) await video.play();
       else video.pause();
     } catch (e) {
-      placeholder.textContent = I18N.t('chat.videoUnavailable');
+      placeholder.innerHTML = Icons.svg('video', { className: 'mq-icon--sm mq-inline-icon' }) +
+        '<span class="cp-text">' + escapeHtml(I18N.t('chat.videoUnavailable')) + '</span>';
+      placeholder.classList.add('media-error');
       showToast(I18N.t('err.playVideo', { error: e.message }), 'error');
     }
   };
@@ -2092,7 +3163,7 @@ function buildFile(payload, key) {
 
   const icon = document.createElement('div');
   icon.className = 'file-icon';
-  icon.textContent = fileIcon(payload.mime);
+  icon.innerHTML = fileIcon(payload.mime);
 
   const info = document.createElement('div');
   info.className = 'file-info';
@@ -2122,13 +3193,13 @@ function buildFile(payload, key) {
 }
 
 function fileIcon(mime) {
-  if (!mime) return '📎';
-  if (mime.startsWith('image/')) return '🖼️';
-  if (mime.startsWith('audio/')) return '🎵';
-  if (mime.startsWith('video/')) return '🎬';
-  if (mime.includes('pdf')) return '📄';
-  if (mime.includes('zip') || mime.includes('compressed')) return '🗜️';
-  return '📎';
+  if (!mime) return Icons.svg('paperclip', { className: 'mq-icon--lg' });
+  if (mime.startsWith('image/')) return Icons.svg('image', { className: 'mq-icon--lg' });
+  if (mime.startsWith('audio/')) return Icons.svg('music', { className: 'mq-icon--lg' });
+  if (mime.startsWith('video/')) return Icons.svg('film', { className: 'mq-icon--lg' });
+  if (mime.includes('pdf')) return Icons.svg('file-text', { className: 'mq-icon--lg' });
+  if (mime.includes('zip') || mime.includes('compressed')) return Icons.svg('file-archive', { className: 'mq-icon--lg' });
+  return Icons.svg('paperclip', { className: 'mq-icon--lg' });
 }
 
 function lazyLoad(el, fn) {
@@ -2156,7 +3227,7 @@ async function sendMessage() {
   try {
     key = await getChatKey(currentChatId, chat);
   } catch (err) {
-    showToast('🔒 ' + err.message, 'error');
+    showToast(err.message, 'error', 'lock');
     return;
   }
 
@@ -2164,7 +3235,7 @@ async function sendMessage() {
   try {
     envelope = await encryptChatText(key, text, currentChatId);
   } catch (err) {
-    showToast('🔒 ' + err.message, 'error');
+    showToast(err.message, 'error', 'lock');
     return;
   }
   rememberSent(currentChatId, envelope.content, text);
@@ -2176,7 +3247,8 @@ async function sendMessage() {
     iv: envelope.iv,
     header: envelope.header,
     msgType: 'text',
-    replyTo: replyTo || null
+    replyTo: replyTo || null,
+    ttlSeconds: getChatTtl(currentChatId)
   });
   if (!sent) return;
 
@@ -2207,7 +3279,7 @@ function autoResize(el) {
 }
 
 function handleTyping() {
-  if (!currentChatId) return;
+  if (!currentChatId || privacy.ghost) return;
   const now = Date.now();
   if (now - lastTypingSent < 2000) return;
   lastTypingSent = now;
@@ -2222,7 +3294,7 @@ async function editMessage(msgId) {
   const chat = getChatById(currentChatId);
   let key;
   try { key = await getChatKey(currentChatId, chat); }
-  catch (err) { return showToast('🔒 ' + err.message, 'error'); }
+  catch (err) { return showToast(err.message, 'error', 'lock'); }
 
   let currentText = '';
   try { currentText = await decryptChatText(key, msg, currentChatId); } catch (e) { /* ignore */ }
@@ -2411,6 +3483,70 @@ function resetRecordingUI() {
   recordingType = null;
 }
 
+// ==================== СТИКЕРЫ ====================
+function openStickerPicker() {
+  if (!currentChatId) {
+    showToast(I18N.t('err.pickChat'), 'error');
+    return;
+  }
+  const items = Icons.STICKERS.map((s) => `
+    <button class="sticker-item" data-action="sendSticker" data-id="${s.id}" title="${escapeHtml(s.id)}">
+      <img src="data:image/svg+xml;utf8,${encodeURIComponent(s.svg)}" alt="${escapeHtml(s.id)}" loading="lazy">
+    </button>`).join('');
+  showModal(`
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
+    <h2>${I18N.t('chat.stickers')}</h2>
+    <div class="sticker-picker">${items}</div>
+  `);
+}
+
+async function sendSticker(stickerId) {
+  const sticker = Icons.STICKERS.find((s) => s.id === stickerId);
+  if (!sticker) return;
+  if (!currentChatId) {
+    showToast(I18N.t('err.pickChat'), 'error');
+    return;
+  }
+  const chatIdAtStart = currentChatId;
+  closeModal();
+  try {
+    const blob = new Blob([sticker.svg], { type: 'image/svg+xml' });
+    await sendMediaBlob(blob, 'sticker', {
+      chatId: chatIdAtStart,
+      duration: 0,
+      name: `sticker-${sticker.id}.svg`,
+      mime: 'image/svg+xml'
+    });
+  } catch (err) {
+    showToast(I18N.t('err.upload') + ' ' + err.message, 'error', 'alert-circle');
+  }
+}
+
+// Стикер в сообщении — это картинка (SVG/Lottie), а не текстовый смайлик
+function buildSticker(payload, key) {
+  const wrap = document.createElement('div');
+  wrap.className = 'sticker-message';
+  const placeholder = document.createElement('div');
+  placeholder.className = 'media-loading';
+  placeholder.textContent = I18N.t('chat.loadingImage');
+  wrap.appendChild(placeholder);
+
+  const load = async () => {
+    try {
+      const src = await getMediaObjectUrl(payload, key);
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = payload.name || 'sticker';
+      img.onclick = () => window.open(src, '_blank', 'noopener');
+      placeholder.replaceWith(img);
+    } catch (e) {
+      placeholder.textContent = I18N.t('chat.imageUnavailable');
+    }
+  };
+  lazyLoad(wrap, load);
+  return wrap;
+}
+
 function attachFile() {
   if (!currentChatId) {
     showToast(I18N.t('err.pickChat'), 'error');
@@ -2486,7 +3622,8 @@ async function sendMediaBlob(blob, kind, opts) {
     content: envelope.content,
     iv: envelope.iv,
     header: envelope.header,
-    msgType: kind
+    msgType: kind,
+    ttlSeconds: getChatTtl(chatId)
   });
   if (!sent) throw new Error(I18N.t('err.noConnection'));
 }
@@ -2498,7 +3635,16 @@ function showModal(html) {
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('show');
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  // Анимация выхода: сначала fade-out, потом скрытие
+  overlay.classList.add('closing');
+  const hide = () => {
+    overlay.classList.remove('show', 'closing');
+    const content = document.getElementById('modal-content');
+    if (content) content.innerHTML = '';
+  };
+  setTimeout(hide, 170);
 }
 
 function toggleMenu() {
@@ -2511,15 +3657,21 @@ function closeChat() {
   typewriterTimers.clear();
   currentChatId = null;
   document.getElementById('app-container').classList.remove('chat-open');
+  updateMobileNav();
   document.getElementById('active-chat').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
-  document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+  for (const el of chatListNodes.values()) el.classList.remove('active');
+  hideScrollFab();
+  // Кэш рендера больше невалиден для открытого чата
+  msgRender.chatId = null;
+  msgRender.order = [];
+  msgRender.nodes.clear();
 }
 
 function openSearch() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('search.title')}</h2>
     <div class="input-group">
       <input type="text" id="user-search-input" placeholder="${I18N.t('search.placeholder2')}" data-action="searchUsers">
@@ -2551,7 +3703,7 @@ async function searchUsers(query) {
         <div class="search-result-item" data-action="startChat" data-id="${u.id}">
           <div class="chat-avatar">${escapeHtml((u.name || 'U')[0].toUpperCase())}</div>
           <div>
-            <div style="font-weight:600">${escapeHtml(u.name || I18N.t('chat.user'))}</div>
+            <div class="search-result-name">${escapeHtml(u.name || I18N.t('chat.user'))}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
             <div style="font-size:12px;color:var(--text-secondary)">@${escapeHtml(u.username || '')} • ${escapeHtml(u.phone || '')}</div>
           </div>
         </div>
@@ -2570,7 +3722,7 @@ function startChat(userId) {
 function openNewGroup() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('group.title')}</h2>
     <div class="input-group">
       <label>${I18N.t('group.name')}</label>
@@ -2593,7 +3745,7 @@ function createGroup() {
 function openNewChannel() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('channel.title')}</h2>
     <div class="input-group">
       <label>${I18N.t('channel.name')}</label>
@@ -2631,11 +3783,11 @@ function showChatInfo() {
   const chat = getChatById(currentChatId);
   if (!chat) return;
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${escapeHtml(getChatName(chat))}</h2>
     <div style="text-align:center;margin-bottom:18px;">
-      <div class="chat-avatar" style="width:70px;height:70px;font-size:28px;margin:0 auto 10px;">${escapeHtml(getChatAvatar(chat))}</div>
-      <div class="encryption-badge">🔒 E2EE AES-256-GCM</div>
+      <div class="chat-avatar" style="width:70px;height:70px;font-size:28px;margin:0 auto 10px;">${chatAvatarMarkup(chat)}</div>
+      <div class="encryption-badge"><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg><span>E2EE AES-256-GCM</span></div>
     </div>
     <div style="font-size:13px;color:var(--text-secondary)">
       ${I18N.t('chatinfo.membersShort', { count: chat.members?.length || 0 })}
@@ -2643,20 +3795,95 @@ function showChatInfo() {
   `);
 }
 
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function computeSafetyNumber() {
+  if (!identity || !currentChatId) return null;
+  const chat = getChatById(currentChatId);
+  if (!chat) return null;
+  let keys = [];
+  if (chat.type === 'private') {
+    const other = (chat.members || []).find(m => m.id !== currentUser.id);
+    if (!other || !other.public_key) return null;
+    keys = [await E2EE.normalizePublicKey(other.public_key)];
+  } else {
+    keys = (chat.members || [])
+      .filter(m => m.id !== currentUser.id && m.public_key)
+      .map(m => m.public_key)
+      .sort();
+    if (!keys.length) return null;
+  }
+  try {
+    const data = new TextEncoder().encode([identity.publicKey, ...keys].join('|'));
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    let num = 0n;
+    for (const b of digest) num = (num << 8n) + BigInt(b);
+    const digits = num.toString().padStart(60, '0').slice(-60);
+    return digits.match(/.{5}/g).join(' ');
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fillSafetyNumber() {
+  const el = document.getElementById('safety-number');
+  if (!el) return;
+  const sn = await computeSafetyNumber();
+  if (!el.isConnected) return;
+  el.textContent = sn || I18N.t('enc.safetyUnavailable');
+  el.dataset.safety = sn || '';
+}
+
+function copySafetyNumber() {
+  const el = document.getElementById('safety-number');
+  const sn = el && el.dataset.safety;
+  if (!sn) return;
+  copyToClipboard(sn.replace(/\s/g, ''));
+  showToast(I18N.t('enc.safetyCopied'), 'success');
+}
+
 function showEncryptionInfo() {
   toggleMenu();
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('enc.title')}</h2>
     <div style="line-height:1.7;font-size:13px;">
       <p><strong>CipherTalk</strong> ${I18N.t('enc.subtitle')}</p><br>
-      <p>🔑 <strong>ECDH</strong> (P-256) — ${I18N.t('enc.ecdh')}</p>
-      <p>🔒 <strong>AES-256-GCM</strong> — ${I18N.t('enc.aes')}</p>
-      <p>🛡️ <strong>HKDF</strong> — ${I18N.t('enc.hkdf')}</p>
-      <p>💾 <strong>AES-256-GCM</strong> — ${I18N.t('enc.atRest')}</p><br>
+      <p><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-key"></use></svg><strong>ECDH</strong> (P-256) — ${I18N.t('enc.ecdh')}</p>
+      <p><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-lock"></use></svg><strong>AES-256-GCM</strong> — ${I18N.t('enc.aes')}</p>
+      <p><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-shield"></use></svg><strong>HKDF</strong> — ${I18N.t('enc.hkdf')}</p>
+      <p><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-database"></use></svg><strong>AES-256-GCM</strong> — ${I18N.t('enc.atRest')}</p>
+      <p><svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-phone"></use></svg><strong>DTLS-SRTP</strong> — ${I18N.t('enc.calls')}</p><br>
       <p>${I18N.t('enc.serverBlind')}</p>
+      <div class="safety-block">
+        <div class="safety-title"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-shield-check"></use></svg><span>${I18N.t('enc.safety')}</span></div>
+        <div class="safety-number" id="safety-number">…</div>
+        <div class="safety-hint">${I18N.t('enc.safetyHint')}</div>
+        <button class="btn btn-secondary" data-action="copySafetyNumber">${I18N.t('enc.safetyCopy')}</button>
+      </div>
     </div>
   `);
+  fillSafetyNumber();
 }
 
 function updateOnlineStatuses() {
@@ -2671,7 +3898,7 @@ function updateOnlineStatuses() {
 
 function showTypingIndicator(name) {
   const statusEl = document.getElementById('chat-header-status');
-  statusEl.innerHTML = `<span class="typing-indicator"><span></span><span></span><span></span></span> ${escapeHtml(name || '')} ${I18N.t('chat.typing')}`;
+  statusEl.innerHTML = `<span class="typing-indicator"><span class="mq-typing-dot"></span><span class="mq-typing-dot"></span><span class="mq-typing-dot"></span></span> ${escapeHtml(name || '')} ${I18N.t('chat.typing')}`;
   statusEl.className = 'chat-header-status online';
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => updateChatHeader(), 3000);
@@ -2692,7 +3919,7 @@ function openSettings() {
     </div>`).join('');
 
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('settings.title')}</h2>
 
     <div class="settings-section-title">${I18N.t('settings.profile')}</div>
@@ -2761,6 +3988,43 @@ function openSettings() {
       <span class="slider-value" id="round-value">${appearance.roundness}px</span>
     </div>
     <div class="switch-row">
+      <span>${I18N.t('settings.tails')}</span>
+      <div class="switch ${appearance.tails !== false ? 'on' : ''}" id="tails-switch" data-action="toggleTails"></div>
+    </div>
+
+    <div class="settings-section-title">${I18N.t('settings.typography')}</div>
+    <div class="anim-row font-row">
+      ${FONT_FAMILIES.map(f => `<button class="anim-chip font-chip ${(appearance.fontFamily || 'system') === f.id ? 'active' : ''}" data-font="${f.id}" data-action="setFontFamily" data-id="${f.id}">${I18N.t(f.label)}</button>`).join('')}
+    </div>
+    <div id="custom-font-row" style="display:${appearance.fontFamily === 'custom' ? 'block' : 'none'};margin-top:8px">
+      <input type="text" id="custom-font-input" class="custom-font-input" maxlength="200"
+             placeholder="${I18N.t('settings.customFontPlaceholder')}"
+             value="${escapeHtml(appearance.fontCustom || '')}" data-action="setCustomFont">
+      <div class="input-hint">${I18N.t('settings.customFontHint')}</div>
+    </div>
+    <div class="slider-row">
+      <span>${I18N.t('settings.fontSize')}</span>
+      <input type="range" min="12" max="24" step="1" value="${appearance.msgFontSize || 14}" data-action="setFontSize">
+      <span class="slider-value" id="font-size-value">${appearance.msgFontSize || 14}px</span>
+    </div>
+    <div class="anim-row" style="margin-top:10px">
+      <span class="row-label">${I18N.t('settings.fontWeight')}</span>
+      ${FONT_WEIGHTS.map(w => `<button class="anim-chip weight-chip ${appearance.msgFontWeight === w ? 'active' : ''}" data-weight="${w}" data-action="setFontWeight" data-id="${w}">${w}</button>`).join('')}
+    </div>
+    <div class="slider-row">
+      <span>${I18N.t('settings.lineHeight')}</span>
+      <input type="range" min="1.2" max="2" step="0.05" value="${appearance.msgLineHeight || 1.45}" data-action="setLineHeight">
+      <span class="slider-value" id="line-height-value">${(Number(appearance.msgLineHeight) || 1.45).toFixed(2)}</span>
+    </div>
+    <div class="anim-row" style="margin-top:10px">
+      <span class="row-label">${I18N.t('settings.fontScope')}</span>
+      <button class="anim-chip scope-chip ${appearance.fontScope !== 'messages' ? 'active' : ''}" data-scope="app" data-action="setFontScope" data-id="app">${I18N.t('settings.scopeApp')}</button>
+      <button class="anim-chip scope-chip ${appearance.fontScope === 'messages' ? 'active' : ''}" data-scope="messages" data-action="setFontScope" data-id="messages">${I18N.t('settings.scopeMessages')}</button>
+    </div>
+    <div id="font-preview" class="font-preview" style="font-family:${escapeHtml(resolveFontStack())};font-size:${appearance.msgFontSize || 14}px;font-weight:${appearance.msgFontWeight || '400'};line-height:${Number(appearance.msgLineHeight) || 1.45}">${I18N.t('settings.fontPreview')}</div>
+    <button class="btn btn-secondary" data-action="resetTypography" style="margin-top:10px;width:100%">${I18N.t('settings.resetTypography')}</button>
+
+    <div class="switch-row">
       <span>${I18N.t('settings.snow')}</span>
       <div class="switch ${appearance.snow ? 'on' : ''}" id="snow-switch" data-action="toggleSnow"></div>
     </div>
@@ -2773,10 +4037,30 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="switch-row">
+      <span>${I18N.t('settings.customCursor')}</span>
+      <div class="switch ${appearance.customCursor !== false ? 'on' : ''}" id="cursor-switch" data-action="toggleCursor"></div>
+    </div>
+    <div class="settings-hint">${I18N.t('settings.customCursorHint')}</div>
+
     <div class="settings-section-title">${I18N.t('settings.privacy')}</div>
     <div class="switch-row">
       <span>${I18N.t('settings.hideOnline')}</span>
       <div class="switch ${privacy.hideOnline ? 'on' : ''}" id="hide-online-switch" data-action="toggleHideOnline"></div>
+    </div>
+    <div class="switch-row">
+      <span>${I18N.t('settings.ghost')}</span>
+      <div class="switch ${privacy.ghost ? 'on' : ''}" id="ghost-switch" data-action="toggleGhost"></div>
+    </div>
+    <div class="settings-hint">${I18N.t('settings.ghostHint')}</div>
+    <div class="switch-row">
+      <span>${I18N.t('settings.screenshot')}</span>
+      <div class="switch ${privacy.screenshotGuard ? 'on' : ''}" id="screenshot-switch" data-action="toggleScreenshotGuard"></div>
+    </div>
+    <div class="settings-hint">${I18N.t('settings.screenshotHint')}</div>
+    <div class="settings-section-title" style="font-size:13px">${I18N.t('settings.badge')}</div>
+    <div class="anim-row badge-row">
+      ${BADGE_CHOICES.map(b => `<button class="anim-chip badge-chip ${privacy.badge === b.id ? 'active' : ''}" data-badge="${b.id}" data-action="setBadge" data-id="${b.id}">${b.icon ? `<svg class="mq-icon mq-icon--xs" aria-hidden="true" focusable="false"><use href="#mq-i-${b.icon}"></use></svg>` : ''}${escapeHtml(I18N.t(b.label))}</button>`).join('')}
     </div>
     <div class="input-group">
       <label>${I18N.t('settings.pin')}</label>
@@ -2787,9 +4071,16 @@ function openSettings() {
       <button class="btn btn-secondary" data-action="removePin" ${privacy.pinHash ? '' : 'disabled'}>${I18N.t('settings.removePin')}</button>
     </div>
 
+    <div class="settings-section-title">${I18N.t('settings.panic')}</div>
+    <div class="settings-hint">${I18N.t('settings.panicHint')}</div>
+    <button class="btn btn-secondary panic-btn" data-action="panicLock">${I18N.t('settings.panicBtn')}</button>
+
     <div class="settings-section-title">${I18N.t('settings.encryption')}</div>
     <div class="settings-hint">${I18N.t('settings.encryptionHint')}</div>
     <button class="btn btn-secondary" data-action="resetE2EE">${I18N.t('settings.resetKeys')}</button>
+
+    <div class="settings-section-title">${I18N.t('public.title')}</div>
+    <div id="public-access-card">${publicAccessCardHtml()}</div>
 
     <div class="settings-section-title">${I18N.t('lang.name')}</div>
     <div class="anim-row">
@@ -2797,6 +4088,89 @@ function openSettings() {
       <button class="anim-chip ${I18N.getLang() === 'en' ? 'active' : ''}" data-action="setLang" data-id="en">${I18N.t('lang.en')}</button>
     </div>
   `);
+
+  // Адрес мог обновиться после прошлого открытия — обновляем карточку,
+  // не блокируя показ модалки.
+  loadPublicUrl().then(() => {
+    const card = document.getElementById('public-access-card');
+    if (card) card.innerHTML = publicAccessCardHtml();
+  });
+}
+
+// ==================== ПУБЛИЧНЫЙ ДОСТУП ====================
+// Адрес, по которому мессенджер доступен с любого устройства и любой сети.
+let publicUrlCache = null;
+
+async function loadPublicUrl() {
+  try {
+    const res = await fetch('/api/public-url', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    publicUrlCache = (data && data.url) ? data.url : null;
+    return publicUrlCache;
+  } catch (e) {
+    publicUrlCache = null;
+    return null;
+  }
+}
+
+function publicAccessCardHtml() {
+  const url = publicUrlCache;
+  if (!url) {
+    return `<div class="settings-hint">${I18N.t('public.unavailable')}</div>`;
+  }
+  return `
+    <div class="public-card">
+      <img class="public-card-qr" src="/api/public-url/qr.svg" alt="QR" data-i18n-alt="public.qrAlt">
+      <div class="public-card-body">
+        <div class="public-card-title">${I18N.t('public.title')}</div>
+        <div class="public-card-url">${escapeHtml(url)}</div>
+        <div class="public-card-hint">${I18N.t('public.note')}</div>
+        <button class="btn btn-secondary" data-action="copyPublicUrl">${I18N.t('public.copy')}</button>
+      </div>
+    </div>
+  `;
+}
+
+async function copyPublicUrl() {
+  const url = publicUrlCache || await loadPublicUrl();
+  if (!url) {
+    showToast(I18N.t('public.unavailable'), 'error');
+    return;
+  }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    showToast(I18N.t('public.copied'), 'success');
+  } catch (e) {
+    showToast(url, 'info');
+  }
+}
+
+// Показываем адрес на экране входа и в настройках
+async function refreshPublicAccess() {
+  const url = await loadPublicUrl();
+  const block = document.getElementById('public-access');
+  const urlEl = document.getElementById('public-access-url');
+  if (block && urlEl) {
+    if (url) {
+      urlEl.textContent = url;
+      block.style.display = 'block';
+    } else {
+      block.style.display = 'none';
+    }
+  }
+  return url;
 }
 
 function updateLangChips() {
@@ -2817,6 +4191,39 @@ function setLanguage(lang) {
   try { if (currentChatId) { updateChatHeader(); renderMessages(currentChatId); } } catch (e) { /* ignore */ }
   try { if (document.getElementById('modal-overlay').classList.contains('show')) openSettings(); } catch (e) { /* ignore */ }
   showToast(I18N.t('lang.changed', { lang: I18N.t('lang.' + lang) }), 'success');
+}
+
+async function toggleGhost() {
+  privacy.ghost = !privacy.ghost;
+  if (privacy.ghost) privacy.hideOnline = true;
+  savePrivacy();
+  applyPrivacyFeatures();
+  const ghost = document.getElementById('ghost-switch');
+  if (ghost) ghost.classList.toggle('on', privacy.ghost);
+  const online = document.getElementById('hide-online-switch');
+  if (online) online.classList.toggle('on', privacy.hideOnline);
+  sendWs({ type: 'set_privacy', hideOnline: privacy.hideOnline });
+  try {
+    await api('/api/update-profile', { method: 'POST', body: { hideOnline: privacy.hideOnline } });
+  } catch (e) { /* WS уже применил */ }
+  showToast(privacy.ghost ? I18N.t('toast.ghostOn') : I18N.t('toast.ghostOff'), 'success');
+}
+
+function toggleScreenshotGuard() {
+  privacy.screenshotGuard = !privacy.screenshotGuard;
+  savePrivacy();
+  applyPrivacyFeatures();
+  document.getElementById('screenshot-switch')?.classList.toggle('on', privacy.screenshotGuard);
+}
+
+function setBadge(id) {
+  privacy.badge = BADGE_IDS.includes(id) ? id : '';
+  savePrivacy();
+  document.querySelectorAll('[data-badge]').forEach(el => {
+    el.classList.toggle('active', el.dataset.badge === privacy.badge);
+  });
+  updateMenuProfile();
+  showToast(I18N.t('settings.saved'), 'success');
 }
 
 async function toggleHideOnline() {
@@ -2872,18 +4279,32 @@ function handleSessionExpired() {
 
 function clearSession(reload) {
   authToken = '';
+  // Чистим кэш текущего аккаунта до сброса currentUser (ключ зависит от него).
+  clearPlaintextCache();
   currentUser = null;
+  // Возвращаемся к общим настройкам устройства (без аккаунта)
+  reloadAppearanceForUser();
+  identity = null;
+  chatKeys = {};
+  groupKeyBlobs = {};
+  persistedPlaintext = null;
   localStorage.removeItem('ciphertalk_token');
   localStorage.removeItem('ciphertalk_user');
-  // ключи E2EE не удаляем: иначе история перестанет расшифровываться
+  // Сами E2EE-ключи не удаляем: иначе история перестанет расшифровываться
   if (ws) {
     ws.onclose = null;
     try { ws.close(); } catch (e) { /* ignore */ }
     ws = null;
   }
-  mediaCache.forEach(objectUrl => URL.revokeObjectURL(objectUrl));
-  mediaCache.clear();
-  clearPlaintextCache();
+  try {
+    mediaCache.forEach(objectUrl => { try { URL.revokeObjectURL(objectUrl); } catch(e){} });
+    mediaCache.clear();
+  } catch(e){}
+  // очистка всех таймеров истечения
+  try {
+    for (const t of expiryTimers.values()) { try { clearTimeout(t); } catch(e){} }
+    expiryTimers.clear();
+  } catch(e){}
   if (reload) location.reload();
 }
 
@@ -3008,11 +4429,16 @@ const CLICK_ACTIONS = {
   openSavedMessages: () => openSavedMessages(),
   openSettings: () => openSettings(),
   showEncryptionInfo: () => showEncryptionInfo(),
+  copySafetyNumber: () => copySafetyNumber(),
+  copyPublicUrl: () => copyPublicUrl(),
+  mobileChats: () => { closeChat(); updateMobileNav(); },
   logout: () => logout(),
   toggleMenu: () => toggleMenu(),
   closeChat: () => closeChat(),
   showChatInfo: () => showChatInfo(),
   attachFile: () => attachFile(),
+  openStickerPicker: () => openStickerPicker(),
+  sendSticker: (el) => sendSticker(el.dataset.id),
   toggleVoiceRecording: () => toggleVoiceRecording(),
   toggleVideoRecording: () => toggleVideoRecording(),
   sendMessage: () => sendMessage(),
@@ -3029,11 +4455,22 @@ const CLICK_ACTIONS = {
   clearCustomBg: () => clearCustomBg(),
   setStylePreset: (el) => setStylePreset(el.dataset.id),
   toggleGlass: () => toggleGlass(),
+  toggleCursor: () => toggleCursor(),
   setBlur: (el) => setBlur(el.value),
   setFloat: (el) => setFloat(el.dataset.key, el.value, el.dataset.target, el.dataset.unit),
   toggleSnow: () => toggleSnow(),
+  toggleTails: () => toggleTails(),
+  setFontFamily: (el) => setFontFamily(el.dataset.id),
+  setFontWeight: (el) => setFontWeight(el.dataset.id),
+  setFontScope: (el) => setFontScope(el.dataset.id),
+  resetTypography: () => resetTypography(),
   setAnimLevel: (el) => setAnimLevel(el.dataset.id),
+  scrollToBottom: () => scrollToBottom(),
   toggleHideOnline: () => toggleHideOnline(),
+  toggleGhost: () => toggleGhost(),
+  toggleScreenshotGuard: () => toggleScreenshotGuard(),
+  setBadge: (el) => setBadge(el.dataset.id),
+  panicLock: () => panicLock(),
   setPin: () => setPin(),
   removePin: () => removePin(),
   resetE2EE: () => resetE2EE(),
@@ -3049,6 +4486,9 @@ const INPUT_ACTIONS = {
   checkPasswordStrength: () => checkPasswordStrength(),
   searchChats: (el) => searchChats(el.value),
   searchUsers: (el) => searchUsers(el.value),
+  setFontSize: (el) => setFontSize(el.value),
+  setCustomFont: (el) => setCustomFont(el.value),
+  setLineHeight: (el) => setLineHeight(el.value),
   messageInput: (el) => { autoResize(el); handleTyping(); }
 };
 
@@ -3084,17 +4524,28 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('load', async () => {
   I18N.applyI18n();
   updateLangChips();
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
   loadAppearance();
   snow.init();
+  watchDevice();
+  // Кастомный курсор — только для устройств с мышью
+  if (typeof Cursor !== 'undefined' && Cursor.init) Cursor.init();
+  // Публичный адрес виден ещё до входа — по нему можно открыть мессенджер
+  // с телефона или другого устройства.
+  refreshPublicAccess();
   const savedUser = localStorage.getItem('ciphertalk_user');
-  groupKeyBlobs = loadGroupKeyBlobs();
 
   if (authToken && savedUser) {
     try {
       const { ok, data } = await api('/api/me');
       if (ok && data.user) {
         currentUser = normalizeUser(data.user);
-        identity = await ensureLocalIdentity();
+        // Личность привязана к аккаунту: при входе подключаем нужный ключ.
+        await ensureIdentityForUser(currentUser.id);
+        // Настройки внешнего вида и приватности тоже принадлежат аккаунту.
+        reloadAppearanceForUser();
         localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
         if (currentUser.hide_online) {
           privacy.hideOnline = true;

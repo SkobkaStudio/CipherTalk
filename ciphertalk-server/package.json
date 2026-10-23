@@ -10,19 +10,33 @@
     "test:integration": "node tests/full_integration_test.js",
     "test:e2ee": "node tests/e2ee_crypto_test.js",
     "test:e2ee:ratchet": "node tests/e2ee_ratchet.test.js",
-    "test:e2ee:flow": "node tests/e2ee_client_flow.test.js"
+    "test:e2ee:flow": "node tests/e2ee_client_flow.test.js",
+    "test:calls": "node tests/call_signal_test.js",
+    "test:client": "node tests/client_identity_scope_test.js",
+    "test:perf": "node tests/perf_render_test.js",
+    "test:public": "node tests/public_access_test.js",
+    "test:ui": "node tests/responsive_cursor_test.js",
+    "test:icons": "node tests/icons_test.js",
+    "test:security": "node tests/security_regression_test.js",
+    "test:sms": "node tests/sms_provider_test.js",
+    "tunnel": "node scripts/tunnel.js",
+    "tunnel:setup": "node scripts/tunnel-setup.js"
   },
   "dependencies": {
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "multer": "^2.4.0",
+    "qrcode-generator": "^2.0.4",
     "ws": "^8.14.2"
   },
   "devDependencies": {
     "jest": "^29.6.1",
+    "jsqr": "^1.4.0",
     "nodemon": "^3.0.1",
-    "puppeteer-core": "^25.15.0"
+    "puppeteer-core": "^25.15.0",
+    "qrcode": "^1.5.4"
   },
   "jest": {
     "testPathIgnorePatterns": [

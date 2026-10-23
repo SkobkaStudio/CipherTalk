@@ -35,7 +35,7 @@ function buildContextMenu(buttons, x, y) {
     }
     const item = document.createElement('button');
     item.className = 'ctx-item' + (btn.danger ? ' danger' : '');
-    item.innerHTML = `<span class="ctx-emoji">${btn.emoji}</span><span>${escapeHtml(btn.label)}</span>`;
+    item.innerHTML = (btn.icon ? Icons.svg(btn.icon, { className: 'mq-icon--sm ctx-icon' }) : `<span class="ctx-emoji">${escapeHtml(String(btn.emoji || ''))}</span>`) + `<span>${escapeHtml(btn.label)}</span>`;
     item.addEventListener('click', () => {
       closeContextMenu();
       btn.action();
@@ -59,7 +59,8 @@ function openReactionBar(msg, x, y) {
   REACTION_EMOJI.forEach(emoji => {
     const btn = document.createElement('button');
     btn.className = 'react-btn';
-    btn.textContent = emoji;
+    btn.innerHTML = Icons.reactionMarkup(emoji, 'mq-icon--sm');
+    btn.title = emoji;
     btn.addEventListener('click', () => {
       closeContextMenu();
       sendReaction(msg.id, emoji);
@@ -78,32 +79,32 @@ async function openMessageContextMenu(msg, x, y) {
   const buttons = [];
 
   buttons.push({
-    emoji: '↩️',
+    icon: 'reply',
     label: I18N.t('msg.reply'),
     action: () => startReply(msg)
   });
 
   buttons.push({
-    emoji: '🔁',
+    icon: 'rotate',
     label: I18N.t('msg.forward'),
     action: () => openForwardModal(msg)
   });
 
   buttons.push({
-    emoji: '😊',
+    icon: 'smile',
     label: I18N.t('msg.react'),
     action: () => openReactionBar(msg, x, y)
   });
 
   if (msg.pinned) {
     buttons.push({
-      emoji: '📌',
+      icon: 'pin',
       label: I18N.t('msg.unpin'),
       action: () => togglePin(msg, false)
     });
   } else {
     buttons.push({
-      emoji: '📌',
+      icon: 'pin',
       label: I18N.t('msg.pin'),
       action: () => togglePin(msg, true)
     });
@@ -112,7 +113,7 @@ async function openMessageContextMenu(msg, x, y) {
   if (isOwn && (msg.type === 'text' || !msg.type)) {
     buttons.push({ sep: true });
     buttons.push({
-      emoji: '✏️',
+      icon: 'edit',
       label: I18N.t('msg.edit'),
       action: () => editMessage(msg.id)
     });
@@ -120,7 +121,7 @@ async function openMessageContextMenu(msg, x, y) {
 
   if (isOwn) {
     buttons.push({
-      emoji: '🗑️',
+      icon: 'trash',
       label: I18N.t('msg.delete'),
       danger: true,
       action: () => deleteMessage(msg.id)
@@ -140,22 +141,93 @@ document.addEventListener('contextmenu', (e) => {
   openMessageContextMenu(msg, e.clientX, e.clientY);
 });
 
-// Долгое нажатие (мобильные)
+// Долгое нажатие, свайп вправо (ответ) и двойной тап (❤️)
 let longPressTimer = null;
+let touchState = null;
+let lastTap = { id: 0, time: 0 };
+
+function resetTouchState() {
+  if (touchState && touchState.el) {
+    touchState.el.style.transform = '';
+    touchState.el.style.transition = '';
+  }
+  touchState = null;
+}
+
 document.addEventListener('touchstart', (e) => {
   const el = e.target.closest('.message');
   if (!el || !currentChatId) return;
   const touch = e.touches[0];
+  touchState = {
+    el,
+    startX: touch.clientX,
+    startY: touch.clientY,
+    x: touch.clientX,
+    y: touch.clientY,
+    time: Date.now(),
+    moved: false,
+    fired: false
+  };
   longPressTimer = setTimeout(() => {
+    if (!touchState || touchState.moved) return;
+    touchState.fired = true;
     const msgId = Number(el.dataset.msgId);
     const msg = (messages[currentChatId] || []).find(m => m.id === msgId);
     if (msg) openMessageContextMenu(msg, touch.clientX, touch.clientY);
   }, 550);
 }, { passive: true });
 
+document.addEventListener('touchmove', (e) => {
+  if (!touchState) return;
+  const touch = e.touches[0];
+  touchState.x = touch.clientX;
+  touchState.y = touch.clientY;
+  const dx = touch.clientX - touchState.startX;
+  const dy = touch.clientY - touchState.startY;
+  if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+    touchState.moved = true;
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
+  if (dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+    const shift = Math.min(dx, 84);
+    touchState.el.style.transition = 'none';
+    touchState.el.style.transform = `translateX(${shift}px)`;
+  }
+}, { passive: true });
+
 document.addEventListener('touchend', () => {
-  if (longPressTimer) clearTimeout(longPressTimer);
-  longPressTimer = null;
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  if (!touchState) return;
+  const state = touchState;
+  const dx = state.x - state.startX;
+  const dy = state.y - state.startY;
+  const duration = Date.now() - state.time;
+  resetTouchState();
+
+  if (state.fired) return;
+
+  if (state.moved && dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+    const msgId = Number(state.el.dataset.msgId);
+    const msg = (messages[currentChatId] || []).find(m => m.id === msgId);
+    if (msg) startReply(msg);
+    return;
+  }
+
+  if (!state.moved && duration < 260 && Math.abs(dx) < 12 && Math.abs(dy) < 12) {
+    const msgId = Number(state.el.dataset.msgId);
+    const now = Date.now();
+    if (lastTap.id === msgId && now - lastTap.time < 320) {
+      lastTap = { id: 0, time: 0 };
+      sendReaction(msgId, '❤️');
+    } else {
+      lastTap = { id: msgId, time: now };
+    }
+  }
+}, { passive: true });
+
+document.addEventListener('touchcancel', () => {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  resetTouchState();
 }, { passive: true });
 
 document.addEventListener('click', (e) => {
@@ -201,6 +273,30 @@ function renderReplyBar() {
 }
 
 // ==================== РЕАКЦИИ ====================
+function burstReaction(messageId, emoji) {
+  const el = document.querySelector(`.message[data-msg-id="${messageId}"]`);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const isHeart = emoji === '❤️' || emoji === '❤';
+  for (let i = 0; i < 9; i++) {
+    const node = document.createElement('span');
+    node.className = 'reaction-burst';
+    node.innerHTML = isHeart ? Icons.svg('heart', { className: 'mq-icon--md' }) : Icons.reactionMarkup(emoji, 'mq-icon--md');
+    node.style.left = cx + 'px';
+    node.style.top = cy + 'px';
+    const angle = (Math.PI * 2 * i) / 9 + Math.random() * 0.5;
+    const dist = 45 + Math.random() * 55;
+    node.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    node.style.setProperty('--dy', Math.sin(angle) * dist - 35 + 'px');
+    node.style.setProperty('--rot', (Math.random() * 80 - 40) + 'deg');
+    node.style.animationDelay = (i * 18) + 'ms';
+    document.body.appendChild(node);
+    setTimeout(() => node.remove(), 1250);
+  }
+}
+
 function sendReaction(messageId, emoji) {
   const sent = sendWs({
     type: 'react_message',
@@ -219,6 +315,7 @@ function sendReaction(messageId, emoji) {
   else msg.reactions[emoji].push(currentUser.id);
   if (!msg.reactions[emoji].length) delete msg.reactions[emoji];
   renderMessages(currentChatId);
+  if (idx < 0) requestAnimationFrame(() => burstReaction(messageId, emoji));
 }
 
 // ==================== ЗАКРЕПЛЕНИЕ ====================
@@ -256,7 +353,7 @@ async function openPinnedModal() {
   }
 
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('pinned.title')}</h2>
     ${items.length ? items.join('') : `<div class="empty-note">${I18N.t('pinned.empty')}</div>`}
   `);
@@ -273,12 +370,12 @@ function unpinFromModal(messageId) {
 function openForwardModal(msg) {
   const targets = chats.filter(c => c.id !== currentChatId || true);
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('forward.title')}</h2>
     <div id="forward-list">
       ${targets.map(c => `
         <div class="forward-item" data-action="forwardTo" data-id="${c.id}" data-msg="${msg.id}">
-          <div class="fi-avatar">${escapeHtml(getChatAvatar(c))}</div>
+          <div class="fi-avatar">${chatAvatarMarkup(c)}</div>
           <div>
             <div class="fi-name">${escapeHtml(getChatName(c))}</div>
             <div class="fi-sub">${escapeHtml(c.type === 'private' ? I18N.t('forward.private') : (c.type === 'channel' ? I18N.t('forward.channel') : I18N.t('forward.group')))}</div>
@@ -374,6 +471,13 @@ function setFolders(list) {
   renderFolderBar();
 }
 
+// Иконка папки: пользовательский эмодзи или SVG-иконка по умолчанию
+function folderIconMarkup(folder) {
+  const emoji = (folder && folder.emoji || '').trim();
+  if (emoji && emoji !== '📁') return '<span class="folder-emoji">' + escapeHtml(emoji) + '</span>';
+  return Icons.svg('folder', { className: 'mq-icon--sm' });
+}
+
 function renderFolderBar() {
   const bar = document.getElementById('folder-bar');
   if (!bar) return;
@@ -384,7 +488,7 @@ function renderFolderBar() {
     <button class="folder-chip ${activeFolderId === null ? 'active' : ''}" data-action="filterFolder" data-id="">${I18N.t('folder.all')}</button>
     ${folders.map(f => `
       <button class="folder-chip ${activeFolderId === Number(f.id) ? 'active' : ''}" data-action="filterFolder" data-id="${f.id}">
-        <span>${escapeHtml(f.emoji || '📁')}</span>
+        ${folderIconMarkup(f)}
         <span>${escapeHtml(f.name)}</span>
         <span class="fcount">${(f.chat_ids || []).length}</span>
       </button>`).join('')}
@@ -399,7 +503,7 @@ function filterFolder(folderId) {
 
 function openCreateFolder() {
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('folder.new.title')}</h2>
     <div class="input-group">
       <label>${I18N.t('folder.name')}</label>
@@ -407,7 +511,7 @@ function openCreateFolder() {
     </div>
     <div class="input-group">
       <label>${I18N.t('folder.icon')}</label>
-      <input type="text" id="folder-emoji-input" placeholder="📁" maxlength="4" value="📁">
+      <input type="text" id="folder-emoji-input" placeholder="${I18N.t('folder.iconPlaceholder')}" maxlength="4" value="">
     </div>
     <button class="btn" data-action="createFolderSubmit">${I18N.t('folder.create')}</button>
   `);
@@ -415,7 +519,7 @@ function openCreateFolder() {
 
 function createFolderSubmit() {
   const name = document.getElementById('folder-name-input')?.value.trim();
-  const emoji = document.getElementById('folder-emoji-input')?.value.trim() || '📁';
+  const emoji = document.getElementById('folder-emoji-input')?.value.trim() || '';
   if (!name) {
     showToast(I18N.t('err.folderName'), 'error');
     return;
@@ -434,14 +538,14 @@ function deleteFolder(folderId) {
 
 function openFolderAssignModal(chatId) {
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('folder.assign.title')}</h2>
     <div class="forward-item" data-action="assignFolder" data-chat="${chatId}" data-id="">
-      <div class="fi-avatar">💬</div><div><div class="fi-name">${I18N.t('folder.none')}</div></div>
+      <div class="fi-avatar">${Icons.svg('message', { className: 'mq-icon--lg' })}</div><div><div class="fi-name">${I18N.t('folder.none')}</div></div>
     </div>
     ${folders.map(f => `
       <div class="forward-item" data-action="assignFolder" data-chat="${chatId}" data-id="${f.id}">
-        <div class="fi-avatar">${escapeHtml(f.emoji || '📁')}</div>
+        <div class="fi-avatar">${folderIconMarkup(f)}</div>
         <div><div class="fi-name">${escapeHtml(f.name)}</div></div>
       </div>`).join('')}
   `);
@@ -458,7 +562,7 @@ async function openAddMemberModal() {
   const chat = getChatById(currentChatId);
   if (!chat) return;
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('member.add.title')}</h2>
     <div class="input-group">
       <label>${I18N.t('member.search')}</label>
@@ -483,7 +587,7 @@ async function memberSearch(query) {
       <div class="forward-item" data-action="addMemberToChat" data-id="${u.id}">
         <div class="fi-avatar">${escapeHtml((u.name || '?')[0].toUpperCase())}</div>
         <div>
-          <div class="fi-name">${escapeHtml(u.name || '')}</div>
+          <div class="fi-name">${escapeHtml(u.name || '')}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
           <div class="fi-sub">@${escapeHtml(u.username || '')}</div>
         </div>
       </div>`).join('') : `<div class="empty-note">${I18N.t('member.notFound')}</div>`;
@@ -556,7 +660,7 @@ async function showChatInfoFull() {
       <div class="member-row">
         <div class="member-avatar">${escapeHtml((m.name || '?')[0].toUpperCase())}${online ? '<span class="dot"></span>' : ''}</div>
         <div class="member-info">
-          <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}</div>
+          <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}${isOwnerUser(m) ? ownerBadgeHtml() : ''}</div>
           <div class="member-sub">@${escapeHtml(m.username || '')} ${m.public_key ? '· ' + I18N.t('chatinfo.hasKey') : '· ' + I18N.t('chatinfo.noKey')}</div>
         </div>
         ${isGroup ? `<span class="member-role ${m.role || 'member'}">${escapeHtml(roleLabel(m.role))}</span>` : ''}
@@ -572,13 +676,22 @@ async function showChatInfoFull() {
 
   const pinned = (messages[currentChatId] || []).filter(m => m.pinned).length;
   const folder = folders.find(f => (f.chat_ids || []).includes(currentChatId));
+  const chatTtl = getChatTtl(chat.id);
+  const owner = chatOwner(chat);
 
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <div style="text-align:center;margin-bottom:14px;">
-      <div class="chat-avatar" style="width:72px;height:72px;font-size:28px;margin:0 auto 10px;">${escapeHtml(getChatAvatar(chat))}</div>
-      <div class="encryption-badge">🔒 E2EE · AES-256-GCM</div>
+      <div class="chat-avatar" style="width:72px;height:72px;font-size:28px;margin:0 auto 10px;">${chatAvatarMarkup(chat)}</div>
+      ${owner ? `<div class="chatinfo-owner">${ownerBadgeHtml()}<span>${escapeHtml(owner.name || I18N.t('owner.badge'))}</span></div>` : ''}
+      <div class="encryption-badge">${Icons.svg('lock', { className: 'mq-icon--xs' })}<span>E2EE · AES-256-GCM</span></div>
     </div>
+
+    <div class="section-title">${I18N.t('ttl.title')}</div>
+    <div class="ttl-choice-row">
+      ${TTL_CHOICES.map(seconds => `<button class="ttl-choice${chatTtl === seconds ? ' active' : ''}" data-action="setChatTtl" data-id="${chat.id}" data-seconds="${seconds}">${escapeHtml(ttlLabel(seconds))}</button>`).join('')}
+    </div>
+    <div class="ttl-hint">${I18N.t('ttl.hint')}</div>
 
     <div class="section-title">${I18N.t('chatinfo.members', { count: (chat.members || []).length })}</div>
     ${members || `<div class="empty-note">${I18N.t('chatinfo.none')}</div>`}
@@ -596,8 +709,8 @@ async function showChatInfoFull() {
 // ==================== ПРОФИЛЬ ====================
 function openProfileEditor() {
   showModal(`
-    <button class="modal-close" data-action="closeModal">×</button>
-    <h2>${I18N.t('profile.title')}</h2>
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
+    <h2>${I18N.t('profile.title')}${isOwnerUser(currentUser) ? ownerBadgeHtml() : ''}</h2>
     <div style="text-align:center;margin-bottom:14px;">
       <img id="profile-avatar-preview" src="${escapeHtml(currentUser.avatar || '')}"
            style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--bg-message-in)" alt="avatar">
@@ -699,6 +812,12 @@ Object.assign(CLICK_ACTIONS, {
   removeMember: (el) => removeMemberFromChat(parseInt(el.dataset.id, 10)),
   leaveChat: () => leaveChat(),
   openProfileEditor: () => openProfileEditor(),
+  setChatTtl: (el) => {
+    const chatId = parseInt(el.dataset.id, 10);
+    setChatTtl(chatId, parseInt(el.dataset.seconds, 10));
+    showChatInfoFull();
+    showToast(I18N.t('ttl.saved'), 'success', 'clock');
+  },
   pickAvatar: () => pickAvatar(),
   saveProfile: () => saveProfile()
 });

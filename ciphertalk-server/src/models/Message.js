@@ -17,6 +17,8 @@ class Message {
     this.deleted_by = Array.isArray(data.deleted_by) ? data.deleted_by : [];
     this.reactions = data.reactions && typeof data.reactions === 'object' ? data.reactions : {};
     this.pinned = data.pinned || 0;
+    // Абсолютное время автоудаления (UTC ms) или null, если TTL не задан.
+    this.expires_at = Number(data.expires_at) || null;
     this.created_at = data.created_at || Date.now();
   }
 
@@ -36,6 +38,7 @@ class Message {
       deleted_by: this.deleted_by || [],
       reactions: this.reactions || {},
       pinned: this.pinned || 0,
+      expires_at: this.expires_at || null,
       created_at: this.created_at
     };
   }

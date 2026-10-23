@@ -11,19 +11,22 @@ const CSP_DIRECTIVES = [
   "img-src 'self' data: blob:",
   "media-src 'self' blob: data:",
   "font-src 'self' data:",
-  "connect-src 'self' ws: wss:",
+  "connect-src 'self' ws: wss: stun: turn:",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
   "frame-src 'self' blob:",
-  "manifest-src 'self'",
-  "upgrade-insecure-requests"
+  "manifest-src 'self'"
 ].join('; ');
 
 function securityHeaders(req, res, next) {
-  res.setHeader('Content-Security-Policy', CSP_DIRECTIVES);
+  // upgrade-insecure-requests только для HTTPS, иначе локальный HTTP-клиент
+  // может начать принудительно запрашивать https://localhost и сломаться.
+  const isHttps = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  const csp = isHttps ? `${CSP_DIRECTIVES}; upgrade-insecure-requests` : CSP_DIRECTIVES;
+  res.setHeader('Content-Security-Policy', csp);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');

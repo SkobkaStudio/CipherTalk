@@ -2,13 +2,15 @@ const WebSocket = require('ws');
 const config = require('../config');
 const presenceService = require('./presenceService');
 const { maskPhone } = require('../utils/mask');
+const { isOwnerPhone } = require('../utils/owner');
+const { normalizeTtlSeconds, expiresAtFor, isExpired } = require('../utils/messageExpiry');
 const sessionService = require('./sessionService');
 const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 
 const MAX_SOCKETS_PER_USER = 20;
-const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video']);
+const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video', 'sticker']);
 const MAX_CIPHERTEXT_CHARS = 400 * 1024;
 
 class WebSocketService {
@@ -20,6 +22,9 @@ class WebSocketService {
     this.db = getDatabase();
     this.heartbeatTimer = null;
     this.onlinePingTimer = null;
+    this.expiryTimer = null;
+    // Активные WebRTC-звонки: callId -> { caller, callee, type }
+    this.activeCalls = new Map();
     this.setupHandlers();
   }
 
@@ -92,10 +97,16 @@ class WebSocketService {
       'set_privacy': () => this.handleSetPrivacy(ws, msg),
       'set_group_key': () => this.handleSetGroupKey(ws, msg),
       'get_group_key': () => this.handleGetGroupKey(ws, msg),
+      'call_offer': () => this.handleCallSignal(ws, msg, 'call_offer'),
+      'call_answer': () => this.handleCallSignal(ws, msg, 'call_answer'),
+      'call_ice': () => this.handleCallSignal(ws, msg, 'call_ice'),
+      'call_reject': () => this.handleCallSignal(ws, msg, 'call_reject'),
+      'call_end': () => this.handleCallSignal(ws, msg, 'call_end'),
       'create_folder': () => this.handleCreateFolder(ws, msg),
       'update_folder': () => this.handleUpdateFolder(ws, msg),
       'delete_folder': () => this.handleDeleteFolder(ws, msg),
-      'set_chat_folder': () => this.handleSetChatFolder(ws, msg)
+      'set_chat_folder': () => this.handleSetChatFolder(ws, msg),
+      'delete_chat': () => this.handleDeleteChat(ws, msg)
     };
 
     const handler = handlers[msg.type];
@@ -108,6 +119,11 @@ class WebSocketService {
   // ==================== AUTH ====================
 
   handleAuth(ws, msg) {
+    if (ws.userId) {
+      this.send(ws, { type: 'auth_error', error: 'Соединение уже авторизовано' });
+      return ws.close(4002, 'Already authenticated');
+    }
+
     const auth = sessionService.verify(msg.token);
     if (!auth) {
       this.send(ws, { type: 'auth_error', error: 'Сессия недействительна' });
@@ -150,6 +166,96 @@ class WebSocketService {
       userId: Number(msg.targetUserId),
       publicKey: user?.public_key || ''
     });
+  }
+
+  // ==================== WEBRTC-СИГНАЛИНГ ====================
+  // Сервер только пересылает SDP/ICE между участниками. Медиа идёт
+  // напрямую P2P и шифруется DTLS-SRTP, сервер его не видит.
+
+  handleCallSignal(ws, msg, signalType) {
+    const targetUserId = Number(msg.targetUserId);
+    const callId = String(msg.callId || '').slice(0, 96);
+    if (!Number.isInteger(targetUserId) || targetUserId === ws.userId) {
+      return this.sendError(ws, 'bad_request', 'Некорректный собеседник');
+    }
+    if (!callId) {
+      return this.sendError(ws, 'bad_request', 'Не указан callId');
+    }
+    if (!this.db.findUserById(targetUserId)) {
+      return this.sendError(ws, 'not_found', 'Пользователь не найден');
+    }
+    if (typeof msg.sdp === 'string' && msg.sdp.length > 200 * 1024) {
+      return this.sendError(ws, 'bad_request', 'Слишком большой SDP');
+    }
+
+    if (signalType === 'call_offer') {
+      const sharesPrivateChat = this.db.chatMembers
+        .filter(cm => cm.user_id === ws.userId)
+        .map(cm => cm.chat_id)
+        .some(cid => {
+          const chat = this.db.findChatById(cid);
+          return chat && chat.type === 'private' && this.db.isChatMember(cid, targetUserId);
+        });
+      if (!sharesPrivateChat) {
+        return this.sendError(ws, 'forbidden', 'Звонки доступны только в личных чатах');
+      }
+    } else {
+      const call = this.activeCalls.get(callId);
+      const validPair = call && (
+        (call.caller === ws.userId && call.callee === targetUserId) ||
+        (call.callee === ws.userId && call.caller === targetUserId)
+      );
+      if (!validPair) {
+        return this.sendError(ws, 'bad_request', 'Неизвестный звонок');
+      }
+    }
+
+    const me = this.db.findUserById(ws.userId);
+    const payload = {
+      type: signalType,
+      callId,
+      fromUserId: ws.userId,
+      fromName: me ? (me.name || me.username || '') : '',
+      fromAvatar: me ? (me.avatar || '') : '',
+      callType: msg.callType === 'video' ? 'video' : 'audio'
+    };
+    if (typeof msg.sdp === 'string') payload.sdp = msg.sdp;
+    if (msg.candidate && typeof msg.candidate === 'object') payload.candidate = msg.candidate;
+    if (typeof msg.reason === 'string') payload.reason = msg.reason.slice(0, 80);
+
+    if (signalType === 'call_offer') {
+      // Один активный звонок на пользователя. Тот же участник может
+      // перезвонить повторно (старый callId просто заменяется).
+      for (const [id, call] of this.activeCalls) {
+        const samePair = id !== callId && (
+          (call.caller === ws.userId && call.callee === targetUserId) ||
+          (call.callee === ws.userId && call.caller === targetUserId)
+        );
+        const busy = id !== callId && (
+          call.caller === targetUserId || call.callee === targetUserId ||
+          call.caller === ws.userId || call.callee === ws.userId
+        );
+        if (samePair) {
+          this.activeCalls.delete(id);
+        } else if (busy) {
+          return this.send(ws, { type: 'call_unavailable', callId, reason: 'busy' });
+        }
+      }
+      this.activeCalls.set(callId, { caller: ws.userId, callee: targetUserId, type: payload.callType });
+    }
+
+    const delivered = presenceService.sendToUser(targetUserId, payload);
+    if (!delivered && signalType === 'call_offer') {
+      this.activeCalls.delete(callId);
+      return this.send(ws, { type: 'call_unavailable', callId, reason: 'offline' });
+    }
+
+    if (signalType === 'call_offer') {
+      this.send(ws, { type: 'call_ringing', callId, targetUserId });
+    }
+    if (signalType === 'call_end' || signalType === 'call_reject') {
+      this.activeCalls.delete(callId);
+    }
   }
 
   handleStartChat(ws, msg) {
@@ -196,19 +302,21 @@ class WebSocketService {
       created = true;
     }
 
-    const members = this.getChatMembersWithDetails(chatId);
+    // Если чат был удалён у кого-то из собеседников — возвращаем его в список.
+    this.db.restoreChatForUser(chatId, currentUserId);
+    this.db.restoreChatForUser(chatId, targetUserId);
+
+    const members = this.getChatMembersWithDetails(chatId, currentUserId);
     this.send(ws, { type: 'chat_created', chatId, members });
 
     if (created) {
       const chat = this.db.findChatById(chatId);
       const notification = {
         type: 'new_chat',
-        chat: this.getChatWithDetails(chat, members)
+        chat: this.getChatWithDetails(chat, this.getChatMembersWithDetails(chatId, targetUserId), targetUserId)
       };
-      // Уведомляем всех участников (у текущего уже открыт чат)
-      members.forEach(m => {
-        if (m.id !== currentUserId) presenceService.sendToUser(m.id, notification);
-      });
+      // Уведомляем собеседника; телефон каждого маскируется относительно него.
+      presenceService.sendToUser(targetUserId, notification);
     }
   }
 
@@ -237,13 +345,18 @@ class WebSocketService {
     });
     this.db.markDirty();
 
-    const members = this.getChatMembersWithDetails(chatId);
-    const notification = {
-      type: 'new_chat',
-      chat: this.getChatWithDetails(chat, members)
-    };
-    members.forEach(m => presenceService.sendToUser(m.id, notification));
-    this.send(ws, { type: 'group_created', chat: this.getChatWithDetails(chat, members) });
+    const memberIds = this.getChatMemberIds(chatId);
+    memberIds.forEach(uid => {
+      if (uid === currentUserId) return;
+      presenceService.sendToUser(uid, {
+        type: 'new_chat',
+        chat: this.getChatWithDetails(chat, this.getChatMembersWithDetails(chatId, uid), uid)
+      });
+    });
+    this.send(ws, {
+      type: 'group_created',
+      chat: this.getChatWithDetails(chat, this.getChatMembersWithDetails(chatId, currentUserId), currentUserId)
+    });
   }
 
   handleCreateChannel(ws, msg) {
@@ -262,12 +375,12 @@ class WebSocketService {
     this.db.chatMembers.push({ chat_id: chatId, user_id: currentUserId, role: 'owner', joined_at: Date.now() });
     this.db.markDirty();
 
-    const members = this.getChatMembersWithDetails(chatId);
-    const notification = {
-      type: 'new_chat',
-      chat: this.getChatWithDetails(chat, members)
-    };
-    members.forEach(m => presenceService.sendToUser(m.id, notification));
+    this.getChatMemberIds(chatId).forEach(uid => {
+      presenceService.sendToUser(uid, {
+        type: 'new_chat',
+        chat: this.getChatWithDetails(chat, this.getChatMembersWithDetails(chatId, uid), uid)
+      });
+    });
   }
 
   handleSendMessage(ws, msg) {
@@ -293,6 +406,8 @@ class WebSocketService {
     const replyTo = Number.isInteger(Number(msg.replyTo)) && Number(msg.replyTo) > 0
       ? Number(msg.replyTo)
       : null;
+    const ttlSeconds = normalizeTtlSeconds(msg.ttlSeconds);
+    const expiresAt = expiresAtFor(ttlSeconds, now);
 
     const message = new Message({
       id: this.db.nextId('messages'),
@@ -306,12 +421,22 @@ class WebSocketService {
       forwarded_from: Number.isInteger(Number(msg.forwardedFrom)) && Number(msg.forwardedFrom) > 0
         ? Number(msg.forwardedFrom)
         : null,
+      expires_at: expiresAt || null,
       created_at: now
     });
     this.db.addMessage(message);
 
     const sender = this.db.findUserById(currentUserId);
     const members = this.getChatMemberIds(chatId);
+    const restored = this.db.restoreHiddenChatMembers(chatId);
+    const chatForRestored = restored.length ? this.db.findChatById(chatId) : null;
+    restored.forEach(uid => {
+      if (!chatForRestored) return;
+      presenceService.sendToUser(uid, {
+        type: 'new_chat',
+        chat: this.getChatWithDetails(chatForRestored, this.getChatMembersWithDetails(chatId, uid), uid)
+      });
+    });
 
     presenceService.sendToChatMembers(members, {
       type: 'new_message',
@@ -332,6 +457,7 @@ class WebSocketService {
         deletedForAll: message.deleted_for_all,
         reactions: message.reactions,
         pinned: message.pinned,
+        expiresAt: message.expires_at,
         createdAt: message.created_at
       }
     });
@@ -359,6 +485,9 @@ class WebSocketService {
     }
     if (message.type !== 'text') {
       return this.sendError(ws, 'forbidden', 'Медиа-сообщения нельзя редактировать');
+    }
+    if (message.deleted_for_all) {
+      return this.sendError(ws, 'forbidden', 'Удалённое сообщение нельзя редактировать');
     }
     if (!message.chat_id || !this.db.isChatMember(message.chat_id, currentUserId)) {
       return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
@@ -441,12 +570,24 @@ class WebSocketService {
     }
 
     const limit = Math.min(Math.max(parseInt(msg.limit, 10) || 50, 1), 500);
-    const chatMessages = this.db.messages
-      .filter(m => m.chat_id === chatId)
-      .slice(-limit)
-      .map(m => this.serializeMessage(m));
+    // beforeId — пагинация: отдаём сообщения строго старше указанного id
+    const beforeId = parseInt(msg.beforeId, 10) || null;
+    const clearedAt = this.db.getChatClearedAt(chatId, ws.userId);
+    const all = this.db.messages.filter(m =>
+      m.chat_id === chatId && !isExpired(m) && (!clearedAt || m.created_at > clearedAt)
+    );
+    const older = beforeId ? all.filter(m => m.id < beforeId) : all;
+    const hasMore = older.length > limit;
+    const page = older.slice(-limit).map(m => this.serializeMessage(m));
 
-    this.send(ws, { type: 'messages', chatId, messages: chatMessages });
+    this.send(ws, {
+      type: 'messages',
+      chatId,
+      messages: page,
+      hasMore,
+      beforeId: page.length ? page[0].id : null,
+      older: !!beforeId
+    });
   }
 
   /**
@@ -492,8 +633,44 @@ class WebSocketService {
       deleted_for_all: m.deleted_for_all || 0,
       reactions: m.reactions || {},
       pinned: m.pinned || 0,
+      expires_at: m.expires_at || null,
       created_at: m.created_at
     };
+  }
+
+  /**
+   * Удаление чата:
+   *  - forAll=true — только владелец группы/канала удаляет чат для всех;
+   *  - forAll=false — чат скрывается у текущего пользователя вместе с историей.
+   */
+  handleDeleteChat(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const chat = this.db.findChatById(chatId);
+    if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
+    if (!this.db.isChatMember(chatId, ws.userId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+
+    const forAll = msg.forAll === true || msg.forAll === 1;
+    if (!forAll) {
+      this.db.hideChatForUser(chatId, ws.userId);
+      this.send(ws, { type: 'chat_deleted', chatId, forAll: false });
+      return;
+    }
+
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel';
+    if (!isGroup) {
+      return this.sendError(ws, 'forbidden', 'В личном чате можно удалить только у себя');
+    }
+    if (this.checkRole(chatId, ws.userId) !== 'owner') {
+      return this.sendError(ws, 'forbidden', 'Удалить чат для всех может только владелец');
+    }
+
+    const members = this.getChatMemberIds(chatId);
+    this.db.deleteChat(chatId);
+    members.forEach(uid => {
+      presenceService.sendToUser(uid, { type: 'chat_deleted', chatId, forAll: true });
+    });
   }
 
   handleTyping(ws, msg) {
@@ -528,7 +705,11 @@ class WebSocketService {
     }
     const myRole = this.checkRole(chatId, currentUserId);
     const chat = this.db.findChatById(chatId);
-    if (chat && chat.type === 'channel' && myRole !== 'owner' && myRole !== 'admin') {
+    if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
+    if (chat.type === 'private' || chat.type === 'saved') {
+      return this.sendError(ws, 'forbidden', 'В приватный чат нельзя добавлять участников');
+    }
+    if (chat.type === 'channel' && myRole !== 'owner' && myRole !== 'admin') {
       return this.sendError(ws, 'forbidden', 'Только админы могут добавлять подписчиков');
     }
     if (!this.db.findUserById(userId)) {
@@ -545,11 +726,12 @@ class WebSocketService {
       this.db.markDirty();
     }
 
-    const members = this.getChatMembersWithDetails(chatId);
-    presenceService.sendToChatMembers(members.map(m => m.id), {
-      type: 'member_added',
-      chatId,
-      members
+    this.getChatMemberIds(chatId).forEach(uid => {
+      presenceService.sendToUser(uid, {
+        type: 'member_added',
+        chatId,
+        members: this.getChatMembersWithDetails(chatId, uid)
+      });
     });
 
     // Новому участнику отправляем текущий групповой ключ (он завёрнут лично для него).
@@ -576,12 +758,13 @@ class WebSocketService {
     if (targetRole === 'owner') return this.sendError(ws, 'forbidden', 'Нельзя удалить владельца');
     this.db.chatMembers = this.db.chatMembers.filter(m => !(m.chat_id === chatId && m.user_id === userId));
     this.db.markDirty();
-    const members = this.getChatMembersWithDetails(chatId);
-    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
-      type: 'member_removed',
-      chatId,
-      userId,
-      members
+    this.getChatMemberIds(chatId).forEach(uid => {
+      presenceService.sendToUser(uid, {
+        type: 'member_removed',
+        chatId,
+        userId,
+        members: this.getChatMembersWithDetails(chatId, uid)
+      });
     });
   }
 
@@ -658,6 +841,15 @@ class WebSocketService {
 
     const sender = this.db.findUserById(currentUserId);
     const members = this.getChatMemberIds(toChatId);
+    const restored = this.db.restoreHiddenChatMembers(toChatId);
+    const chatForRestored = restored.length ? this.db.findChatById(toChatId) : null;
+    restored.forEach(uid => {
+      if (!chatForRestored) return;
+      presenceService.sendToUser(uid, {
+        type: 'new_chat',
+        chat: this.getChatWithDetails(chatForRestored, this.getChatMembersWithDetails(toChatId, uid), uid)
+      });
+    });
     presenceService.sendToChatMembers(members, {
       type: 'new_message',
       message: {
@@ -764,13 +956,14 @@ class WebSocketService {
     }
     this.db.markDirty();
 
-    const members = this.getChatMembersWithDetails(chatId);
-    presenceService.sendToChatMembers(this.getChatMemberIds(chatId), {
-      type: 'member_role_changed',
-      chatId,
-      userId,
-      role,
-      members
+    this.getChatMemberIds(chatId).forEach(uid => {
+      presenceService.sendToUser(uid, {
+        type: 'member_role_changed',
+        chatId,
+        userId,
+        role,
+        members: this.getChatMembersWithDetails(chatId, uid)
+      });
     });
   }
 
@@ -957,8 +1150,27 @@ class WebSocketService {
     const userId = ws.userId;
     if (userId === undefined || userId === null) return;
 
+    // Завершаем звонки, в которых участвовал отключившийся пользователь.
+    for (const [callId, call] of this.activeCalls) {
+      if (call.caller === userId || call.callee === userId) {
+        const peer = call.caller === userId ? call.callee : call.caller;
+        presenceService.sendToUser(peer, {
+          type: 'call_end',
+          callId,
+          reason: 'disconnected',
+          fromUserId: userId
+        });
+        this.activeCalls.delete(callId);
+      }
+    }
+
     const fullyOffline = presenceService.removeSocket(ws);
     ws.userId = null;
+    if (ws.pingTimer) {
+      clearInterval(ws.pingTimer);
+      ws.pingTimer = null;
+    }
+    ws.removeAllListeners && ws.removeAllListeners();
     if (!fullyOffline) return;
 
     const user = this.db.findUserById(userId);
@@ -1008,6 +1220,59 @@ class WebSocketService {
     }, config.onlinePingInterval);
   }
 
+  /**
+   * Периодически удаляет сообщения с истёкшим TTL и уведомляет участников,
+   * чтобы исчезновение было одинаковым на всех устройствах.
+   */
+  startExpirySweep() {
+    if (this.expiryTimer) return;
+    this.expiryTimer = setInterval(() => this.purgeExpiredMessages(), 15000);
+    if (this.expiryTimer.unref) this.expiryTimer.unref();
+  }
+
+  purgeExpiredMessages(now = Date.now()) {
+    const expired = this.db.messages.filter(m => isExpired(m, now));
+    if (!expired.length) return 0;
+
+    const byChat = new Map();
+    expired.forEach(m => {
+      if (!byChat.has(m.chat_id)) byChat.set(m.chat_id, []);
+      byChat.get(m.chat_id).push(m.id);
+    });
+    const expiredIds = new Set(expired.map(m => m.id));
+    this.db.messages = this.db.messages.filter(m => !expiredIds.has(m.id));
+    this.db.markDirty();
+
+    byChat.forEach((messageIds, chatId) => {
+      const members = this.getChatMemberIds(chatId);
+      messageIds.forEach(messageId => {
+        presenceService.sendToChatMembers(members, {
+          type: 'message_deleted',
+          chatId,
+          messageId,
+          forAll: false,
+          expired: true
+        });
+      });
+      const chat = this.db.findChatById(chatId);
+      if (!chat) return;
+      members.forEach(uid => {
+        const details = this.getChatWithDetails(chat, this.getChatMembersWithDetails(chatId, uid), uid);
+        presenceService.sendToUser(uid, {
+          type: 'chat_updated',
+          chatId,
+          lastMessage: details.last_message,
+          lastMessageIv: details.last_message_iv,
+          lastMessageHeader: details.last_message_header,
+          lastMessageType: details.last_message_type,
+          lastMessageTime: details.last_message_time,
+          lastSenderId: details.last_sender_id
+        });
+      });
+    });
+    return expired.length;
+  }
+
   stop() {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -1016,6 +1281,10 @@ class WebSocketService {
     if (this.onlinePingTimer) {
       clearInterval(this.onlinePingTimer);
       this.onlinePingTimer = null;
+    }
+    if (this.expiryTimer) {
+      clearInterval(this.expiryTimer);
+      this.expiryTimer = null;
     }
   }
 
@@ -1042,8 +1311,11 @@ class WebSocketService {
       .map(m => m.user_id);
   }
 
-  getChatWithDetails(chat, members) {
-    const chatMessages = this.db.messages.filter(m => m.chat_id === chat.id);
+  getChatWithDetails(chat, members, requesterId = null) {
+    const clearedAt = requesterId ? this.db.getChatClearedAt(chat.id, requesterId) : 0;
+    const chatMessages = this.db.messages.filter(m =>
+      m.chat_id === chat.id && !isExpired(m) && (!clearedAt || m.created_at > clearedAt)
+    );
     const lastMsg = chatMessages[chatMessages.length - 1];
     // Никакой расшифровки на сервере — только шифротекст.
     const lastContent = lastMsg && !lastMsg.deleted_for_all ? lastMsg.encrypted_content : '';
@@ -1066,11 +1338,11 @@ class WebSocketService {
 
   getUserChatsWithDetails(userId) {
     return this.db.chatMembers
-      .filter(cm => cm.user_id === userId)
+      .filter(cm => cm.user_id === userId && !cm.hidden)
       .map(cm => {
         const chat = this.db.findChatById(cm.chat_id);
         if (!chat) return null;
-        const details = this.getChatWithDetails(chat, this.getChatMembersWithDetails(chat.id, userId));
+        const details = this.getChatWithDetails(chat, this.getChatMembersWithDetails(chat.id, userId), userId);
         return { ...details, role: cm.role };
       })
       .filter(Boolean)
@@ -1096,6 +1368,7 @@ class WebSocketService {
           public_key: u.public_key,
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
+          is_owner: isOwnerPhone(u.phone) ? 1 : 0,
           role: m.role
         };
       })

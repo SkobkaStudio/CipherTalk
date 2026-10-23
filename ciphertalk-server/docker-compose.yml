@@ -1,0 +1,27 @@
+services:
+  ciphertalk:
+    build: .
+    container_name: ciphertalk
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_FILE: /data/ciphertalk-db.json
+      # Файл БД шифруется AES-256-GCM, ключ — /data/ciphertalk-db.json.dbkey.
+      # Бэкап БД бессмысленен без ключа: храните том целиком.
+      DB_ENCRYPTION: "true"
+      UPLOADS_DIR: /data/uploads
+      MAX_FILE_SIZE: 52428800
+    volumes:
+      - ciphertalk-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ciphertalk-data:

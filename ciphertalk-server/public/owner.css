@@ -1,0 +1,240 @@
+/* Золотая галочка создателя CipherTalk и компактный индикатор автоудаления. */
+
+.owner-badge-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.owner-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  vertical-align: -3px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, .95), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(145deg, #ffe082 0%, #ffb300 46%, #b26a00 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 214, 102, .55),
+    0 2px 7px rgba(255, 167, 38, .38),
+    inset 0 -1px 2px rgba(120, 63, 0, .35);
+  animation: owner-badge-glow 3.4s ease-in-out infinite;
+}
+
+.owner-badge__crown {
+  width: 11px;
+  height: 11px;
+  fill: rgba(78, 42, 0, .88);
+  stroke: none;
+}
+
+.owner-badge__check {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  padding: 1px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #7df9c1, #18b26b);
+  box-shadow: 0 0 0 1.5px var(--bg-secondary, #17212b);
+  fill: none;
+  stroke: #053b23;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.owner-badge[data-tooltip]:hover::after,
+.owner-badge[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 80;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 213, 79, .35);
+  border-radius: 8px;
+  background: rgba(14, 22, 33, .96);
+  color: #ffe7a3;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+}
+
+.owner-badge[data-tooltip]:hover::before,
+.owner-badge[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 3px);
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(255, 213, 79, .35);
+  pointer-events: none;
+}
+
+@keyframes owner-badge-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 214, 102, .55), 0 2px 7px rgba(255, 167, 38, .32), inset 0 -1px 2px rgba(120, 63, 0, .35); }
+  50% { box-shadow: 0 0 0 1px rgba(255, 224, 130, .8), 0 2px 12px rgba(255, 179, 0, .58), inset 0 -1px 2px rgba(120, 63, 0, .35); }
+}
+
+.chat-name-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-name-wrap .chat-name { min-width: 0; }
+
+.message-sender {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.search-result-name,
+.fi-name,
+.member-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.chat-header-ttl {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(94, 181, 247, .28);
+  border-radius: 999px;
+  background: rgba(94, 181, 247, .12);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.chat-header-ttl[hidden] { display: none; }
+
+.message-ttl {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  opacity: .62;
+}
+
+.ttl-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 6px;
+}
+
+.ttl-choice {
+  padding: 7px 12px;
+  border: 1px solid var(--border, rgba(255, 255, 255, .12));
+  border-radius: 999px;
+  background: var(--bg-message-in, rgba(255, 255, 255, .06));
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease;
+}
+
+.ttl-choice:hover {
+  color: var(--text-primary);
+  border-color: rgba(94, 181, 247, .45);
+  transform: translateY(-1px);
+}
+
+.ttl-choice.active {
+  border-color: rgba(94, 181, 247, .75);
+  background: rgba(94, 181, 247, .18);
+  color: var(--accent);
+  box-shadow: 0 0 14px rgba(94, 181, 247, .16);
+}
+
+.ttl-hint {
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chatinfo-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -2px 0 8px;
+  padding: 4px 10px 4px 7px;
+  border: 1px solid rgba(255, 213, 79, .28);
+  border-radius: 999px;
+  background: rgba(255, 193, 7, .09);
+  color: #ffe7a3;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chatinfo-owner .owner-badge { margin-left: 0; }
+
+.side-menu-name .owner-badge { margin-left: 6px; }
+
+@media (max-width: 480px) {
+  .owner-badge { width: 16px; height: 16px; }
+  .owner-badge__crown { width: 9px; height: 9px; }
+  .chat-header-ttl { padding: 1px 5px; font-size: 10px; }
+  .ttl-choice { padding: 6px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .owner-badge { animation: none; }
+  .ttl-choice { transition: none; }
+}
+
+
+/* Кастомный бейдж пользователя (личная настройка) */
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 5px;
+  vertical-align: -3px;
+  color: var(--accent, #7c5cff);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent, #7c5cff) 45%, transparent));
+}
+.user-badge__icon { width: 15px; height: 15px; }
+.badge-row { flex-wrap: wrap; gap: 6px; }
+.badge-chip { display: inline-flex; align-items: center; gap: 5px; }
+.panic-btn {
+  width: 100%;
+  margin-top: 8px;
+  color: var(--danger, #e53935);
+  border-color: color-mix(in srgb, var(--danger, #e53935) 45%, transparent);
+}
+.panic-btn:hover { background: color-mix(in srgb, var(--danger, #e53935) 14%, transparent); }
+
+/* Защита от скриншотов: контент скрывается при уходе из вкладки/PrintScreen */
+html.mq-screenshot-guard.mq-privacy-blur #app {
+  filter: blur(16px) saturate(.6);
+  transition: filter .12s ease;
+  pointer-events: none;
+  user-select: none;
+}

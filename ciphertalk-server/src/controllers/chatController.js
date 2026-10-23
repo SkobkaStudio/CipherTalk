@@ -1,6 +1,8 @@
 const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const { maskPhone } = require('../utils/mask');
+const { isOwnerPhone } = require('../utils/owner');
+const { isExpired } = require('../utils/messageExpiry');
 
 class ChatController {
   constructor() {
@@ -16,7 +18,7 @@ class ChatController {
       }
 
       const userChats = this.db.chatMembers
-        .filter(cm => cm.user_id === req.userId)
+        .filter(cm => cm.user_id === req.userId && !cm.hidden)
         .map(cm => {
           const chat = this.db.findChatById(cm.chat_id);
           if (!chat) return null;
@@ -45,8 +47,9 @@ class ChatController {
         return res.status(403).json({ error: 'Нет доступа к чату' });
       }
 
+      const clearedAt = this.db.getChatClearedAt(chatId, req.userId);
       const messages = this.db.messages
-        .filter(m => m.chat_id === chatId)
+        .filter(m => m.chat_id === chatId && !isExpired(m) && (!clearedAt || m.created_at > clearedAt))
         .slice(-limit)
         .map(m => this.serializeMessage(m));
 
@@ -98,6 +101,7 @@ class ChatController {
       deleted_for_all: m.deleted_for_all || 0,
       reactions: m.reactions || {},
       pinned: m.pinned || 0,
+      expires_at: m.expires_at || null,
       created_at: m.created_at
     };
   }
@@ -109,7 +113,10 @@ class ChatController {
       if (!this.db.isChatMember(chatId, req.userId)) {
         return res.status(403).json({ error: 'Нет доступа к чату' });
       }
-      res.json(this.db.getPinnedMessages(chatId).map(m => this.serializeMessage(m)));
+      const clearedAt = this.db.getChatClearedAt(chatId, req.userId);
+      res.json(this.db.getPinnedMessages(chatId)
+        .filter(m => !clearedAt || m.created_at > clearedAt)
+        .map(m => this.serializeMessage(m)));
     } catch (error) {
       console.error('Get pinned messages error:', error);
       res.status(500).json({ error: 'Ошибка получения закреплённых сообщений' });
@@ -170,6 +177,15 @@ class ChatController {
       if (!this.db.isChatMember(chatId, req.userId)) {
         return res.status(403).json({ error: 'Нет доступа к чату' });
       }
+      const chat = this.db.findChatById(chatId);
+      if (!chat) return res.status(404).json({ error: 'Чат не найден' });
+      if (chat.type === 'private' || chat.type === 'saved') {
+        return res.status(403).json({ error: 'В приватный чат нельзя добавлять участников' });
+      }
+      const myRole = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === req.userId)?.role;
+      if (chat.type === 'channel' && myRole !== 'owner' && myRole !== 'admin') {
+        return res.status(403).json({ error: 'Только админы могут добавлять подписчиков' });
+      }
       if (!this.db.findUserById(userId)) {
         return res.status(404).json({ error: 'Пользователь не найден' });
       }
@@ -184,8 +200,7 @@ class ChatController {
         this.db.markDirty();
       }
 
-      const chat = this.db.findChatById(chatId);
-      res.json(chat ? this.getChatWithDetails(chat, req.userId) : null);
+      res.json(this.getChatWithDetails(chat, req.userId));
     } catch (error) {
       console.error('Add member error:', error);
       res.status(500).json({ error: 'Ошибка добавления участника' });
@@ -264,6 +279,7 @@ class ChatController {
           public_key: u.public_key,
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
+          is_owner: isOwnerPhone(u.phone) ? 1 : 0,
           role: m.role
         };
       })
@@ -280,7 +296,10 @@ class ChatController {
 
   getChatWithDetails(chat, requesterId = null) {
     const members = this.getChatMembersWithDetails(chat.id, requesterId);
-    const chatMessages = this.db.messages.filter(m => m.chat_id === chat.id);
+    const clearedAt = requesterId ? this.db.getChatClearedAt(chat.id, requesterId) : 0;
+    const chatMessages = this.db.messages.filter(m =>
+      m.chat_id === chat.id && !isExpired(m) && (!clearedAt || m.created_at > clearedAt)
+    );
     const lastMsg = chatMessages[chatMessages.length - 1];
     // Никакой расшифровки на сервере: отдаём шифротекст + iv + header,
     // расшифрует клиент, у которого есть ключ.

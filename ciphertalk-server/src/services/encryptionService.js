@@ -27,10 +27,13 @@ class EncryptionService {
     try {
       if (fs.existsSync(keyFile)) {
         const hex = fs.readFileSync(keyFile, 'utf8').trim();
-        if (/^[0-9a-f]{64}$/i.test(hex)) {
-          this._key = Buffer.from(hex, 'hex');
-          return this._key;
+        if (!/^[0-9a-f]{64}$/i.test(hex)) {
+          // Не перезаписываем повреждённый ключ: иначе старые OTP/секреты
+          // станут нерасшифровываемыми, а ошибка останется незамеченной.
+          throw new Error(`Файл ключа шифрования повреждён: ${keyFile}`);
         }
+        this._key = Buffer.from(hex, 'hex');
+        return this._key;
       }
       const key = crypto.randomBytes(32);
       fs.writeFileSync(keyFile, key.toString('hex'), { mode: 0o600 });
