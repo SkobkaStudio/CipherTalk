@@ -880,7 +880,7 @@ auth/message/typing/read/call_* события.
 ### License
 This project is licensed under the **MIT License**. See [LICENSE](LICENSE) file for details.
 
-Copyright (c) 2024 SkobkaStudio
+Copyright (c) 2026 SkobkaStudio
 
 ### Contributing
 Contributions are welcome! Feel free to open issues or submit pull requests.
