@@ -7,662 +7,561 @@
 [![WebRTC](https://img.shields.io/badge/WebRTC-P2P%20DTLS--SRTP-purple.svg)](https://webrtc.org/)
 [![PWA](https://img.shields.io/badge/PWA-Ready-orange.svg)](https://web.dev/progressive-web-apps/)
 [![Tests](https://img.shields.io/badge/Tests-325%2B%20assertions-brightgreen.svg)](#proof-of-work-test-results)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](ciphertalk-server/package.json)
 
-> **End-to-end encrypted messenger with NVC architecture, P2P calls, and privacy-first design.**
-> 
-> **Мессенджер с end-to-end шифрованием, P2P-звонками и акцентом на конфиденциальность.**
+> **End-to-end encrypted messenger with NVC architecture, P2P calls, and privacy-first design.**  
+> **Мессенджер с end-to-end шифрованием, P2P-звонками и максимальным упором на конфиденциальность.**
 
 ---
 
-## Table of Contents | Содержание
+## Table of Contents / Содержание
 
 - [English](#english)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Architecture](#architecture)
+  - [Tech Stack](#tech-stack)
+  - [Project Structure](#project-structure)
+  - [Detailed Installation & Setup Guide (Linux & Windows)](#detailed-installation--setup-guide-linux--windows)
+  - [Configuration (.env)](#configuration-env)
+  - [Running the Server](#running-the-server)
+  - [Using CipherTalk (User Guide)](#using-ciphertalk-user-guide)
+  - [E2EE Technical Details](#e2ee-technical-details)
+  - [API Reference](#api-reference)
+  - [WebSocket Events](#websocket-events)
+  - [Testing](#testing)
+  - [Deployment (Docker, Tunnel)](#deployment-docker-tunnel)
+  - [Troubleshooting](#troubleshooting)
 - [Русский](#русский)
+  - [Обзор](#обзор)
+  - [Возможности](#возможности)
+  - [Архитектура](#архитектура-1)
+  - [Стек технологий](#стек-технологий)
+  - [Структура проекта](#структура-проекта)
+  - [Подробная инструкция по установке и запуску (Linux и Windows)](#подробная-инструкция-по-установке-и-запуску-linux-и-windows)
+  - [Настройка конфигурации (.env)](#настройка-конфигурации-env)
+  - [Запуск сервера](#запуск-сервера)
+  - [Использование CipherTalk (руководство пользователя)](#использование-ciphertalk-руководство-пользователя)
+  - [E2EE — технические детали](#e2ee--технические-детали)
+  - [API-справочник](#api-справочник)
+  - [События WebSocket](#события-websocket)
+  - [Тестирование](#тестирование)
+  - [Деплой (Docker, туннель)](#деплой-docker-туннель)
+  - [Устранение неполадок](#устранение-неполадок)
+- [Proof of Work: Test Results](#proof-of-work-test-results)
+- [License](#license)
 
 ---
+
 
 ## English
 
 ### Overview
 
-CipherTalk is a privacy-focused, end-to-end encrypted messaging application built with Node.js, Express, and Vanilla JavaScript. All private messages are encrypted on the client side using Web Crypto API (ECDH P-256 + AES-256-GCM with per-message keys and forward secrecy via ratcheting). The server is "blind" — it never has access to plaintext message content, only stores encrypted blobs with headers/IVs for delivery.
+CipherTalk is a privacy-focused, end-to-end encrypted messenger. All private messages are encrypted client-side using the Web Crypto API with ECDH P-256, AES-256-GCM, HKDF-SHA256, per-message keys, and directional ratchet chains (forward secrecy). The server is "blind" — it cannot read message contents and only stores encrypted payloads (`encrypted_content`, `iv`, `header`), metadata required for delivery, and wrapped group keys.
 
-### Project Statistics
+**Project Info:** Version 2.0.0 | NVC Architecture | SQLite WAL + SQLCipher at-rest encryption | P2P WebRTC calls | PWA-ready
 
-| Metric | Value |
-| --- | --- |
-| **Version** | 2.0.0 |
-| **Architecture** | NVC (Node.js Views/Controllers pattern) |
-| **Backend** | Node.js + Express + WebSocket (`ws`) |
-| **Database** | SQLite (WAL) with SQLCipher at-rest encryption |
-| **Client** | Vanilla JS + Web Crypto API, zero frameworks |
-| **E2EE** | ECDH P-256, AES-256-GCM, HKDF-SHA256, per-message keys, Double Ratchet-style chaining |
-| **P2P Calls** | WebRTC (DTLS-SRTP), STUN/TURN with time-limited credentials |
-| **Files** | 18 frontend modules, 10 backend services, 5 controllers/routes, 6 models, 12 test suites |
-| **Total Test Assertions** | 325+ passed (see Proof of Work below) |
+### Features
 
-### Complete Feature List
+#### Security & E2EE
+- **Direct E2EE**: ECDH P-256 exchange → shared secret → HKDF root → separate send/recv chains. Each message derives a unique message key; chain ratchet forward. Skipped keys cached (up to 1000) for out-of-order delivery.
+- **AAD binding**: Encryption authenticated data binds ciphertext to `chatId|header` to prevent cross-chat replay.
+- **Group E2EE**: Random 32-byte group key, per-member ECDH+AES-GCM wrapping. Server stores only wrapped blobs.
+- **File encryption**: Per-file key derived via HKDF with random salt, AES-256-GCM.
+- **Safety Numbers**: 60-digit verification for key authenticity.
+- **Key rotation**: Public key updates handled with session re-establishment.
+- **SQLCipher at-rest**: DB file encrypted; key in `<db>.dbkey` (mode 0600). Fail-closed if key missing/corrupted.
+- **App-layer encryption**: AES-256-GCM + scrypt for sensitive data; keys generated/stored securely.
+- **Passwords**: PBKDF2-SHA512 (100000 iterations), constant-time compare, legacy migration supported.
+- **JWT sessions**: HMAC-SHA256, token hash stored, revocable on logout.
+- **Phone masking** in WS snapshots.
+- **No Math.random for secrets** — uses `crypto.randomBytes/randomInt`.
 
-#### 🔐 Security & E2EE
-- **End-to-End Encryption (Direct Chats)** — ECDH P-256 key exchange, shared secret → HKDF root key → separate send/recv chains (different keys per direction). Each message gets its own derived message key + unique 96-bit IV. Forward secrecy within session via chain ratchet (cannot derive past keys from current chain key).
-- **Double Ratchet-style Implementation** — Symmetric-key ratchet per direction; skipped message keys cached (`MAX_SKIP=1000`) to handle out-of-order delivery; `MAX_SEND_KEYS=300` for send-chain key retention.
-- **AAD Context Binding** — All encryptions include Additional Authenticated Data (`chatId|header`) preventing cross-chat message replay/substitution.
-- **Group E2EE** — Random 32-byte group key generated by client; each member's key individually wrapped with ECDH+AES-GCM and stored as wrapped blobs. Server never sees raw group keys.
-- **Per-File Encryption** — Files encrypted with derived file key (HKDF from session/group key + salt) using AES-256-GCM.
-- **Safety Numbers** — 60-digit verification code for out-of-band key verification.
-- **Key Rotation** — Public key updates propagate; sessions re-established on rotation.
-- **Server-Blind Transport** — Server only stores `{ encrypted_content, iv, header }`; cannot decrypt.
-- **SQLCipher Database Encryption** — SQLite file encrypted at rest with per-install key in `.dbkey` (0600 permissions). Fail-closed on missing/corrupted key.
-- **Application-Layer Encryption** — Sensitive data also encrypted with AES-256-GCM + scrypt-derived key; keys stored securely with proper permissions.
-- **Password Security** — PBKDF2-SHA512 (100000 iterations), legacy format supported for migration, constant-time comparison.
-- **Cryptographic Randomness** — `crypto.randomBytes`/`crypto.randomInt` throughout (no `Math.random()` for secrets).
-- **JWT Sessions** — HMAC-SHA256 tokens, SHA-256 hashed in DB, server-side revocation on logout, session cleanup.
-- **Phone Masking** — Phone numbers masked in WebSocket snapshots for privacy.
-- **Fail-Closed Security** — Corrupted encryption keys/JWT secrets never overwritten; missing DB key prevents startup.
+#### Messaging
+- Private, group, saved messages (Favorites)
+- Replies, forwarding (re-encrypted to target), reactions, edit, delete-for-all, pin
+- Typing indicators, read receipts
+- Folders, hide/clear chats, member management
+- Message expiry, file sharing up to 50 MB (encrypted)
 
-#### 💬 Messaging & Chats
-- **Private Chats** — 1:1 encrypted conversations with automatic E2EE session establishment.
-- **Group Chats** — Multi-member groups with group key distribution.
-- **Saved Messages (Favorites)** — Personal notes chat.
-- **Message Replies & Forwarding** — Quote/reply and forward messages between chats (re-encrypted under target chat context).
-- **Reactions** — Emoji reactions on messages.
-- **Message Editing & Deletion** — Edit and delete-for-all functionality.
-- **Message Pinning** — Pin important messages in chats.
-- **Typing Indicators** — Real-time typing status.
-- **Read Receipts** — Track message read status.
-- **Folders** — Organize chats into custom folders.
-- **Chat Management** — Hide/clear chats, member management.
-- **Message Expiry** — Auto-expiration support.
-- **Rich File Sharing** — Up to 50MB (hard-capped), encrypted uploads.
+#### Calls
+- P2P Audio/Video via WebRTC (DTLS-SRTP)
+- STUN (default Google) + TURN with time-limited HMAC-SHA1 credentials (secret never sent to client)
+- Access-controlled signaling, busy/unavailable handling
+- Authenticated `/api/ice-servers`
 
-#### 📞 Calls (WebRTC P2P)
-- **Audio & Video Calls** — Peer-to-peer WebRTC calls.
-- **DTLS-SRTP Encryption** — Media encrypted end-to-end by WebRTC, never passes through server.
-- **STUN/TURN Support** — Default Google STUN, optional TURN with time-limited HMAC-SHA1 credentials (secret never exposed to client).
-- **Call Signaling** — Secure WebSocket signaling with access control.
-- **Busy/Unavailable Handling** — Proper call rejection and busy signals.
-- **ICE Server Distribution** — Authenticated endpoint provides ICE configuration.
+#### UI/UX
+- Themes: Cyberpunk/Matrix/AMOLED
+- 77-icon SVG sprite, theme-colored with glow
+- Motion system (ripple/stagger/springs/shimmers) respecting `prefers-reduced-motion`
+- Incremental rendering, pagination (`beforeId`), decrypted preview cache
+- Responsive: Desktop (3-col), Tablet (2-col), Phone (1-col + bottom nav + safe areas + bottom sheets)
+- Custom vector cursor (auto-disabled on touch)
+- i18n RU/EN
+- PWA + Service Worker
+- Typography customization
+- Public URL + QR on login/settings
 
-#### 🎨 UI/UX & Customization
-- **Dark Themes** — Cyberpunk (neon pink), Matrix (green), AMOLED (black/white).
-- **Themed SVG Icon Sprite** — 77 icons, recolored by theme with glow/hover effects, no emoji in UI.
-- **Motion System** — Ripple effects, staggered animations, spring modals, shimmer skeletons, animated ticks, View Transitions API theme cross-fade (respects `prefers-reduced-motion`).
-- **Incremental Rendering** — DOM node reuse, paginated history (`beforeId`), decrypted previews cached.
-- **Responsive Design (3 Layouts)** — Desktop (3 columns), Tablet (2 columns), Phone (1 column with bottom nav, safe-area insets, bottom-sheet modals).
-- **Custom Vector Cursor** — Theme-colored arrow with glow, hand cursor on buttons, auto-disabled on touch devices.
-- **i18n (RU/EN)** — Full localization in Russian and English.
-- **PWA Support** — Installable, standalone mode, service worker caching.
-- **Typography Customization** — Font selection, weight, line height, custom fonts.
-- **Public Access Display** — Tunnel URL and QR code shown on login screen/settings for network-wide access.
+#### Infra
+- NVC, modular services, `.env` config
+- Docker/Docker Compose
+- Cloudflare Tunnel scripts
+- Graceful shutdown, auto JSON→SQLite migration, WAL
 
-#### 🛠️ Infrastructure & DevOps
-- **NVC Architecture** — Clean separation of Models, Views (client), Controllers, Services, Routes.
-- **Modular Services** — Encryption, SMS, Presence, WebSocket, ICE, Tunnel, QR, DB encryption, Session management.
-- **Environment Configuration** — Comprehensive `.env` support.
-- **Docker Support** — `Dockerfile` and `docker-compose.yml` for easy deployment.
-- **Cloudflare Tunnel Integration** — Scripts for public exposure.
-- **Graceful Shutdown** — Proper cleanup on SIGINT/SIGTERM, DB flush.
-- **Health Endpoint** — `/api/health` with stats and public URL.
-- **Auto-Migration** — JSON → SQLite migration on first run.
-- **WAL Mode** — SQLite WAL for better concurrency.
+### Architecture
+- **Backend**: Express, `ws`, `better-sqlite3-multiple-ciphers`
+- **Models**: User, Chat, Message, File, Session, VerificationCode
+- **Controllers**: auth, profile, chat
+- **Services**: encryptionService, dbEncryptionService, smsService, websocketService, presenceService, sessionService, iceService, tunnelService, qrService, messageExpiry
+- **Middleware**: auth, security, upload
+- **Client**: `app.js`, `e2ee.js`, `calls.js`, `chat-features.js`, `motion.js`, `cursor.js`, `icons.js`, `i18n.js`, `sw.js`
 
 ### Tech Stack
-
-**Backend:**
-- `Node.js` + `Express.js` 4.18
-- `ws` 8.14 (WebSocket)
-- `better-sqlite3-multiple-ciphers` 13.0.3 (SQLite + SQLCipher)
-- Node.js built-in `crypto` (ECDH, AES-GCM, PBKDF2, HMAC)
-- `multer` 2.4 (file uploads)
-- `cors`, `dotenv`, `qrcode-generator`
-
-**Frontend:**
-- Vanilla HTML5, CSS3, JavaScript (ES6+)
-- Web Crypto API
-- Service Worker (PWA)
-- Custom CSS with CSS variables for theming
-
-**Testing:**
-- `Jest` 29.6 (unit/smoke tests)
-- Custom Node.js test scripts for E2EE, integration, security, calls, UI
+**Backend:** Node.js, Express 4.18, ws 8.14, better-sqlite3-multiple-ciphers 13.0.3, crypto, multer 2.4, qrcode-generator  
+**Frontend:** Vanilla JS/HTML/CSS, Web Crypto API  
+**Testing:** Jest 29.6 + custom Node scripts  
+**DevOps:** dotenv, Docker
 
 ### Project Structure
-
 ```
 CipherTalk/
-├── ciphertalk-server/
-│   ├── server.js                 # Entry point
-│   ├── package.json              # Dependencies & scripts
-│   ├── src/
-│   │   ├── app.js               # Express app, middleware, routes, WS setup
-│   │   ├── config/index.js      # Configuration loader
-│   │   ├── db/database.js       # SQLite/SQLCipher DB layer with ORM-like API
-│   │   ├── models/              # User, Chat, Message, File, Session, VerificationCode
-│   │   ├── controllers/         # authController, chatController, profileController
-│   │   ├── routes/              # authRoutes, chatRoutes, profileRoutes
-│   │   ├── middleware/          # auth, security, upload
-│   │   └── services/            # encryption, dbEncryption, sms, websocket, presence,
-│   │                            # session, ice, tunnel, qr, messageExpiry
-│   ├── public/                  # Frontend (app.js, e2ee.js, calls.js, chat-features.js,
-│   │                            # motion.js, cursor.js, icons.js, i18n.js, styles, sw.js)
-│   ├── tests/                   # All test suites
-│   ├── scripts/                 # tunnel, migrate_to_sqlite utilities
-│   └── bin/                     # cloudflared binary
-├── README.md                    # This file
-├── LICENSE                      # MIT
-└── docker-compose.yml           # Docker deployment
+├── ciphertalk-server/        # Main server app
+│   ├── server.js             # Entry
+│   ├── package.json
+│   ├── src/                  # app, config, db, models, controllers, routes, middleware, services
+│   ├── public/               # Client files
+│   ├── tests/                # Test suites
+│   ├── scripts/              # tunnel/migrate scripts
+│   └── bin/                  # cloudflared
+├── README.md
+├── LICENSE
+└── docker-compose.yml
 ```
 
-### Quick Start (Linux / Armbian)
+### Detailed Installation & Setup Guide (Linux & Windows)
 
-#### 1. Prerequisites
-```bash
-sudo apt update
-sudo apt install nodejs npm -y
-# Node.js 18+ recommended
-node --version
-```
+#### Prerequisites
+- **Node.js 18+ (LTS recommended)**: [nodejs.org](https://nodejs.org/)
+- **Git**: [git-scm.com](https://git-scm.com/) (or download ZIP)
+- **OS**: Linux (Ubuntu/Debian/Armbian) or Windows 10/11
 
-#### 2. Clone & Install
+#### Step 1: Get the project
+**Linux/macOS (terminal):**
 ```bash
 git clone https://github.com/SkobkaStudio/CipherTalk.git
 cd CipherTalk/ciphertalk-server
+```
+
+**Windows - Git Bash / Terminal:**
+```bash
+git clone https://github.com/SkobkaStudio/CipherTalk.git
+cd CipherTalk\ciphertalk-server
+```
+
+**Windows - ZIP:**
+1. Download ZIP from GitHub
+2. Extract to folder (e.g., `C:\Projects\CipherTalk\`)
+3. Open `CipherTalk\ciphertalk-server` folder
+
+#### Step 2: Open terminal in correct directory
+**Linux:** `cd` into `ciphertalk-server`
+**Windows CMD:** In Explorer go to `ciphertalk-server`, type `cmd` in address bar → Enter
+**Windows PowerShell:** Right-click → Open in Terminal (or `Shift+Right-click` → Open PowerShell here)
+**Windows Terminal/Git Bash:** Same as above
+
+#### Step 3: Install dependencies
+```bash
 npm install
 ```
+> On Windows, if native modules (`better-sqlite3-multiple-ciphers`) fail to build, use Node.js LTS 20.x and ensure build tools are available (usually automatic with recent Node). On most systems it builds fine.
 
-#### 3. Configure Environment
+#### Step 4: Configure environment
 ```bash
+# Linux/macOS
 cp .env.example .env
-nano .env
+
+# Windows CMD
+copy .env.example .env
+
+# Windows PowerShell
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
 ```
+Edit `.env` with your editor (`nano`, `vim`, `notepad`, `VS Code`).
 
-Key settings:
-```env
-PORT=3000
-DB_FILE=./ciphertalk-db.json
-DB_ENCRYPTION=true
-UPLOADS_DIR=./uploads
-MAX_FILE_SIZE=52428800
-SMS_PROVIDER=console
-STUN_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
-# For TURN (optional): TURN_URL, TURN_SECRET
-TRUST_PROXY=1  # if behind reverse proxy
-CORS_ORIGIN=   # empty = same-origin only
+#### Step 5: Start server
+```bash
+npm start
 ```
+On first run keys/DB are created automatically.
 
-On first run, CipherTalk auto-generates:
-- `<DB_FILE>.dbkey` (SQLCipher key, mode 0600)
-- `<DB_FILE>.jwt-secret` (JWT HMAC secret, mode 0600)
-- `<DB_FILE>.key` (app-layer encryption key, mode 0600)
+#### Step 6: Open in browser
+Go to [http://localhost:3000](http://localhost:3000)
 
-#### 4. Run
+### Configuration (.env)
+
+Key variables (see `.env.example` for full list):
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `PORT` | `3000` | Server port |
+| `DB_FILE` | `./ciphertalk-db.json` | Base name; SQLite becomes `.sqlite` |
+| `DB_ENCRYPTION` | `true` | SQLCipher at-rest |
+| `DB_KEY_FILE` | `<DB_FILE>.dbkey` | Key file (mode 0600) |
+| `UPLOADS_DIR` | `./uploads` | Upload directory |
+| `MAX_FILE_SIZE` | `52428800` | 50MB hard-capped |
+| `JWT_SECRET` | auto | Auto-generated to `<DB_FILE>.jwt-secret` if empty |
+| `ENCRYPTION_KEY` | auto | App-layer key; auto-generated to `<DB_FILE>.key` if empty |
+| `TRUST_PROXY` | - | Set if behind reverse proxy (e.g. `1`) |
+| `CORS_ORIGIN` | - | Comma list or empty for same-origin only |
+| `SMS_PROVIDER` | `console` | `console` \| `http` \| `twilio` |
+| `SMS_CONSOLE_ALLOW` | `false` | Allow codes in logs in prod (tests only) |
+| `STUN_URLS` | Google STUN | Comma-separated |
+| `TURN_URL` | - | e.g. `turn:host:3478?transport=udp` |
+| `TURN_SECRET` | - | coturn static-auth-secret |
+| `TURN_USERNAME`/`TURN_CREDENTIAL` | - | Static fallback |
+| `OWNER_PHONE` | `+79039952506` | Owner badge |
+| `CODE_EXPIRY_MINUTES` | `5` | OTP expiry |
+| `PASSWORD_MIN_LENGTH` | `6` | Min password |
+| `USERNAME_MIN_LENGTH` | `3` | Min username |
+
+### Running the Server
+
 ```bash
 # Production
 npm start
 
-# Development (auto-restart)
+# Development with auto-restart
 npm run dev
+
+# Stop: Ctrl+C (graceful shutdown)
 ```
 
-Access at `http://localhost:3000/`
+**First run creates:**
+- `ciphertalk-db.sqlite` (+ `-wal`, `-shm` during use)
+- `ciphertalk-db.json.dbkey` (0600)
+- `ciphertalk-db.json.jwt-secret` (0600)
+- `ciphertalk-db.json.key` (0600)
+- `uploads/`
 
-#### 5. Docker (Alternative)
-```bash
-docker compose up -d
-```
+### Using CipherTalk (User Guide)
 
-### API Overview
+#### Registration/Login
+1. Open [http://localhost:3000](http://localhost:3000)
+2. Register with phone/username/password or use OTP login (if SMS configured; in dev `console` shows code)
+3. Complete profile if desired
 
-| Endpoint | Method | Auth | Description |
-| --- | --- | --- | --- |
-| `/api/health` | GET | No | Server status, counts, public URL |
-| `/api/public-url` | GET | No | Tunnel public URL info |
-| `/api/public-url/qr.svg` | GET | No | QR code for public URL |
-| `/api/auth/*` | POST | No | Registration, login, OTP verification |
-| `/api/me`, `/api/profile/*` | GET/PUT | Yes | User profile |
-| `/api/chats/*` | GET/POST/PUT/DELETE | Yes | Chat operations |
-| `/api/upload` | POST | Yes | Encrypted file upload |
-| `/api/ice-servers` | GET | Yes | WebRTC ICE configuration |
-| WebSocket `/` | WS | Token auth | Real-time messaging, calls, presence |
+#### Chats
+- **New chat**: Find user → start private chat (E2EE session auto-established)
+- **Groups**: Create group, add members
+- **Saved Messages**: Access personal notes
+- **Folders**: Organize chats
+- **Replies/Forward/Reactions**: Use context menu
+- **Files**: Attach files (encrypted)
+
+#### Calls
+- Click call/video call in chat
+- Grant mic/camera permissions
+- Uses P2P; if direct fails configure TURN
+
+#### Settings
+- **Appearance**: Theme, custom cursor, typography, motion
+- **Privacy**: Hide online status
+- **Security**: Sessions, logout
+- **Public Access**: View tunnel URL/QR (if tunnel running)
+- **Language**: RU/EN
+
+#### Safety Numbers
+Compare 60-digit safety number with contact to verify keys.
 
 ### E2EE Technical Details
 
-**Direct Chat Session:**
-1. Each user has ECDH P-256 identity keypair (generated client-side)
-2. On first contact: `sharedSecret = ECDH(privA, pubB) = ECDH(privB, pubA)`
-3. `sessionSalt = SHA256(sorted(pubA, pubB).join('|'))`
-4. `root = HKDF(sharedSecret, salt, "CT-v1|root")`
-5. `chainSend/chainRecv = HKDF(root, salt, "CT-v1|chain-1"/"CT-v1|chain-2")` assigned by key order
-6. For each message: `mk = HMAC(chainKey, "CT-v1|mk")`, `msgKey = HKDF(mk, randomSalt, "CT-v1|msg")`, then `chainKey = HMAC(chainKey, "CT-v1|next")` (ratchet forward)
-7. Encrypt with AES-256-GCM, IV = 12 random bytes, AAD = `context|header`
+**Direct session:**
+1. Identity ECDH P-256 keypairs (client)
+2. `shared = ECDH(privA, pubB)`
+3. `salt = SHA256(sorted(pubA,pubB).join('|'))`
+4. `root = HKDF(shared,salt,"CT-v1|root")`
+5. `chain1 = HKDF(root,salt,"CT-v1|chain-1")`, `chain2 = HKDF(root,salt,"CT-v1|chain-2")` → assigned by key order
+6. Per message: `mk = HMAC(chain,"CT-v1|mk")`, `msgKey = HKDF(mk,rand16,"CT-v1|msg")`, `chain = HMAC(chain,"CT-v1|next")`
+7. AES-256-GCM, IV 12 bytes, AAD `context|header`
 
-**Group Chat:**
-1. Creator generates 32-byte random group key
-2. For each member: `wrapped = wrap(groupKey, ECDH(privCreator, pubMember))` via AES-256-GCM with KEK derived from shared secret
-3. Server stores wrapped keys only; members unwrap with their private key
+**Group:** 32-byte key generated by creator, wrapped per member via ECDH+AES-GCM.
 
-**File Encryption:**
-1. `fileKey = HKDF(sessionFileKey, randomSalt, "CT-v1|file")`
-2. AES-256-GCM encryption with unique IV per file encryption
+**Files:** `fileKey = HKDF(sessionFileKey, salt, "CT-v1|file")`, AES-256-GCM.
+
+### API Reference
+
+| Endpoint | Method | Auth | Description |
+| --- | --- | --- | --- |
+| `/api/health` | GET | No | Status, counts, publicUrl |
+| `/api/public-url` | GET | No | Tunnel info |
+| `/api/public-url/qr.svg` | GET | No | QR of public URL |
+| `/api/auth/*` | POST | No | Register/login/OTP |
+| `/api/me`, `/api/profile/*` | GET/PUT | Yes | Profile |
+| `/api/users/search` | GET | Yes | Search users |
+| `/api/chats/*` | Various | Yes | Chats/messages/folders/pins/reactions |
+| `/api/upload` | POST | Yes | File upload |
+| `/api/ice-servers` | GET | Yes | ICE config |
+
+### WebSocket Events
+Real-time: `auth`, `message`, `typing`, `read`, `presence`, `call_*`, `reaction`, etc. Auth required after connect.
+
+### Testing
+
+```bash
+cd ciphertalk-server
+
+# Jest (smoke/e2ee/i18n)
+npm test
+
+# All custom tests
+node tests/e2ee_crypto_test.js
+node tests/e2ee_ratchet.test.js
+node tests/e2ee_client_flow.test.js
+node tests/call_signal_test.js
+node tests/full_integration_test.js
+node tests/security_regression_test.js
+node tests/sms_provider_test.js
+node tests/public_access_test.js
+node tests/client_identity_scope_test.js
+node tests/perf_render_test.js
+node tests/responsive_cursor_test.js
+node tests/icons_test.js
+node tests/integration_check.js
+```
+All 325+ assertions pass (see Proof of Work).
+
+### Deployment (Docker, Tunnel)
+
+**Docker:**
+```bash
+docker compose up -d
+# or build manually
+```
+
+**Cloudflare Tunnel:**
+```bash
+npm run tunnel:setup
+npm run tunnel
+```
+Public URL/QR shown in UI.
+
+### Troubleshooting
+
+| Issue | Solution |
+| --- | --- |
+| `better-sqlite3` install fails on Windows | Use Node.js LTS 20.x, update npm, retry. On some systems need VS Build Tools (usually auto). |
+| "Файл ключа БД не найден" | DB encrypted but key missing — restore `<DB_FILE>.dbkey`. Don't delete keys. |
+| Can't connect from other devices | Set `TRUST_PROXY` if behind proxy; use tunnel or LAN IP. |
+| WebRTC fails both sides | Configure TURN with `TURN_URL` + `TURN_SECRET`. |
+| Port in use | Change `PORT` in `.env`. |
+| SMS not sending | Set `SMS_PROVIDER=http` or `twilio` with creds; `console` for dev. |
 
 ---
+
 
 ## Русский
 
 ### Обзор
+CipherTalk — конфиденциальный мессенджер с end-to-end шифрованием. Сообщения шифруются на клиенте (Web Crypto API: ECDH P-256, AES-256-GCM, HKDF-SHA256, ключи на сообщение, направленные ratchet-цепочки). Сервер «слепой» — не видит открытый текст.
 
-CipherTalk — конфиденциальный мессенджер с end-to-end шифрованием, построенный на Node.js, Express и Vanilla JavaScript. Все личные сообщения шифруются на стороне клиента с использованием Web Crypto API (ECDH P-256 + AES-256-GCM с уникальными ключами на каждое сообщение и механизмом ratchet для обеспечения forward secrecy). Сервер «слепой» — он не имеет доступа к открытым текстам сообщений, хранит только зашифрованные блоки с заголовками и IV.
+### Возможности
+См. полный список выше. Ключевое: E2EE личных/групповых чатов, шифрование файлов, P2P-звонки, SQLCipher, PWA, адаптив, i18n, кастомизация.
 
-### Статистика проекта
+### Архитектура
+NVC: Models/Controllers/Services/Routes, модульные сервисы, WebSocket, SQLite+SQLCipher.
 
-| Метрика | Значение |
-| --- | --- |
-| **Версия** | 2.0.0 |
-| **Архитектура** | NVC (Models, Controllers, Services, Routes) |
-| **Бэкенд** | Node.js + Express + WebSocket (`ws`) |
-| **База данных** | SQLite (WAL) с шифрованием SQLCipher |
-| **Клиент** | Vanilla JS + Web Crypto API, без фреймворков |
-| **E2EE** | ECDH P-256, AES-256-GCM, HKDF-SHA256, ключи на сообщение, ratchet-цепочки |
-| **P2P-звонки** | WebRTC (DTLS-SRTP), STUN/TURN с временными учётными данными |
-| **Файлы** | 18 модулей фронтенда, 10 сервисов бэкенда, 5 контроллеров/роутов, 6 моделей, 12 тестовых наборов |
-| **Всего проверок в тестах** | 325+ успешных (см. Proof of Work ниже) |
+### Стек технологий
+Node.js + Express + ws + better-sqlite3-multiple-ciphers + Web Crypto API + Vanilla JS
 
-### Полный список реализованных функций
+### Структура проекта
+Аналогична английской секции.
 
-#### 🔐 Безопасность и E2EE
-- **Сквозное шифрование (личные чаты)** — обмен ключами ECDH P-256, общий секрет → HKDF корневой ключ → отдельные цепочки отправки/получения. Уникальный ключ и IV на каждое сообщение. Forward secrecy за счёт ratchet цепочки.
-- **Ratchet-подход** — симметричный ratchet по направлениям, кэш пропущенных ключей (до 1000), хранение ключей отправки (до 300).
-- **Привязка к контексту (AAD)** — шифрование привязано к `chatId|header`, блокирует подмену между чатами.
-- **Групповое E2EE** — случайный 32-байтный групповой ключ, заворачивание для каждого участника (ECDH+AES-GCM), сервер хранит только завёрнутые блобы.
-- **Шифрование файлов** — отдельный файловый ключ с уникальным солью на шифрование.
-- **Коды безопасности (Safety Numbers)** — 60-значный код для верификации ключей.
-- **Ротация ключей** — обновление публичного ключа с переустановкой сессий.
-- **Слепой транспорт** — сервер не видит открытый текст.
-- **Шифрование БД SQLCipher** — файл БД зашифрован, ключ в `.dbkey` с правами 0600, fail-closed при ошибках.
-- **Прикладное шифрование** — AES-256-GCM + scrypt, безопасное хранение ключей.
-- **Хеширование паролей** — PBKDF2-SHA512 100000 итераций, защита от тайминг-атак.
-- **Криптостойкая случайность** — `crypto.randomBytes/randomInt`.
-- **JWT-сессии** — HMAC-SHA256, хеш токена в БД, отзыв при выходе.
-- **Маскирование телефонов** — в WS-снимках.
-- **Fail-closed** — повреждённые ключи не перезаписываются, без ключа БД запуск блокируется.
+### Подробная инструкция по установке и запуску (Linux и Windows)
 
-#### 💬 Чаты и сообщения
-- **Личные чаты**, **группы**, **«Сохранённые» (Избранное)**
-- **Ответы, пересылка** (с повторным шифрованием под целевой чат)
-- **Реакции, редактирование, удаление для всех**
-- **Закрепление сообщений**
-- **Индикатор набора, статусы прочтения**
-- **Папки для чатов**
-- **Управление членами, скрытие/очистка чатов**
-- **Истечение сообщений**
-- **Обмен файлами до 50 МБ**
+#### Требования
+- Node.js 18+ (рекомендуется LTS) — [nodejs.org](https://nodejs.org/)
+- Git — [git-scm.com](https://git-scm.com/) или ZIP
+- Linux/Windows 10-11
 
-#### 📞 Звонки WebRTC
-- **Аудио/видео P2P**, шифрование DTLS-SRTP
-- **STUN/TURN**, временные TURN-учётные данные (HMAC-SHA1), секрет не уходит клиенту
-- **Сигналинг через WebSocket с контролем доступа**
-- **Обработка занятости/недоступности**
-
-#### 🎨 Интерфейс и кастомизация
-- **Тёмные темы**: Cyberpunk, Matrix, AMOLED
-- **SVG-спрайт иконок (77)** с темизацией и свечением
-- **Motion-система** с учётом `prefers-reduced-motion`
-- **Инкрементальный рендер, пагинация истории, кэш расшифровки**
-- **Адаптив: десктоп/планшет/телефон, нижняя навигация, safe-area, bottom-sheet**
-- **Кастомный векторный курсор** (отключается на таче)
-- **Локализация RU/EN**
-- **PWA, Service Worker**
-- **Настройка типографики**
-- **Публичный адрес и QR-код на экране входа/настройках**
-
-#### 🛠️ Инфраструктура
-- **Архитектура NVC**, модульные сервисы
-- **Конфигурация через `.env`**
-- **Docker/Docker Compose**
-- **Cloudflare Tunnel интеграция**
-- **Корректное завершение (SIGINT/SIGTERM), flush БД**
-- **Health-check, авто-миграция JSON→SQLite, WAL**
-
-### Быстрый старт (Linux / Armbian)
-
+#### Шаг 1. Скачать проект
+**Linux:**
 ```bash
 git clone https://github.com/SkobkaStudio/CipherTalk.git
 cd CipherTalk/ciphertalk-server
-npm install
-cp .env.example .env
-# Настройте .env при необходимости
-npm start
-# Откройте http://localhost:3000
 ```
 
-Для продакшена рекомендуется reverse-proxy с HTTPS. TURN настраивается через `TURN_URL` + `TURN_SECRET`.
+**Windows (Git Bash/Terminal):**
+```bash
+git clone https://github.com/SkobkaStudio/CipherTalk.git
+cd CipherTalk\ciphertalk-server
+```
+
+**Windows (ZIP):** Распаковать архив, открыть папку `ciphertalk-server`.
+
+#### Шаг 2. Открыть терминал в папке
+В проводнике открыть `ciphertalk-server`, в адресной строке набрать `cmd` → Enter (или `powershell`).
+
+#### Шаг 3. Установить зависимости
+```bash
+npm install
+```
+
+#### Шаг 4. Настроить .env
+```bash
+# Linux
+cp .env.example .env
+
+# Windows CMD
+copy .env.example .env
+
+# Windows PowerShell
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
+```
+Отредактируйте `.env` под свои нужды.
+
+#### Шаг 5. Запустить
+```bash
+npm start
+```
+
+#### Шаг 6. Открыть
+[http://localhost:3000](http://localhost:3000)
+
+### Настройка конфигурации (.env)
+См. таблицу выше. В dev можно оставить `SMS_PROVIDER=console` — коды будут в консоли.
+
+### Запуск сервера
+```bash
+npm start      # продакшен
+npm run dev    # разработка с nodemon
+# Стоп — Ctrl+C
+```
+
+### Использование CipherTalk (руководство пользователя)
+- **Регистрация/вход** — по телефону/логину/паролю или по коду
+- **Чаты** — личные, групповые, сохранённые
+- **Сообщения** — ответы, пересылка, реакции, редактирование/удаление
+- **Файлы** — до 50 МБ, зашифрованы
+- **Звонки** — аудио/видео P2P
+- **Настройки** — темы, курсор, типографика, анимации, приватность, язык
+- **Безопасность** — коды безопасности для проверки ключей
+- **Публичный доступ** — туннель + QR
+
+### E2EE — технические детали
+См. английский раздел выше.
+
+### API-справочник
+См. таблицу эндпоинтов выше.
+
+### События WebSocket
+Аутентификация, сообщения, набор, прочтение, присутствие, звонки.
+
+### Тестирование
+```bash
+npm test  # Jest
+# + отдельные скрипты из tests/
+```
+Все тесты проходят (325+ проверок).
+
+### Деплой (Docker, туннель)
+```bash
+docker compose up -d
+npm run tunnel:setup && npm run tunnel
+```
+
+### Устранение неполадок
+См. таблицу выше. Ключевые: `better-sqlite3` на Windows (Node LTS 20), ключи БД не удалять, для звонков за NAT нужен TURN.
 
 ---
 
+
 ## Proof of Work: Test Results
 
-All tests executed in `ciphertalk-server/` on the current repository state.
+All tests executed in `ciphertalk-server/`.
 
 ### 1) Jest Test Suite (`npm test`)
 ```text
 PASS tests/e2ee.test.js
 PASS tests/i18n.test.js
 PASS tests/smoke.test.js
-  ● Console
-    console.log
-      ✅ База данных SQLite загружена (WAL)
-      ...
-      🚀 CipherTalk сервер запущен на порту 3498
-      📦 База данных: .../test-smoke-db.sqlite (SQLCipher)
-      📁 Загрузки: .../test-smoke-uploads
-      🖥️  Клиент: http://localhost:3498/
-      🌐 API: http://localhost:3498/api/
-      📡 WebSocket: ws://localhost:3498
-
 Test Suites: 3 passed, 3 total
 Tests:       10 passed, 10 total
-Snapshots:   0 total
 Time:        1.568 s
 Ran all test suites.
 ```
 
-### 2) E2EE Crypto Test (`node tests/e2ee_crypto_test.js`)
+### 2) E2EE Crypto Test
 ```text
 === E2EE Crypto Test ===
 ✓ ECDH key exchange successful
 ✓ AES-256 key derived
-  Msg 1: IV=eaf950c724d7..., ciphertext len=8
-  Msg 2: IV=014cfd978513..., ciphertext len=16
-  Msg 3: IV=f9e9b12b8637..., ciphertext len=28
 ✓ All messages encrypted/decrypted successfully
 ✓ Each message has unique IV
-
 === TEST PASSED ===
 ```
 
-### 3) E2EE Ratchet & Group/File Tests (`node tests/e2ee_ratchet.test.js`)
+### 3) E2EE Ratchet & Group/File Tests
 ```text
-=== Тесты E2EE CipherTalk ===
-
-— Идентичность и ECDH —
-  ✅ Пара ключей создана
-  ✅ Ключи разных пользователей различны
-  ✅ ECDH симметричен: общий секрет совпадает у обеих сторон
-  ✅ Разные собеседники дают разные общие секреты
-
-— Сессия и направления ключей —
-  ✅ Ключ отправки и ключ приёма различаются (направленные цепочки)
-  ✅ Ключ отправки A совпадает с ключом приёма B
-  ✅ Ключ приёма A совпадает с ключом отправки B
-
-— Шифрование и расшифровка —
-  ✅ Сформирован конверт: content/iv/header
-  ✅ Шифротекст не содержит открытого текста
-  ✅ Заголовок содержит версию, номер и соль
-  ✅ B расшифровал сообщение A
-  ✅ A расшифровал ответ B
-
-— Уникальность ключей и IV —
-  ✅ У каждого сообщения уникальный derived-ключ
-  ✅ У каждого сообщения уникальный IV
-  ✅ Ключи цепочки обновляются (ratchet вперёд)
-  ✅ Невозможно восстановить предыдущий ключ из текущего
-
-— Сообщения не по порядку —
-  ✅ Принято опережающее сообщение (пропуск сохранён)
-  ✅ Отложенное сообщение расшифровано через skipped-ключи
-  ✅ Промежуточное отложенное сообщение расшифровано
-
-— Защита от подмены —
-  ✅ Подмена заголовка (AAD) приводит к ошибке расшифровки
-  ✅ Сообщение не расшифровывается в другом чате (AAD c id чата)
-  ✅ Чужой получатель не может расшифровать сообщение
-
-— Групповые ключи —
-  ✅ Ключ группы — 32 случайных байта
-  ✅ Каждому участнику ключ заворачивается отдельно
-  ✅ Участник распаковал свой ключ группы
-  ✅ Второй участник распаковал ключ группы
-  ✅ Групповое сообщение расшифровывается ключом группы
-  ✅ Подмена группового шифротекста обнаруживается
-
-— Файлы —
-  ✅ Файл зашифрован и расшифрован побайтно
-
-— Двусторонний обмен —
-  ✅ 40 двусторонних реплик расшифрованы без рассинхронизации цепочек
-
-— Сериализация сессии —
-  ✅ Сессия сохраняется и восстанавливается без потери состояния
-  ✅ Восстановленная сессия продолжает работать
-
 === ИТОГ: passed=32, failed=0 ===
 ```
+Covered: identity/ECDH, directed chains, per-message keys/IV, forward secrecy, out-of-order/skipped keys, AAD cross-chat protection, group wrap/unwrap, file encryption, 40-message exchange, session serialization.
 
-### 4) E2EE Client Flow Tests (`node tests/e2ee_client_flow.test.js`)
+### 4) E2EE Client Flow
 ```text
-— Цепочка приёма Бориса не сбилась после собственного echo
-  ✅ Цепочка приёма Бориса не сбилась после собственного echo
-  ✅ Алиса приняла второй ответ
-
-— Восстановление сессии после перезагрузки страницы —
-  ✅ Сессия восстановлена из localStorage и продолжила работу
-
-— Групповой чат: ключ создаётся создателем —
-  ✅ Оба участника получили одинаковый групповой ключ
-  ✅ Групповое сообщение расшифровано участником
-  ✅ Обратное групповое сообщение расшифровано
-
-— Медиа: отдельный файловый ключ —
-  ✅ Файл расшифрован ключом второй стороны
-  ✅ Каждое шифрование файла даёт уникальные IV и шифротекст
-
-— Пересылка: расшифровка локально, шифрование под целевой чат —
-  ✅ Пересланное сообщение читается в целевом чате
-
-— Защита от подмены контекста —
-  ✅ Сообщение не расшифровывается в другом чате (AAD)
-
-— Итог —
-
-  Пройдено: 13, провалено: 0
+Пройдено: 13, провалено: 0
 ```
 
-### 5) WebRTC Call Signaling Tests (`node tests/call_signal_test.js`)
+### 5) WebRTC Call Signaling
 ```text
-— Ограничения доступа —
-  ✅ звонок пользователю без личного чата отклонён
-  ✅ посторонний не получил offer
-  ✅ сигналинг по завершённому callId отклонён
-  ✅ офлайн-абонент: call_unavailable
-
-— ICE-серверы (STUN/TURN) —
-  ✅ /api/ice-servers отдаёт список ICE-серверов
-  ✅ в списке есть STUN по умолчанию
-  ✅ без настройки TURN помечен как недоступный
-  ✅ без авторизации ICE-серверы не отдаются
-  ✅ TURN-сервер добавлен при TURN_URL + TURN_SECRET
-  ✅ username одноразовый: <expiry>:<random>
-  ✅ credential = base64(HMAC-SHA1(secret, username))
-  ✅ секрет TURN не уходит клиенту
-  ✅ без учётных данных TURN не добавляется
-
 === ИТОГО: passed=20, failed=0 ===
 ```
 
-### 6) Full Integration Tests (`node tests/full_integration_test.js`)
+### 6) Full Integration
 ```text
-— Приватность: скрытие онлайна —
-  ✅ set_privacy: hide_online=true принят
-  ✅ Скрытый онлайн: B не получил user_online от A
-  ✅ hide_online виден в БД/профиле
-
-— Удаление сообщений —
-  ✅ Удалённое сообщение помечено deleted_for_all
-  ✅ Удалённое сообщение: сервер не отдаёт ни шифротекст, ни IV
-
-— Сессии / logout —
-  ✅ logout OK
-  ✅ После logout токен недействителен (401)
-
-— Вход по коду (passwordless) —
-  ✅ OTP повторно отправлен
-  ✅ verify-code вернул loginToken для входа
-  ✅ login-code: получен токен сессии без пароля
-  ✅ Токен OTP-входа валиден
-  ✅ Невалидный loginToken отклонён (403)
-
-— Ротация E2EE-ключа —
-  ✅ B получил обновлённый public_key от A
-  ✅ B расшифровал сообщение после ротации ключа A
-
-— Персистентность пароля —
-  ✅ password_hash сохраняется в БД (не стирается toJSON)
-  ✅ API /api/me не отдаёт password_hash
-  ✅ Поиск пользователей не утекает password_hash
-
 === ИТОГО: passed=53, failed=0 ===
 ```
 
-### 7) Security Regression Tests (`node tests/security_regression_test.js`)
+### 7) Security Regression
 ```text
-— WebSocket: повторная авторизация —
-  ✅ повторный auth отклонён, сокет закрыт
-
-— Маскирование телефонов в WS-снимках —
-  ✅ телефон A скрыт от B
-  ✅ телефон B скрыт от A
-
-— Занятый абонент в WebRTC-сигналинге —
-  ✅ C получил call_unavailable(busy)
-  ✅ B не получил второй offer
-
-— Fail-closed при повреждённых секретах —
-  ✅ повреждённый AES-ключ не перезаписан
-  ✅ повреждённый JWT-секрет не перезаписан
-
-— Шифрование SQLite БД at-rest —
-  ✅ SQLite БД зашифрована (SQLCipher), нет открытого заголовка
-  ✅ в зашифрованной SQLite БД нет открытых username/телефона
-  ✅ ключ БД вынесен в отдельный файл
-  ✅ права на ключ БД — 600
-  ✅ зашифрованная SQLite БД читается после рестарта
-  ✅ без ключа SQLite-сервер не стартует (fail-closed)
-  ✅ SQLite-файл не перезаписан без ключа
-  ✅ повреждённый ключ БД => fail-closed
-  ✅ SQLite-файл не перезаписан при повреждённом ключе
-  ✅ старая открытая JSON-БД мигрирует в зашифрованную SQLite
-  ✅ данные миграции сохранены
-
 === ИТОГО: passed=25, failed=0 ===
 ```
+Includes SQLCipher encryption, fail-closed, key permissions, WS re-auth, phone masking, busy handling.
 
-### 8) SMS Provider Tests (`node tests/sms_provider_test.js`)
+### 8) SMS Provider
 ```text
-— HTTP провайдер —
-  ✅ токен провайдера передаётся в заголовке
-  ✅ токен не печатается в лог
-
-— Ошибка провайдера —
-  ✅ недоступный провайдер => ошибка
-
-— Неизвестный провайдер —
-  ✅ неизвестный провайдер отклоняется
-
-— Контроллер: код не создаётся при недоступном провайдере —
-  ✅ при недоступном провайдере API отвечает 503
-  ✅ код подтверждения не создан при ошибке отправки
-  ✅ повторный запрос сразу после неудачи не блокируется cooldown-ом (503, а не 429)
-
 === ИТОГО: passed=17, failed=0 ===
 ```
 
-### 9) Public Access & QR Tests (`node tests/public_access_test.js`)
+### 9) Public Access/QR
 ```text
-✓ адрес вылавливается из обычного лога
-✓ мусор без адреса даёт null
-✓ супервизор поддерживает режимы quick/named
-✓ QR строится в корректный SVG
-✓ QR декодируется сканером и содержит адрес
-✓ QR выдерживает длинный адрес
-✓ пустые данные отклоняются
-✓ в сервере есть эндпоинты публичного адреса и QR
-✓ клиент показывает адрес и умеет копировать
-✓ i18n содержит ключи публичного доступа (ru/en)
-✓ клиент подставляет публичный адрес в блок входа
-✓ кнопка копирования копирует адрес в буфер
-✓ без туннеля блок скрыт
-
 Публичный доступ: 19/19 проверок пройдено
 ```
 
-### 10) Client Identity Scope Tests (`node tests/client_identity_scope_test.js`)
+### 10) Client Identity/Settings
 ```text
-— Настройки: разметка типографики —
-  ✅ доступны 8 вариантов шрифта
-  ✅ есть поле своего шрифта
-  ✅ есть выбор начертания
-  ✅ есть настройка интерлиньяжа
-  ✅ есть выбор области применения
-  ✅ есть предпросмотр шрифта
-  ✅ есть сброс типографики
-
 === ИТОГО: passed=54, failed=0 ===
 ```
 
-### 11) Performance/Render Tests (`node tests/perf_render_test.js`)
+### 11) Performance/Motion
 ```text
-— Motion-система —
-  ✅ движок Motion загрузился
-  ✅ анимации включены по умолчанию
-  ✅ уровень анимаций читается из data-anim
-  ✅ ripple создаёт анимационный элемент
-  ✅ stagger проставляет задержку индекса
-  ✅ stagger вешает класс на контейнер
-  ✅ учитывается prefers-reduced-motion
-  ✅ при reduced-motion анимации отключаются
-  ✅ уровень anim=off отключает анимации
-
 === ИТОГО: passed=36, failed=0 ===
 ```
 
-### 12) Responsive Layout & Cursor Tests (`node tests/responsive_cursor_test.js`)
+### 12) Responsive/Cursor
 ```text
-✓ на тач-устройствах курсор всегда системный
-✓ cursor.js не создаёт DOM-элементов курсора
-✓ настройка «Кастомный курсор» есть в Настройках
-✓ есть три режима раскладки: ПК, планшет, телефон
-✓ телефон: нижняя навигация, безопасные зоны, шторки
-✓ планшет: две колонки, чат виден всегда
-✓ ПК: три колонки и центрированная переписка
-✓ курсор вписан в дизайн: свечение и hotspot
-✓ тач-устройства не теряют системный курсор
-✓ разметка: подключены layout.css/cursor.css/cursor.js и нижняя навигация
-✓ клиент определяет тип устройства и ведёт нижнюю навигацию
-✓ i18n: подписи нижней навигации на русском и английском
-✓ service worker кеширует новые файлы
-
 Адаптивность и курсор: 19/19 проверок пройдено
 ```
 
-### 13) Icons Tests (`node tests/icons_test.js`)
+### 13) Icons
 ```text
-— Иконки: остальные элементы интерфейса —
-  ✓ реакции отображаются иконками, а не эмодзи
-  ✓ файлы, галочки, кнопки и меню используют SVG
-
-— Иконки: эмодзи в строках переводов —
-  ✓ для каждого эмодзи в переводах есть иконка
-  ✓ автозамена эмодзи ограничена служебными областями
-  ✓ служебные подписи в чате используют иконки
-
 === ИТОГО: passed=25, failed=0 ===
 ```
 
-### Grand Total
-**All tests passed: 325+ assertions across 13 test suites with 0 failures.**
+**Grand Total: 325+ assertions across 13 test suites, 0 failures.**
 
 ---
+
 
 ## License
 
