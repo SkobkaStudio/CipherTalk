@@ -1,719 +1,902 @@
-# ☕ CipherTalk (Кипяток) — Premium E2EE Messenger
+# CipherTalk
 
-<div align="center">
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL%20%2B%20SQLCipher-lightgrey.svg)](https://www.sqlite.org/)
+[![E2EE](https://img.shields.io/badge/E2EE-P--256%20%2B%20AES--256--GCM-red.svg)](https://github.com/SkobkaStudio/CipherTalk)
+[![WebRTC](https://img.shields.io/badge/WebRTC-P2P%20DTLS--SRTP-purple.svg)](https://webrtc.org/)
+[![PWA](https://img.shields.io/badge/PWA-Ready-orange.svg)](https://web.dev/progressive-web-apps/)
+[![Tests](https://img.shields.io/badge/Tests-325%2B%20assertions-brightgreen.svg)](#11-proof-of-work-tests)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](ciphertalk-server/package.json)
 
-### 🔥 Hot End-to-End Encrypted Messenger with NVC Architecture
-### Горячий E2EE-мессенджер с NVC-архитектурой
+> *"Privacy is not a feature. It's a fundamental right."*  
+> *"Конфиденциальность — не функция. Это базовое право."*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-16+-green.svg)](https://nodejs.org/)
-[![Architecture](https://img.shields.io/badge/Architecture-NVC-blue.svg)]()
-[![Encryption](https://img.shields.io/badge/E2EE-ECDH%20%2B%20AES--256--GCM-red.svg)]()
-[![Database](https://img.shields.io/badge/Database-SQLite%20%2B%20WAL-orange.svg)]()
-[![UI](https://img.shields.io/badge/UI-Glassmorphism%20%2B%20Custom%20Themes-purple.svg)]()
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
-
-**[🇬🇧 English Version](#-english-version)** • **[🇷🇺 Русская версия](#-русская-версия)**
-
-</div>
-
-<br>
-<br>
+> **End-to-end encrypted messenger built with privacy-first principles, P2P media, and zero-knowledge architecture.**  
+> **Мессенджер с сквозным шифрованием, построенный по принципу максимальной конфиденциальности и нулевого доверия к серверу.**
 
 ---
+
+## 📑 Table of Contents / Оглавление
+
+- [🇬🇧 ENGLISH VERSION](#-english-version)
+  - [1. Introduction](#1-introduction)
+  - [2. Project Statistics](#2-project-statistics)
+  - [3. Core Features (Deep Dive)](#3-core-features-deep-dive)
+  - [4. Architecture & Deep Dive](#4-architecture--deep-dive)
+  - [5. Tech Stack (Detailed)](#5-tech-stack-detailed)
+  - [6. Project Structure (Complete File Tree)](#6-project-structure-complete-file-tree)
+  - [7. Detailed Installation Guide](#7-detailed-installation-guide)
+  - [8. User Guide](#8-user-guide)
+  - [9. API Reference (Complete)](#9-api-reference-complete)
+  - [10. WebSocket Events (Complete)](#10-websocket-events-complete)
+  - [11. Proof of Work (Tests)](#11-proof-of-work-tests)
+  - [12. Troubleshooting (FAQ)](#12-troubleshooting-faq)
+- [🇷🇺 RUSSIAN VERSION](#-russian-version)
+  - [1. Введение](#1-введение)
+  - [2. Статистика проекта](#2-статистика-проекта)
+  - [3. Ключевые возможности (подробный обзор)](#3-ключевые-возможности-подробный-обзор)
+  - [4. Архитектура и внутреннее устройство](#4-архитектура-и-внутреннее-устройство)
+  - [5. Технологический стек](#5-технологический-стек)
+  - [6. Структура проекта](#6-структура-проекта)
+  - [7. Подробная инструкция по установке](#7-подробная-инструкция-по-установке)
+  - [8. Руководство пользователя](#8-руководство-пользователя)
+  - [9. API-справочник](#9-api-справочник)
+  - [10. События WebSocket](#10-события-websocket)
+  - [11. Доказательства работоспособности (Proof of Work)](#11-доказательства-работоспособности-proof-of-work)
+  - [12. Решение проблем (FAQ)](#12-решение-проблем-faq)
+- [📝 LICENSE & FOOTER](#-license--footer)
+
+---
+
 
 ## 🇬🇧 ENGLISH VERSION
 
-<br>
 
-### 📖 Introduction
+### 1. Introduction
 
-**CipherTalk** (Russian: "Кипяток" = "Boiling Water") is a lightweight, ultra-secure, end-to-end encrypted (E2EE) messenger. Built on a modern NVC (Node-View-Controller) architecture, it is optimized for quick deployments on personal servers, VPS, and single-board computers (SBCs). The project features a premium, highly customizable user interface designed to compete with top-tier commercial messengers.
+**CipherTalk** is a fully functional, production-lean end-to-end encrypted (E2EE) instant messaging application. The project was engineered from the ground up with a strict "server-blind" philosophy: the server must never be able to decrypt private communications, even if fully compromised.
 
-The philosophy behind CipherTalk is simple: your secure chats should be **hot, fast, and never cool down**. The server is designed to be "blind", meaning it physically cannot read your messages. All encryption and decryption happen on the client side.
+#### Philosophy
+- **Zero-Knowledge**: Plaintext messages never leave the client unencrypted. The server stores only ciphertext, IVs, headers, and wrapped keys.
+- **Forward Secrecy**: Each message uses derived keys with chain ratcheting. Past messages cannot be decrypted if current chain keys are compromised.
+- **Post-Compromise Considerations**: Key rotation and per-message key derivation limit blast radius.
+- **Defense in Depth**: SQLCipher at-rest, app-layer encryption, PBKDF2, JWT with revocation, security headers, fail-closed behavior.
+- **User Sovereignty**: Full control over sessions, privacy settings, and self-hostable.
 
-<br>
+#### Why "CipherTalk"?
+The name reflects the core mission — *ciphered conversation*. Every byte of private communication is mathematically protected using modern cryptographic primitives available in the browser (Web Crypto API) and Node.js `crypto` module.
 
-### 📊 Project Statistics & Proof of Work
 
-*   **Total Codebase Size:** ~193,765 lines (including dependencies, configurations, localizations, and styles).
-*   **Recent Mega Update:** 58 files changed, 11,504 insertions(+), 750 deletions(-).
-*   **Database Migration:** 100% successful transition from legacy JSON format to SQLite with WAL mode.
-*   **Test Coverage:** 100% Passed across 12 test suites (250+ individual checks).
-*   **Security Verification:** Server stores only ciphertext (verified by automated tests).
+### 2. Project Statistics
 
-<br>
+| Category | Value | Notes |
+| --- | --- | --- |
+| **Version** | `2.0.0` | Current release |
+| **Architecture** | `NVC` (Node.js Views/Controllers) | Clean separation of concerns |
+| **Backend Files** | `~40+` | Routes, controllers, services, models, middleware |
+| **Frontend Files** | `18` | `app.js`, `e2ee.js`, `calls.js`, `chat-features.js`, `motion.js`, `cursor.js`, `icons.js`, `i18n.js`, `sw.js`, styles, etc. |
+| **Test Suites** | `13` | Jest + custom Node.js test scripts |
+| **Test Assertions** | **325+** | All passing with 0 failures |
+| **Dependencies (prod)** | `10` | express, ws, better-sqlite3-multiple-ciphers, cors, dotenv, multer, qrcode-generator |
+| **Dependencies (dev)** | `5` | jest, jsqr, nodemon, puppeteer-core, qrcode |
+| **Supported Languages** | `RU / EN` | Full i18n coverage |
+| **Supported Layouts** | `Desktop / Tablet / Phone` | Fully responsive with safe areas |
+| **Themes** | `Cyberpunk / Matrix / AMOLED` | With custom cursor per theme |
+| **Icons** | `77` | Themed SVG sprite, no emoji in UI |
 
-### ✨ Key Features
 
-#### 🔐 Security & Privacy (Server-Blind Architecture)
-*   **Zero-Knowledge E2EE:** 
-    *   Utilizes **ECDH (P-256)** for public key exchange.
-    *   Utilizes **AES-256-GCM** for message encryption.
-    *   Every message is encrypted with a unique Initialization Vector (IV).
-    *   The server only stores and routes encrypted byte streams.
-*   **JWT Sessions:** 
-    *   Replaced insecure ID-based authentication with robust HMAC-SHA256 JSON Web Tokens.
-    *   Tokens are cryptographically signed and revoked server-side upon logout.
-*   **SQLite + WAL Mode:** 
-    *   Write-Ahead Logging (WAL) prevents database locking during concurrent read/write operations.
-    *   Ensures ACID compliance and high performance.
-*   **Safety Numbers:** 
-    *   Generates a 60-digit code for users to compare with their contacts.
-    *   Ensures no Man-in-the-Middle (MITM) key substitution has occurred.
-*   **Privacy Toggles:** 
-    *   PIN-code app lock.
-    *   "Ghost Mode" (hides online status and read receipts).
-    *   Screenshot protection (where supported by the OS/browser).
+### 3. Core Features (Deep Dive)
 
-#### 💬 Messaging & Media
-*   **Real-time Delivery:** 
-    *   Instant messaging via WebSockets.
-    *   No duplicate messages.
-    *   Seamless synchronization across multiple browser tabs.
-*   **Rich Interactions:** 
-    *   Reply with quotes.
-    *   Forward messages.
-    *   Edit messages.
-    *   Delete for me / Delete for everyone.
-    *   Pin important messages.
-    *   Emoji reactions.
-*   **Media Support:** 
-    *   File sharing up to 50MB.
-    *   Photo sharing with an elegant fallback UI if the file is lost.
-    *   Voice messages recorded via `MediaRecorder` API.
-    *   Animated SVG stickers.
-*   **WebRTC Calls:** 
-    *   Fully functional P2P Audio and Video calls directly in the browser.
-    *   Media streams are protected by **DTLS-SRTP**.
-    *   Media streams never pass through the server.
-*   **Live Status:** 
-    *   Real-time typing indicators ("typing...").
-    *   Online/Offline presence tracking.
-    *   Last seen timestamps.
+#### 🔐 Security (E2EE, Ratchet, SQLCipher, JWT, PBKDF2)
 
-#### 🎨 Premium UI/UX & Deep Customization
-*   **Glassmorphism Design:** 
-    *   Luxurious frosted glass effect (`backdrop-filter: blur`).
-    *   Customizable opacity and saturation.
-*   **12+ Themes:** 
-    *   AMOLED (pure #000000).
-    *   Cyberpunk.
-    *   Matrix.
-    *   Neon.
-    *   Dracula.
-    *   Nord.
-    *   Ice.
-    *   Sunset.
-*   **Custom SVG Icons:** 
-    *   77+ scalable SVG icons replacing all system emojis.
-    *   Inherit the theme's color palette.
-    *   Feature a glowing halo and pulse on hover.
-*   **Custom Cursor:** 
-    *   A sleek, themed vector arrow.
-    *   Neon pink in Cyberpunk, green in Matrix, white in AMOLED.
-    *   Glowing hand effect over buttons.
-*   **Motion System:** 
-    *   Ripple effects on clicks.
-    *   Staggered list entrances.
-    *   Spring modals and toasts.
-    *   Shimmer skeletons.
-    *   Typewriter effect for incoming messages.
-    *   Falling snow particles.
-    *   Respects `prefers-reduced-motion`.
-*   **Responsive Layouts:** 
-    *   Desktop: 3 columns (Menu, Chat List, Chat Window).
-    *   Tablet: 2 columns.
-    *   Mobile: 1 column, bottom navigation, safe-area insets, swipe gestures.
-*   **Installable PWA:** 
-    *   Add to home screen on iOS/Android.
-    *   Works as a standalone app without browser UI.
+##### End-to-End Encryption (Direct Chats)
+- **Key Exchange**: ECDH with curve `P-256` (secp256r1). Both peers derive identical shared secret.
+- **Session Derivation**: `sharedSecret → HKDF-SHA256(salt, info="CT-v1|root") → rootKey`. Salt = `SHA256(sorted(pubA,pubB).join('|'))` for symmetric session regardless of initiator.
+- **Directional Chains**: Root splits into `chainSend` and `chainRecv` via HKDF with different info labels. Keys differ per direction preventing reflection attacks.
+- **Per-Message Keys**: For each message, `msgKey = HKDF(HMAC(chainKey, "CT-v1|mk"), randomSalt(16), "CT-v1|msg")`. After encryption, `chainKey = HMAC(chainKey, "CT-v1|next")` (symmetric ratchet).
+- **Forward Secrecy**: Previous keys unrecoverable from current chain key.
+- **Post-Quantum Consideration**: Currently classical ECDH P-256; architecture allows algorithm upgrade.
+- **AAD**: `AES-GCM` uses Additional Authenticated Data = `${context}|${header}` binding to chat/context.
+- **IV**: 96-bit random IV per encryption (`crypto.getRandomValues` / `crypto.randomBytes`).
 
-#### 👑 Exclusive Owner Features
-*   **Owner Badge:** 
-    *   A golden, glowing crown/checkmark.
-    *   Visible next to the creator's username.
-*   **Panic Button:** 
-    *   Instantly wipes local cache.
-    *   Clears tokens and logs out.
-*   **Super Economy Mode:** 
-    *   Disables heavy animations and glassmorphism.
-    *   Ensures smooth performance on low-end devices.
+##### Double-Ratchet Style Handling
+- **Skipped Keys**: Out-of-order messages cached in `session.skipped[<n>]` up to `MAX_SKIP = 1000`.
+- **Send Chain Retention**: Up to `MAX_SEND_KEYS = 300` for potential own-message verification flows.
+- **Session Serialization**: Full session state (chains, counters, skipped keys) persisted encrypted/local in client.
 
-<br>
+##### Group E2EE
+- **Group Key Generation**: Cryptographically random 32 bytes by group creator.
+- **Key Wrapping**: For each member, derive KEK from `ECDH(creatorPriv, memberPub)`, wrap group key with `AES-256-GCM`. Store `{ wrapped, iv, nonce? }` per member.
+- **Distribution**: Server relays wrapped blobs; never sees raw group key.
+- **Rotation**: New group key can be generated and re-wrapped on membership changes (supported by architecture).
 
-### 🏗️ Architecture & Deep Dive
+##### File Encryption
+- **Derivation**: `fileKey = HKDF(sessionFileKey, randomSalt(16), "CT-v1|file")`
+- **Encryption**: AES-256-GCM with fresh IV
+- **Transport**: Encrypted blob uploaded to server; server stores encrypted file, cannot decrypt.
 
-#### NVC Pattern (Node-View-Controller)
-*   **Models:** 
-    *   Interact with the SQLite database.
-    *   Define schemas (Users, Chats, Messages).
-*   **Views:** 
-    *   Static frontend files (HTML, CSS).
-    *   Vanilla JS rendering logic.
-*   **Controllers/Services:** 
-    *   Handle business logic.
-    *   Manage encryption, WebSocket routing, and API endpoints.
+##### Database Encryption (SQLCipher)
+- **Engine**: `better-sqlite3-multiple-ciphers`
+- **Key Storage**: Separate file `<DB_FILE>.dbkey` with `0600` permissions, hex-encoded 32 bytes
+- **Fail-Closed**: If key missing but encrypted DB exists → startup aborts. If key corrupted → aborts, never overwritten.
+- **Migration Safety**: Plain SQLite detected when expecting encrypted → moved to backup, prevents accidental data loss
+- **WAL Mode**: `journal_mode = WAL`, `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5000`
+- **Validation**: On load, verifies file header not plaintext SQLite when encryption expected
 
-#### SQLite Schema (WAL Mode Enabled)
+##### Application-Layer Encryption
+- **Service**: `encryptionService` (AES-256-GCM, 96-bit IV, 128-bit tag)
+- **Key Derivation**: `scryptSync(password/envKey, SALT='CipherTalk-at-rest', 32)` or random 32 bytes from `<DB_FILE>.key`
+- **Format**: `CTV1.<ivBase64>.<tagBase64>.<ciphertextBase64>`
+
+##### Authentication & Sessions
+- **Passwords**: `pbkdf2Sync(password, salt, 100000, 64, 'sha512')` stored as `pbkdf2-sha512$iterations$salt$hash`. Legacy `salt:hash` (10000) supported.
+- **Constant-Time Compare**: `crypto.timingSafeEqual` for password/hash/token comparisons
+- **JWT**: HMAC-SHA256 signed tokens. Secret from `JWT_SECRET` or auto-generated to `<DB_FILE>.jwt-secret` (0600)
+- **Token Storage**: Sessions table stores `token_hash = SHA256(token)`, raw token never stored
+- **Revocation**: Logout deletes/revokes session server-side
+- **Session TTL**: Configurable (default 30 days), cleanup job runs hourly
+- **OTP**: Cryptographically random 6 digits via `crypto.randomInt`
+
+##### Additional Security Measures
+- **Phone Masking**: In WebSocket user snapshots, phone numbers masked
+- **Security Headers**: Via `middleware/security.js`
+- **CORS**: Restrictive by default (same-origin), configurable via `CORS_ORIGIN`
+- **Upload Security**: Auth required, `Content-Security-Policy: sandbox`, `X-Content-Type-Options: nosniff`, served as `application/octet-stream`
+- **Fail-Closed**: Corrupted secrets never auto-regenerated
+- **Trust Proxy**: Configurable hop count
+
+
+#### 💬 Messaging (Chats, Groups, Files, Replies, Reactions, Pin, Expiry)
+
+- **Private Chats**: 1:1 with automatic E2EE session setup
+- **Group Chats**: Multi-member with group key distribution
+- **Saved Messages**: Personal "Favorites" chat
+- **Replies**: Quote original message
+- **Forwarding**: Decrypt locally, re-encrypt for target context
+- **Reactions**: Per-message reactions
+- **Edit/Delete**: Edit messages, delete-for-all
+- **Pinning**: Pin messages in chat
+- **Typing Indicators**: Real-time via WebSocket
+- **Read Receipts**: Track read status
+- **Folders**: Organize chats into custom folders
+- **Hide/Clear**: Chat visibility management
+- **Message Expiry**: Time-based expiration support
+- **File Sharing**: Up to 50MB, encrypted, served securely
+- **Pagination**: History loaded with `beforeId`
+
+
+#### 📞 Calls (WebRTC, STUN/TURN, DTLS-SRTP)
+
+- **P2P Media**: Direct peer connection where possible
+- **Encryption**: DTLS-SRTP enforced by WebRTC
+- **Signaling**: WebSocket-based, access-controlled (must share private chat)
+- **STUN**: Google public STUN by default
+- **TURN**: Optional, with short-lived credentials via `static-auth-secret` (HMAC-SHA1). Secret never exposed to browser
+- **Credential Generation**: `username = <expiry>:<random>`, `credential = base64(HMAC-SHA1(secret, username))`
+- **States**: offer/answer/candidate/end/busy/unavailable
+- **Protection**: Cannot call without chat, cannot signal to ended calls, offline users get `call_unavailable`
+
+
+#### 🎨 UI/UX (Glassmorphism, Themes, Custom Cursor, Motion, PWA)
+
+- **Themes**: Cyberpunk (neon pink), Matrix (green), AMOLED (black)
+- **Icon System**: 77 SVG icons in sprite, theme-colored, glow + hover pulse
+- **Motion Engine**: Ripple, stagger, spring modals, shimmer skeletons, animated ticks, View Transitions API cross-fade
+- **Reduced Motion**: Respects `prefers-reduced-motion`
+- **Incremental Rendering**: DOM reuse, cached decrypted previews
+- **Responsive Layouts**: Desktop 3-column, Tablet 2-column, Phone 1-column + bottom nav + safe-area + bottom sheets
+- **Custom Cursor**: Vector arrow, theme-colored, glow, hand on interactive elements, disabled on touch
+- **i18n**: Russian/English
+- **PWA**: Manifest, Service Worker, installable, standalone
+- **Typography**: Font selection, weight, line-height, custom fonts
+
+
+#### 🛠️ Infrastructure (NVC, SQLite WAL, Docker, Cloudflare Tunnel)
+
+- **NVC Pattern**: Models, Views (client), Controllers, Routes + Services
+- **Database**: SQLite WAL with indexes, SQLCipher
+- **Modular Services**: All cross-cutting concerns extracted
+- **Config**: Centralized in `src/config/index.js` from `.env`
+- **Uploads**: Isolated directory, auth-protected static serving with headers
+- **Health**: `/api/health` endpoint
+- **Graceful Shutdown**: SIGINT/SIGTERM handlers, WS stop, DB flush
+- **Auto-Migration**: JSON → SQLite
+- **Docker**: Dockerfile + docker-compose.yml
+- **Tunnel**: Cloudflare quick/named tunnel scripts
+
+
+### 4. Architecture & Deep Dive
+
+#### NVC Pattern Diagram
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                            CLIENT (Browser)                      │
+│  app.js | e2ee.js(WebCrypto) | calls.js(WebRTC) | i18n | motion │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ REST (JSON) + WebSocket
+┌─────────────────────────────▼───────────────────────────────────┐
+│                         Express App (src/app.js)                 │
+│  Middleware: security, cors, auth, upload | Static: public/uploads│
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ Routes
+        ┌─────────────────────┼─────────────────────┐
+      Routes              Controllers           Services
+    authRoutes           authController        encryptionService
+    chatRoutes           chatController        websocketService
+    profileRoutes        profileController     presenceService/smsService
+                              │                    sessionService/iceService
+                              ▼                        │
+                            Models ──────────────────┘
+                              │
+                              ▼
+                        Database (SQLite/WAL + SQLCipher)
+```
+
+#### Complete SQL Schema
+
 ```sql
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT UNIQUE NOT NULL,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    public_key TEXT,
-    online INTEGER DEFAULT 0,
-    last_seen INTEGER,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+-- users
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  phone TEXT, email TEXT,
+  first_name TEXT, last_name TEXT, name TEXT, username TEXT,
+  password_hash TEXT,
+  avatar TEXT, bio TEXT,
+  public_key TEXT,        -- ECDH P-256 SPKI base64
+  online INTEGER DEFAULT 0,
+  last_seen INTEGER DEFAULT 0,
+  hide_online INTEGER DEFAULT 0,
+  created_at INTEGER, updated_at INTEGER
+);
+CREATE UNIQUE INDEX idx_users_phone ON users(phone);
+CREATE UNIQUE INDEX idx_users_username ON users(username);
+
+-- chats
+CREATE TABLE chats (
+  id INTEGER PRIMARY KEY,
+  type TEXT,              -- 'private' | 'group' | 'saved'
+  name TEXT, avatar TEXT, description TEXT,
+  owner_id INTEGER,
+  is_pinned INTEGER DEFAULT 0,
+  is_channel INTEGER DEFAULT 0,
+  folder_id INTEGER,
+  created_at INTEGER, updated_at INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS chats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT CHECK(type IN ('private', 'group', 'saved')),
-    name TEXT,
-    owner_id INTEGER,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+-- chat_members
+CREATE TABLE chat_members (
+  chat_id INTEGER, user_id INTEGER,
+  role TEXT,
+  joined_at INTEGER,
+  last_read_message_id INTEGER DEFAULT 0,
+  hidden INTEGER DEFAULT 0,
+  cleared_at INTEGER DEFAULT 0,
+  PRIMARY KEY(chat_id, user_id)
+);
+CREATE INDEX idx_chat_members_user ON chat_members(user_id);
+
+-- messages (server-blind)
+CREATE TABLE messages (
+  id INTEGER PRIMARY KEY,
+  chat_id INTEGER,
+  sender_id INTEGER,
+  encrypted_content TEXT, -- ciphertext
+  iv TEXT,                -- base64
+  header TEXT,            -- JSON metadata
+  type TEXT,              -- text|file|sticker|system
+  reply_to INTEGER,
+  forwarded_from INTEGER,
+  edited INTEGER DEFAULT 0,
+  deleted_for_all INTEGER DEFAULT 0,
+  deleted_by TEXT,        -- JSON array
+  reactions TEXT,         -- JSON
+  pinned INTEGER DEFAULT 0,
+  expires_at INTEGER,
+  created_at INTEGER
+);
+CREATE INDEX idx_messages_chat ON messages(chat_id, id);
+
+-- sessions
+CREATE TABLE sessions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER,
+  token TEXT,             -- legacy/ref
+  token_hash TEXT,        -- SHA256
+  expires_at INTEGER,
+  created_at INTEGER,
+  last_used INTEGER,
+  user_agent TEXT,
+  ip TEXT
+);
+CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+
+-- files
+CREATE TABLE files (
+  id INTEGER PRIMARY KEY,
+  filename TEXT,
+  original_name TEXT,
+  size INTEGER,
+  mimetype TEXT,
+  uploader_id INTEGER,
+  created_at INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER NOT NULL,
-    sender_id INTEGER NOT NULL,
-    ciphertext TEXT NOT NULL,
-    iv TEXT NOT NULL,
-    msg_type TEXT DEFAULT 'text',
-    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY (chat_id) REFERENCES chats(id),
-    FOREIGN KEY (sender_id) REFERENCES users(id)
+-- folders
+CREATE TABLE folders (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER,
+  name TEXT,
+  emoji TEXT,
+  color TEXT,
+  chat_ids TEXT,          -- JSON
+  created_at INTEGER,
+  updated_at INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
-CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+-- group_keys (wrapped)
+CREATE TABLE group_keys (
+  chat_id INTEGER PRIMARY KEY,
+  version INTEGER DEFAULT 1,
+  wrapped TEXT,           -- JSON: { memberId: {wrapped,iv,...}, ... }
+  created_by INTEGER,
+  created_at INTEGER,
+  updated_at INTEGER
+);
+
+-- verification_codes, counters (as implemented)
 ```
 
-#### E2EE Flow
-1.  Client A generates an ECDH key pair (P-256).
-2.  Client A sends its Public Key to the server.
-3.  Server relays the Public Key to Client B.
-4.  Client B computes a Shared Secret using its Private Key and Client A's Public Key.
-5.  Messages are encrypted locally using AES-256-GCM.
-6.  The payload `{iv, ciphertext}` is sent to the server.
-7.  The server saves only this ciphertext to SQLite.
+#### E2EE Mathematics (Step by Step)
 
-<br>
+**1) Identity Generation (Client)**
+```javascript
+const pair = await crypto.subtle.generateKey(
+  { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']
+);
+// Export: publicKey = SPKI base64, privateKey = PKCS8 base64
+```
 
-### 🛠️ Tech Stack
-*   **Backend:** 
-    *   Node.js
-    *   Express.js
-    *   WebSockets (ws)
-    *   SQLite (better-sqlite3)
-*   **Frontend:** 
-    *   Vanilla JavaScript
-    *   HTML5
-    *   CSS3 (Glassmorphism)
-*   **Crypto:** 
-    *   Web Crypto API
-*   **DevOps:** 
-    *   PM2
-    *   Cloudflare Tunnel
-    *   Docker
+**2) Direct Session**
+```javascript
+shared = ECDH(privA, pubB)  // 32 bytes
+first = min(pubA,pubB), second = max(pubA,pubB)
+salt = SHA256(textToBytes(first + '|' + second))
+root = HKDF(ikm=shared, salt, info='CT-v1|root', len=32)
+chain1 = HKDF(root, salt, 'CT-v1|chain-1', 32)
+chain2 = HKDF(root, salt, 'CT-v1|chain-2', 32)
+// Assign by pubkey order: if myPub < peerPub → send=chain1, recv=chain2
+```
 
-<br>
+**3) Message Encryption**
+```javascript
+chainKey = currentSendChain
+mk = HMAC(chainKey, 'CT-v1|mk')        // message key material
+salt16 = randomBytes(16)
+msgKey = HKDF(mk, salt16, 'CT-v1|msg', 32)
+header = { v:1, n:sendCount, ts:Date.now(), s: bytesToB64(salt16) }
+aad = textToBytes(context + '|' + JSON.stringify(header))
+{iv,data} = AES-GCM.encrypt(msgKey, plaintext, iv=random12, aad)
+sendChain = HMAC(chainKey, 'CT-v1|next')  // ratchet
+sendCount++
+```
 
-### 📁 Project Structure
-```text
+**4) Message Decryption**
+```javascript
+header = JSON.parse(payload.header)
+mk = HMAC(chainKey, 'CT-v1|mk')
+msgKey = HKDF(mk, b64ToBytes(header.s), 'CT-v1|msg', 32)
+aad = textToBytes(context + '|' + payload.header)
+plaintext = AES-GCM.decrypt(msgKey, payload.iv, payload.content, aad)
+chainKey = HMAC(chainKey, 'CT-v1|next')
+```
+
+**5) Group Key Wrap/Unwrap**
+```javascript
+// Wrap
+kek = HKDF(ECDH(creatorPriv, memberPub), salt, 'CT-v1|group-wrap', 32)
+wrapped = AES-GCM.encrypt(kek, groupKey32, iv)
+
+// Unwrap
+kek = HKDF(ECDH(memberPriv, creatorPub), salt, 'CT-v1|group-wrap', 32)
+groupKey = AES-GCM.decrypt(kek, wrapped.iv, wrapped.data)
+```
+
+**6) File Encryption**
+```javascript
+salt16 = randomBytes(16)
+fileKey = HKDF(sessionFileKey, salt16, 'CT-v1|file', 32)
+{iv,data} = AES-GCM.encrypt(fileKey, fileBytes)
+payload = { iv, data, salt: bytesToB64(salt16) }
+```
+
+
+### 5. Tech Stack (Detailed)
+
+| Technology | Version | Purpose | Why |
+| --- | --- | --- | --- |
+| **Node.js** | 18+ | Runtime | Modern JS, built-in crypto, async I/O |
+| **Express.js** | ^4.18.2 | Web framework | Minimal, flexible, battle-tested |
+| **ws** | ^8.14.2 | WebSocket server | Lightweight, native WS, great for real-time |
+| **better-sqlite3-multiple-ciphers** | ^13.0.3 | SQLite + SQLCipher | Fast sync API, WAL, encryption support |
+| **cors** | ^2.8.5 | CORS middleware | Controlled cross-origin access |
+| **dotenv** | ^16.3.1 | Env config | 12-factor config |
+| **multer** | ^2.4.0 | File uploads | Multipart handling |
+| **qrcode-generator** | ^2.0.4 | QR generation | SVG QR for public URL |
+| **Jest** | ^29.6.1 | Testing | Unit/smoke tests |
+| **jsqr** | ^1.4.0 | QR decode tests | Verify QR content |
+| **puppeteer-core** | ^25.15.0 | Browser tests | UI/integration validation |
+| **qrcode** | ^1.5.4 | QR utils | Test helpers |
+| **nodemon** | ^3.0.1 | Dev | Auto-restart |
+
+**Client:** Vanilla HTML5/CSS3/ES6+, Web Crypto API, Service Worker, CSS Custom Properties.
+
+
+### 6. Project Structure (Complete File Tree)
+
+```
 CipherTalk/
-├── ciphertalk-server/
-│   ├── server.js                 # Entry point
-│   ├── src/
-│   │   ├── app.js               # Express setup
-│   │   ├── config/              # Env parser
-│   │   ├── db/                  # SQLite & migrations
-│   │   ├── models/              # User, Chat, Message
-│   │   ├── services/            # Encryption, WebSockets, SMS
-│   │   ├── controllers/         # Auth, Profile, Chat logic
-│   │   ├── routes/              # Express routes
-│   │   └── middleware/          # JWT auth, Multer
-│   ├── public/                  # Frontend (app.js, index.html)
-│   │   ├── motion.css           # Animation engine
-│   │   ├── cursor.css           # Custom cursor
-│   │   ├── icons.js             # SVG sprites
-│   │   └── layout.css           # Responsive grids
-│   └── tests/                   # Jest & Integration tests
+├── LICENSE
+├── README.md                    # This documentation
+├── docker-compose.yml
+├── do-mvc.md
+├── ANALYSIS_REPORT.md
+├── FINAL_REPORT.md
+├── old/                         # Legacy files
+└── ciphertalk-server/
+    ├── server.js               # Entry point
+    ├── package.json            # Scripts & deps
+    ├── package-lock.json
+    ├── .env                    # Environment (local)
+    ├── .env.example            # Template
+    ├── Dockerfile
+    ├── .dockerignore
+    ├── .public-url
+    ├── bin/
+    │   └── cloudflared         # Tunnel binary
+    ├── scripts/
+    │   ├── tunnel.js           # Tunnel manager
+    │   ├── tunnel-setup.js     # Tunnel setup
+    │   └── migrate_to_sqlite.js
+    ├── src/
+    │   ├── app.js              # Express app, middleware, routes, WS
+    │   ├── config/
+    │   │   └── index.js        # Central config
+    │   ├── db/
+    │   │   └── database.js     # SQLite/SQLCipher layer
+    │   ├── models/
+    │   │   ├── User.js
+    │   │   ├── Chat.js
+    │   │   ├── Message.js
+    │   │   ├── File.js
+    │   │   ├── Session.js
+    │   │   └── VerificationCode.js
+    │   ├── controllers/
+    │   │   ├── authController.js
+    │   │   ├── chatController.js
+    │   │   └── profileController.js
+    │   ├── routes/
+    │   │   ├── authRoutes.js
+    │   │   ├── chatRoutes.js
+    │   │   └── profileRoutes.js
+    │   ├── middleware/
+    │   │   ├── auth.js
+    │   │   ├── security.js
+    │   │   └── upload.js
+    │   └── services/
+    │       ├── encryptionService.js
+    │       ├── dbEncryptionService.js
+    │       ├── smsService.js
+    │       ├── websocketService.js
+    │       ├── presenceService.js
+    │       ├── sessionService.js
+    │       ├── iceService.js
+    │       ├── tunnelService.js
+    │       ├── qrService.js
+    │       └── messageExpiry.js
+    ├── public/
+    │   ├── index.html
+    │   ├── app.js
+    │   ├── e2ee.js              # E2EE client
+    │   ├── calls.js
+    │   ├── chat-features.js
+    │   ├── motion.js
+    │   ├── cursor.js
+    │   ├── icons.js
+    │   ├── i18n.js
+    │   ├── sw.js
+    │   ├── manifest.json
+    │   ├── layout.css
+    │   ├── features.css
+    │   ├── motion.css
+    │   ├── icons.css
+    │   ├── cursor.css
+    │   ├── owner.css
+    │   └── icons/              # SVG icons
+    ├── tests/                  # All test suites
+    │   ├── e2ee.test.js
+    │   ├── e2ee_crypto_test.js
+    │   ├── e2ee_ratchet.test.js
+    │   ├── e2ee_client_flow.test.js
+    │   ├── smoke.test.js
+    │   ├── full_integration_test.js
+    │   ├── security_regression_test.js
+    │   ├── call_signal_test.js
+    │   ├── sms_provider_test.js
+    │   ├── public_access_test.js
+    │   ├── client_identity_scope_test.js
+    │   ├── perf_render_test.js
+    │   ├── responsive_cursor_test.js
+    │   ├── icons_test.js
+    │   ├── integration_check.js
+    │   └── i18n.test.js
+    └── uploads/                # Encrypted file storage
 ```
 
-<br>
 
-### 🚀 Quick Start
+### 7. Detailed Installation Guide
 
+#### Prerequisites
+| Requirement | Version | Link |
+| --- | --- | --- |
+| **Node.js** | >= 18.0.0 (LTS recommended: 20.x) | [nodejs.org](https://nodejs.org/) |
+| **npm** | >= 9.x | Bundled with Node.js |
+| **Git** | Latest | [git-scm.com](https://git-scm.com/) |
+| **OS** | Linux, Armbian, Windows 10/11 | — |
+
+#### Linux / Armbian
 ```bash
-# 1. Clone the repository
+# 1) Install Node.js (if needed)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 2) Clone
 git clone https://github.com/SkobkaStudio/CipherTalk.git
 cd CipherTalk/ciphertalk-server
 
-# 2. Install dependencies
+# 3) Install deps
 npm install
 
-# 3. Configure environment
+# 4) Configure
 cp .env.example .env
+nano .env  # Edit as needed
 
-# 4. Start the server
-npm run dev
+# 5) Run
+npm start
 ```
 
-<br>
-
-### 📡 API Endpoints
-
-#### `POST /api/auth/register`
-```json
-{
-  "phone": "+79001234567",
-  "firstName": "Ivan",
-  "lastName": "Ivanov",
-  "username": "ivan_coder",
-  "password": "StrongPassword123"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsIn...",
-  "user": {
-    "id": 1,
-    "username": "ivan_coder"
-  }
-}
+#### Windows (CMD)
+```cmd
+REM 1) Open cmd in ciphertalk-server folder (type cmd in address bar)
+REM 2)
+npm install
+copy .env.example .env
+notepad .env
+npm start
 ```
 
-#### `POST /api/auth/send-code`
-```json
-{
-  "phone": "+79001234567"
-}
+#### Windows (PowerShell)
+```powershell
+npm install
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
+notepad .env
+npm start
 ```
 
-#### `GET /api/chats/:userId`
-```json
-{
-  "chats": [
-    {
-      "id": 1,
-      "type": "private",
-      "last_message": "CTV1:iv:tag:ciphertext...",
-      "updated_at": 1770000000
-    }
-  ]
-}
+#### Windows (Git Bash)
+```bash
+npm install
+cp .env.example .env
+nano .env  # or vim
+npm start
 ```
 
-<br>
+#### Access
+Open [http://localhost:3000](http://localhost:3000)
 
-### 🧪 Proof of Work (Test Logs)
 
-**Integration Tests (`npm run test:integration`):**
+### 8. User Guide
+
+1. **Register** - Create account with phone/username/password or OTP
+2. **Find Users** - Search and start private chat (E2EE auto-initializes)
+3. **Chat** - Send encrypted messages, files, reactions, replies
+4. **Groups** - Create group, add members (group E2EE)
+5. **Calls** - Audio/video P2P calls
+6. **Safety Numbers** - Verify contacts in chat info
+7. **Settings** - Themes, cursor, typography, motion, privacy, language
+8. **Public Access** - View/share tunnel URL + QR if enabled
+
+
+### 9. API Reference (Complete)
+
+#### Health & Public
+| Method | Endpoint | Auth | Description | Example Response |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/health` | No | Server status | `{"status":"ok","timestamp":"...","users":N,"chats":N,"messages":N,"publicUrl":null}` |
+| `GET` | `/api/public-url` | No | Tunnel info | `{"url":null,"mode":null,"updatedAt":null,"available":false}` |
+| `GET` | `/api/public-url/qr.svg` | No | QR code SVG | SVG image |
+
+#### Auth
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/send-code` | No | Send OTP |
+| `POST` | `/api/auth/verify-code` | No | Verify OTP → login token |
+| `POST` | `/api/auth/login-code` | No | Exchange login token for session |
+| `POST` | `/api/auth/register` | No | Register with password |
+| `POST` | `/api/auth/login` | No | Login with password |
+| `POST` | `/api/auth/logout` | Yes | Revoke session |
+
+#### Profile & Users
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/me` | Yes | Current user |
+| `PUT` | `/api/profile` | Yes | Update profile |
+| `GET` | `/api/users/search?q=...` | Yes | Search users |
+| `POST` | `/api/profile/privacy` | Yes | Update privacy settings |
+
+#### Chats & Messages
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/chats` | Yes | List chats |
+| `POST` | `/api/chats/private` | Yes | Create/get private chat |
+| `POST` | `/api/chats/group` | Yes | Create group |
+| `GET` | `/api/chats/:id/messages` | Yes | Get messages (paginated) |
+| `POST` | `/api/chats/:id/messages` | Yes | Send message |
+| `PUT` | `/api/messages/:id` | Yes | Edit message |
+| `DELETE` | `/api/messages/:id` | Yes | Delete message |
+| `POST` | `/api/messages/:id/reaction` | Yes | Add/remove reaction |
+| `POST` | `/api/messages/:id/pin` | Yes | Pin/unpin |
+| `POST` | `/api/chats/:id/read` | Yes | Mark read |
+
+#### Files & ICE
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/upload` | Yes | Upload file (multipart) |
+| `GET` | `/uploads/:filename` | Yes | Download (encrypted blob) |
+| `GET` | `/api/ice-servers` | Yes | WebRTC ICE config |
+
+
+### 10. WebSocket Events (Complete)
+
+**Client → Server:** `auth`, `message`, `typing`, `read`, `call_offer`, `call_answer`, `call_candidate`, `call_end`, `ping`  
+**Server → Client:** `auth_ok`, `auth_error`, `message`, `typing`, `read_receipt`, `user_online`, `user_offline`, `call_offer`, `call_answer`, `call_candidate`, `call_end`, `call_busy`, `call_unavailable`, `pong`, `error`
+
+All signaling protected by chat membership checks.
+
+
+### 11. Proof of Work (Tests)
+
+All tests run from `ciphertalk-server/`.
+
+#### Jest
 ```text
-[TEST] Registration UserA... OK
-[TEST] Registration UserB... OK
-[TEST] ECDH Key Exchange... OK
-[TEST] Chat Creation... OK
-[TEST] Send E2EE Message... OK
-[TEST] DB Check: plaintext in db: false
---- RESULT: 56 TESTS PASSED, 0 FAILED ---
+PASS tests/e2ee.test.js
+PASS tests/i18n.test.js
+PASS tests/smoke.test.js
+Test Suites: 3 passed, 3 total
+Tests: 10 passed, 10 total
+Time: 1.568 s
 ```
 
-**Security Tests (`npm run test:security`):**
+#### E2EE Crypto
 ```text
-[SEC] Rate Limit (10 attempts)... OK (Blocked after 5)
-[SEC] JWT Forgery... OK (401 Unauthorized)
-[SEC] IDOR (Access other's chat)... OK (403 Forbidden)
---- RESULT: 25 TESTS PASSED, 0 FAILED ---
+=== E2EE Crypto Test ===
+✓ ECDH key exchange successful
+✓ AES-256 key derived
+✓ All messages encrypted/decrypted successfully
+✓ Each message has unique IV
+=== TEST PASSED ===
 ```
 
-<br>
+#### E2EE Ratchet
+```text
+=== ИТОГ: passed=32, failed=0 ===
+```
 
-### ⚠️ Known Limitations
-*   **Browser-bound Keys:** E2EE private keys are in `localStorage`. Clearing browser data loses access to old messages.
-*   **TURN Server:** P2P calls use public STUN. Symmetric NAT (mobile networks) requires a TURN server.
-*   **Educational Purpose:** Built for portfolio/learning. Audited protocols (Signal) are recommended for production.
+#### E2EE Client Flow
+```text
+Пройдено: 13, провалено: 0
+```
 
-<br>
+#### Call Signaling
+```text
+=== ИТОГО: passed=20, failed=0 ===
+```
 
-### 🗺️ Roadmap
-- [x] **v2.0** — NVC architecture, Group chats, Username.
-- [x] **v2.1** — Real E2EE (ECDH P-256 + AES-256-GCM).
-- [x] **v2.2** — JWT Authentication.
-- [x] **v3.0** — SQLite Database (WAL mode).
-- [x] **v3.1** — Docker Support.
-- [x] **v4.0** — PWA, Custom Cursor, SVG Icons, 12+ Themes.
-- [x] **v4.1** — Voice Messages, Video Circles, Owner Badge.
-- [x] **v5.0** — WebRTC Audio/Video Calls.
-- [ ] **v5.1** — PostgreSQL support.
-- [ ] **v5.2** — Multi-device (key sync).
-- [ ] **v5.3** — Native Apps (React Native).
-- [ ] **v6.0** — AI assistant for chat summaries.
+#### Full Integration
+```text
+=== ИТОГО: passed=53, failed=0 ===
+```
 
-<br>
-<br>
-<br>
+#### Security Regression
+```text
+=== ИТОГО: passed=25, failed=0 ===
+```
+
+#### SMS Provider
+```text
+=== ИТОГО: passed=17, failed=0 ===
+```
+
+#### Public Access/QR
+```text
+Публичный доступ: 19/19 проверок пройдено
+```
+
+#### Client Identity/Settings
+```text
+=== ИТОГО: passed=54, failed=0 ===
+```
+
+#### Performance/Motion
+```text
+=== ИТОГО: passed=36, failed=0 ===
+```
+
+#### Responsive/Cursor
+```text
+Адаптивность и курсор: 19/19 проверок пройдено
+```
+
+#### Icons
+```text
+=== ИТОГО: passed=25, failed=0 ===
+```
+
+**GRAND TOTAL: 325+ ASSERTIONS | 13 TEST SUITES | 0 FAILURES**
+
+
+### 12. Troubleshooting (FAQ)
+
+| Problem | Cause | Solution |
+| --- | --- | --- |
+| `Cannot find module better-sqlite3...` | Native build failed | Use Node.js LTS 20.x, reinstall (`npm rebuild`) or reinstall deps |
+| `Файл ключа БД не найден` | Missing `.dbkey` for encrypted DB | Restore key file from backup. Never delete keys |
+| `Не удалось запустить... повреждённый ключ` | Corrupted key | Restore correct key or use backup DB |
+| Port 3000 busy | Another process | Change `PORT` in `.env` or kill process |
+| Calls don't connect behind NAT | No TURN | Configure `TURN_URL` + `TURN_SECRET` |
+| Camera/mic blocked | Browser permissions | Allow in browser settings |
+| Can't access from LAN | Firewall/bind | Check firewall, use correct IP; set `TRUST_PROXY` if behind proxy |
+| CORS errors | Cross-origin blocked | Set `CORS_ORIGIN` or use same origin |
+
 
 ---
 
-## 🇷🇺 РУССКАЯ ВЕРСИЯ
 
-<br>
+## 🇷🇺 RUSSIAN VERSION
 
-### 📖 Введение
 
-**CipherTalk** (или просто **"Кипяток"**) — это легковесный, ультра-безопасный мессенджер со сквозным шифрованием (E2EE). Построен на современной NVC-архитектуре (Node-View-Controller) и оптимизирован для развертывания на личных серверах, VPS и одноплатных компьютерах (SBC). Проект обладает премиальным, гибко настраиваемым интерфейсом, способным конкурировать с топовыми коммерческими аналогами.
+### 1. Введение
 
-Философия CipherTalk проста: ваши чаты должны быть горячими, быстрыми и никогда не остывать. Сервер спроектирован как «слепой» — он физически не может прочитать ваши сообщения. Всё шифрование и расшифровка происходят на стороне клиента.
+**CipherTalk** — полнофункциональный мессенджер с end-to-end шифрованием, созданный по принципу «сервер ничего не знает». Сервер никогда не получает открытый текст приватных сообщений — только шифротекст, IV, заголовки и «завёрнутые» групповые ключи.
 
-<br>
+#### Философия
+- **Нулевое доверие**: Расшифровка возможна только у получателей
+- **Forward Secrecy**: Ключи обновляются, прошлые сообщения не расшифровать при компрометации текущих
+- **Многоуровневая защита**: SQLCipher, прикладное шифрование, PBKDF2, JWT с отзывом
+- **Самохостинг**: Полный контроль над данными
+- **Приватность по умолчанию**: Минимум метаданных
 
-### 📊 Статистика и Пруфы
+#### Почему «CipherTalk»?
+От слова *cipher* (шифр) — зашифрованный диалог.
 
-*   **Объем кода:** ~193 765 строк (включая зависимости, конфиги, локализации и стили).
-*   **Последнее мега-обновление:** 58 файлов изменено, 11 504 строки добавлено, 750 удалено.
-*   **Миграция БД:** 100% успешный переход с JSON на SQLite (WAL).
-*   **Тесты:** 100% Passed (12 наборов, 250+ проверок).
-*   **Безопасность:** Сервер хранит только шифротекст (подтверждено автотестами).
 
-<br>
+### 2. Статистика проекта
 
-### ✨ Возможности
+| Категория | Значение | Примечание |
+| --- | --- | --- |
+| **Версия** | `2.0.0` | Текущий релиз |
+| **Архитектура** | `NVC` | Models/Controllers/Services/Routes |
+| **Тестов** | `13 наборов` | Jest + кастомные скрипты |
+| **Проверок** | **325+** | Все пройдены, 0 ошибок |
+| **Фронтенд-модулей** | `18` | Клиентские скрипты и стили |
+| **Сервисов бэкенда** | `10` | Модульные сервисы |
+| **Языки** | `RU / EN` | Полная локализация |
+| **Адаптив** | `ПК/Планшет/Телефон` | С учётом safe-area |
 
-#### 🔐 Безопасность и Приватность (Слепой сервер)
-*   **Бескомпромиссное E2EE:** 
-    *   ECDH (P-256) для обмена ключами.
-    *   AES-256-GCM с уникальным IV для каждого сообщения.
-    *   Сервер хранит только зашифрованные байты.
-*   **JWT-сессии:** 
-    *   Безопасные токены (HMAC-SHA256).
-    *   Отзыв токенов на сервере при выходе.
-*   **SQLite + WAL:** 
-    *   Режим Write-Ahead Logging предотвращает блокировки.
-    *   Высокая производительность при одновременной записи.
-*   **Коды безопасности (Safety Numbers):** 
-    *   60-значный код для сверки ключей.
-    *   Защита от MITM-атак.
-*   **Приватность:** 
-    *   PIN-код на вход.
-    *   Режим «Призрак» (скрытие онлайна и галочек прочтения).
-    *   Защита от скриншотов.
+### 3. Ключевые возможности (подробный обзор)
 
-#### 💬 Обмен сообщениями и Медиа
-*   **Доставка в реальном времени:** 
-    *   Мгновенные сообщения через WebSocket.
-    *   Без дублей и потерь.
-    *   Синхронизация между вкладками.
-*   **Действия с сообщениями:** 
-    *   Ответы с цитатой (Reply).
-    *   Пересылка (Forward).
-    *   Редактирование (Edit).
-    *   Удаление у себя / у всех (Delete).
-    *   Закрепление (Pin).
-    *   Эмодзи-реакции.
-*   **Медиа:** 
-    *   Файлы до 50 МБ.
-    *   Фото (с красивой заглушкой при потере).
-    *   Голосовые сообщения (MediaRecorder).
-    *   Видео-кружки.
-    *   Анимированные SVG-стикеры.
-*   **Звонки (WebRTC):** 
-    *   Полноценные P2P аудио- и видеозвонки.
-    *   Защищены протоколом DTLS-SRTP.
-    *   Медиа не проходит через сервер.
-*   **Статусы:** 
-    *   Индикатор «Печатает...».
-    *   Онлайн/Оффлайн.
-    *   Время последнего визита.
+#### Безопасность и E2EE
+- **Личные чаты**: ECDH P-256 → HKDF → направленные цепочки, ключ на сообщение, ratchet вперёд
+- **AAD-привязка**: Защита от подмены между чатами
+- **Группы**: Случайный групповой ключ, индивидуальная обёртка для каждого участника
+- **Файлы**: Отдельное шифрование с уникальным солью
+- **Коды безопасности**: Верификация ключей собеседника
+- **Ротация ключей**: Обновление с переустановкой сессии
+- **SQLCipher**: Шифрование БД at-rest, ключ в `.dbkey` (0600), fail-closed
+- **Пароли**: PBKDF2-SHA512 100000 итераций, постоянное сравнение
+- **JWT**: HMAC-SHA256, хранение хеша токена, отзыв при выходе
+- **Маскирование телефонов**, строгие заголовки, fail-closed
 
-#### 🎨 Премиальный UI/UX и Глубокая Кастомизация
-*   **Glassmorphism:** 
-    *   Эффект матового стекла (`backdrop-filter: blur`).
-    *   Настройка прозрачности и насыщенности.
-*   **12+ Тем:** 
-    *   AMOLED (чистый #000000).
-    *   Киберпанк.
-    *   Матрица.
-    *   Неон.
-    *   Dracula.
-    *   Nord.
-    *   Ледяная.
-    *   Закат.
-*   **Кастомные SVG-иконки:** 
-    *   77+ векторных иконок.
-    *   Заменяют все эмодзи.
-    *   Меняют цвет под тему, имеют свечение.
-*   **Кастомный курсор:** 
-    *   Векторная стрелка.
-    *   Неоновая в Киберпанке, зеленая в Матрице.
-    *   Светящаяся рука над кнопками.
-*   **Анимации (Motion System):** 
-    *   Ripple-эффект при нажатии.
-    *   Каскадное появление списков.
-    *   Пружинные модалки.
-    *   Скелетоны загрузки.
-    *   Эффект «печатной машинки».
-    *   Падающие снежинки.
-    *   Учитывает `prefers-reduced-motion`.
-*   **Адаптив (Mobile First):** 
-    *   ПК: 3 колонки.
-    *   Планшет: 2 колонки.
-    *   Телефон: 1 колонка, нижняя навигация, Safe Area.
-    *   Свайпы: вправо = ответ, долгое нажатие = меню.
-*   **Устанавливаемое PWA:** 
-    *   Добавление на главный экран.
-    *   Запуск как нативного приложения.
-<br>
+#### Сообщения и чаты
+Личные/групповые/сохранённые, ответы, пересылка, реакции, редактирование, удаление для всех, закрепление, индикатор набора, прочтение, папки, скрытие/очистка, истечение, файлы до 50 МБ.
 
-### 🏗️ Архитектура и Технические Детали
+#### Звонки
+P2P WebRTC, DTLS-SRTP, STUN/TURN с временными учётными данными, контроль доступа.
 
-#### Паттерн NVC (Node-View-Controller)
-*   **Models (Модели):** 
-    *   Взаимодействуют с базой данных SQLite.
-    *   Определяют схемы (Пользователи, Чаты, Сообщения).
-*   **Views (Представления):** 
-    *   Статические файлы фронтенда (HTML, CSS).
-    *   Логика рендеринга на Vanilla JS.
-*   **Controllers/Services (Контроллеры/Сервисы):** 
-    *   Обрабатывают бизнес-логику.
-    *   Шифрование, WebSocket, API.
+#### Интерфейс
+Тёмные темы, SVG-иконки, Motion-система с учётом reduced-motion, инкрементальный рендер, 3 раскладки, кастомный курсор, RU/EN, PWA.
 
-#### Схема Базы Данных (SQLite + WAL)
-```sql
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT UNIQUE NOT NULL,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    public_key TEXT,
-    online INTEGER DEFAULT 0,
-    last_seen INTEGER,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
+#### Инфраструктура
+NVC, SQLite WAL + SQLCipher, модульные сервисы, Docker, Cloudflare Tunnel, graceful shutdown.
 
-CREATE TABLE IF NOT EXISTS chats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT CHECK(type IN ('private', 'group', 'saved')),
-    name TEXT,
-    owner_id INTEGER,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
+### 4. Архитектура и внутреннее устройство
 
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER NOT NULL,
-    sender_id INTEGER NOT NULL,
-    ciphertext TEXT NOT NULL,
-    iv TEXT NOT NULL,
-    msg_type TEXT DEFAULT 'text',
-    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY (chat_id) REFERENCES chats(id),
-    FOREIGN KEY (sender_id) REFERENCES users(id)
-);
+См. схему NVC, полную SQL-схему и математику E2EE выше.
 
-CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
-CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
-```
+### 5. Технологический стек
+См. подробную таблицу выше.
 
-#### Схема Шифрования (E2EE)
-1.  Клиент А генерирует пару ключей ECDH.
-2.  Клиент А отправляет свой публичный ключ на сервер.
-3.  Сервер пересылает его Клиенту Б.
-4.  Клиент Б вычисляет общий секрет (Shared Secret).
-5.  Сообщения шифруются локально (AES-256-GCM).
-6.  Отправляется JSON `{iv, ciphertext}`.
-7.  Сервер сохраняет только этот шифротекст в БД.
+### 6. Структура проекта
+Полное дерево файлов описано выше с назначением директорий.
 
-<br>
+### 7. Подробная инструкция по установке
 
-### 🛠️ Стек технологий
-*   **Бэкенд:** 
-    *   Node.js
-    *   Express
-    *   WebSockets (ws)
-    *   SQLite (better-sqlite3)
-*   **Фронтенд:** 
-    *   Vanilla JavaScript
-    *   HTML5
-    *   CSS3 (Glassmorphism)
-*   **Криптография:** 
-    *   Web Crypto API
-*   **DevOps:** 
-    *   PM2
-    *   Cloudflare Tunnel
-    *   Docker
-
-<br>
-
-### 📁 Структура проекта
-```text
-CipherTalk/
-├── ciphertalk-server/
-│   ├── server.js                 # Точка входа
-│   ├── src/
-│   │   ├── app.js               # Настройка Express
-│   │   ├── config/              # Парсер .env
-│   │   ├── db/                  # SQLite и миграции
-│   │   ├── models/              # User, Chat, Message
-│   │   ├── services/            # Encryption, WebSockets, SMS
-│   │   ├── controllers/         # Логика Auth, Profile, Chat
-│   │   ├── routes/              # Маршруты Express
-│   │   └── middleware/          # JWT проверка, Multer
-│   ├── public/                  # Клиентская часть
-│   │   ├── motion.css           # Движок анимаций
-│   │   ├── cursor.css           # Кастомный курсор
-│   │   ├── icons.js             # SVG-иконки
-│   │   └── layout.css           # Адаптивная сетка
-│   └── tests/                   # Jest и Интеграционные тесты
-```
-
-<br>
-
-### 🚀 Быстрый старт
-
+#### Linux/Armbian
 ```bash
-# 1. Клонируем репозиторий
 git clone https://github.com/SkobkaStudio/CipherTalk.git
 cd CipherTalk/ciphertalk-server
-
-# 2. Устанавливаем зависимости
 npm install
-
-# 3. Настраиваем окружение
 cp .env.example .env
-
-# 4. Запускаем сервер
-npm run dev
+npm start
 ```
 
-<br>
-
-### 📡 API Endpoints
-
-#### `POST /api/auth/register`
-```json
-{
-  "phone": "+79001234567",
-  "firstName": "Иван",
-  "lastName": "Иванов",
-  "username": "ivan_coder",
-  "password": "StrongPassword123"
-}
+#### Windows (CMD/PowerShell/Git Bash)
+```cmd
+npm install
+copy .env.example .env
+npm start
 ```
-Response:
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsIn...",
-  "user": {
-    "id": 1,
-    "username": "ivan_coder"
-  }
-}
+```powershell
+npm install
+Copy-Item .env.example .env -ErrorAction SilentlyContinue
+npm start
 ```
 
-#### `POST /api/auth/send-code`
-```json
-{
-  "phone": "+79001234567"
-}
-```
+Открыть http://localhost:3000
 
-#### `GET /api/chats/:userId`
-```json
-{
-  "chats": [
-    {
-      "id": 1,
-      "type": "private",
-      "last_message": "CTV1:iv:tag:ciphertext...",
-      "updated_at": 1770000000
-    }
-  ]
-}
-```
+### 8. Руководство пользователя
+Регистрация, поиск пользователей, чаты, группы, файлы, звонки, коды безопасности, настройки, публичный доступ.
 
-<br>
+### 9. API-справочник
+Полный список эндпоинтов с описанием в английской секции.
 
-### 🧪 Пруфы (Логи тестов)
+### 10. События WebSocket
+auth/message/typing/read/call_* события.
 
-**Интеграционные тесты (`npm run test:integration`):**
-```text
-[TEST] Регистрация UserA... OK
-[TEST] Регистрация UserB... OK
-[TEST] Обмен ключами ECDH... OK
-[TEST] Создание чата... OK
-[TEST] Отправка E2EE сообщения... OK
-[TEST] Проверка БД: plaintext in db: false
---- ИТОГ: 56 ТЕСТОВ ПРОЙДЕНО, 0 ОШИБОК ---
-```
+### 11. Доказательства работоспособности (Proof of Work)
+Все 13 тестовых наборов пройдены успешно, **325+ проверок, 0 ошибок**. Логи приведены выше.
 
-**Тесты безопасности (`npm run test:security`):**
-```text
-[SEC] Rate Limit (10 попыток)... OK (Блок после 5)
-[SEC] Подделка JWT... OK (401 Unauthorized)
-[SEC] Доступ к чужому чату (IDOR)... OK (403 Forbidden)
---- ИТОГ: 25 ТЕСТОВ ПРОЙДЕНО, 0 ОШИБОК ---
-```
+### 12. Решение проблем (FAQ)
+Проблемы с `better-sqlite3`, ключами БД, NAT/TURN, портом, CORS — решения в таблице выше.
 
-<br>
-
-### ⚠️ Известные ограничения
-*   **Ключи в браузере:** 
-    *   Приватные ключи в `localStorage`.
-    *   Очистка кэша = потеря доступа к старым сообщениям.
-*   **TURN-сервер для звонков:** 
-    *   P2P-звонки используют STUN.
-    *   Мобильные сети (NAT) требуют TURN-сервер.
-*   **Учебный проект:** 
-    *   Создан в образовательных целях.
-    *   Для критических данных используйте Signal Protocol.
-
-<br>
-
-### 🗺️ Roadmap
-- [x] **v2.0** — NVC архитектура, Групповые чаты, Username.
-- [x] **v2.1** — Настоящее E2EE (ECDH P-256 + AES-256-GCM).
-- [x] **v2.2** — JWT Аутентификация.
-- [x] **v3.0** — База данных SQLite с режимом WAL.
-- [x] **v3.1** — Поддержка Docker.
-- [x] **v4.0** — PWA, Кастомный курсор, SVG-иконки, 12+ тем.
-- [x] **v4.1** — Голосовые сообщения, Видео-кружки, Галочка Владельца.
-- [x] **v5.0** — Аудио/Видеозвонки (WebRTC).
-- [ ] **v5.1** — Поддержка PostgreSQL.
-- [ ] **v5.2** — Мультидевайс (синхронизация ключей).
-- [ ] **v5.3** — Нативные приложения (React Native).
-- [ ] **v6.0** — AI-ассистент для пересказа чатов.
-
-<br>
-<br>
-<br>
 
 ---
 
-<div align="center">
 
-### ⭐ Support the Project / Поддержи проект
+## 📝 LICENSE & FOOTER
 
-Если тебе нравится CipherTalk, поставь звезду на GitHub! Это мотивирует на дальнейшую разработку.
-If you like CipherTalk, give it a star on GitHub! It motivates further development.
+### License
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) file for details.
 
-<br>
+Copyright (c) 2024 SkobkaStudio
 
-[⭐ Star this repo](https://github.com/SkobkaStudio/CipherTalk)
-[🐛 Report a bug](https://github.com/SkobkaStudio/CipherTalk/issues)
-[💡 Request a feature](https://github.com/SkobkaStudio/CipherTalk/issues)
+### Contributing
+Contributions are welcome! Feel free to open issues or submit pull requests.
 
-<br>
+### Support
+If you find this project useful, please consider giving it a ⭐ on GitHub!
 
-<b>Made with ☕ and 🔐 for the self-hosted and privacy-focused community</b>
-<b>Сделано с ☕ и 🔐 для сообщества self-hosted энтузиастов</b>
+### Final Words
 
-</div>
-```
+> *"The best place to hide a secret is where no one expects it to be hidden — in plain sight of mathematics."*
+
+**CipherTalk — Private. Encrypted. Yours.**  
+**CipherTalk — Приватный. Зашифрованный. Твой.**
+
+**Built with ❤️ for privacy. Engineered with 🔐 for security.**
+
+---
+
+*Last Updated: October 2026 | Version 2.0.0 | All tests passing ✅*
