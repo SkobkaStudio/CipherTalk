@@ -7,6 +7,14 @@ const dbEncryptionService = require('../services/dbEncryptionService');
 // из _mapUser при каждой загрузке строки (это ломало цикл инициализации
 // модулей и приводило к "TypeError: User is not a constructor").
 const User = require('../models/User');
+const {
+  formatUserId,
+  formatChatId,
+  parsePublicId,
+  privateChatInternalId,
+  MAX_USER_INTERNAL_ID,
+  MAX_CHAT_INTERNAL_ID
+} = require('../utils/ids');
 
 const DEFAULT_COUNTERS = {
   users: 0,
@@ -101,8 +109,131 @@ class Database {
     this.db.pragma('busy_timeout = 5000');
     this.ensureSchema();
     this.migrateSchema();
+    this.assignPublicIds();
     console.log('✅ База данных SQLite загружена (WAL)');
     return true;
+  }
+
+  // ==================== ПУБЛИЧНЫЕ ID ====================
+  // Каждому пользователю — 8-значный id (00000001 … 99999999),
+  // каждой группе/каналу — отрицательный 14-значный (-00000000000001 …).
+  // Внутренний id (INTEGER PRIMARY KEY) остаётся счётчиком и может быть
+  // отрицательным (для личных чатов: -min(a,b)*1e6-max(a,b)), поэтому
+  // стартовые значения публичных счётчиков считаются от количества записей.
+  // Старые пользователи (зарегистрированные до этого обновления) получают
+  // id автоматически по дате регистрации — от самого старого к новому.
+  // Метод идемпотентен: запускается при каждом старте сервера и досчитывает
+  // только отсутствующие значения.
+  assignPublicIds() {
+    const hasColumn = (table, col) => new Set(
+      this.db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name)
+    ).has(col);
+
+    for (const [table, col] of [['users', 'public_id'], ['chats', 'public_id']]) {
+      if (!hasColumn(table, col)) {
+        try {
+          this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} TEXT`).run();
+        } catch (e) {
+          if (!/duplicate column name/i.test(e.message)) {
+            console.error('[DB] assignPublicIds column error:', e.message);
+          }
+        }
+      }
+    }
+
+    try {
+      this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)').run();
+      this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_public_id ON chats(public_id)').run();
+    } catch (e) { /* индекс уже есть */ }
+
+    const tx = this.db.transaction(() => {
+      // --- Пользователи: счётчик с 1, сортировка по дате регистрации (старые первыми)
+      let userCounter = Number(
+        this.db.prepare("SELECT COUNT(*) AS c FROM users WHERE public_id IS NOT NULL AND public_id != ''").get().c
+      );
+      const usersWithout = this.db.prepare(
+        "SELECT id FROM users WHERE public_id IS NULL OR public_id = '' ORDER BY created_at ASC, id ASC"
+      ).all();
+      const upU = this.db.prepare('UPDATE users SET public_id = ? WHERE id = ?');
+      for (const row of usersWithout) {
+        userCounter += 1;
+        if (userCounter > MAX_USER_INTERNAL_ID) {
+          console.error('[DB] Лимит 8-значных пользовательских id исчерпан (99999999)');
+          break;
+        }
+        upU.run(formatUserId(userCounter), row.id);
+      }
+
+      // --- Чаты: группы/каналы -> отрицательные 14-значные, личные/избранное -> 8-значные
+      let chatCounter = Number(
+        this.db.prepare("SELECT COUNT(*) AS c FROM chats WHERE public_id IS NOT NULL AND public_id != ''").get().c
+      );
+      const chatsWithout = this.db.prepare(
+        "SELECT id, type FROM chats WHERE public_id IS NULL OR public_id = '' ORDER BY created_at ASC, id ASC"
+      ).all();
+      const upC = this.db.prepare('UPDATE chats SET public_id = ? WHERE id = ?');
+      for (const row of chatsWithout) {
+        chatCounter += 1;
+        if (chatCounter > MAX_CHAT_INTERNAL_ID) {
+          console.error('[DB] Лимит 14-значных id чатов исчерпан');
+          break;
+        }
+        upC.run(formatChatId(chatCounter, row.type || 'private'), row.id);
+      }
+    });
+
+    try {
+      tx();
+    } catch (e) {
+      console.error('[DB] assignPublicIds failed:', e.message);
+    }
+  }
+
+  /** Внутренний id пользователя -> публичный «00000001» (или строка с числом, если колонка пустая). */
+  getPublicUserId(internalId) {
+    const r = this.db.prepare('SELECT public_id FROM users WHERE id = ?').get(Number(internalId));
+    return (r && r.public_id) || formatUserId(internalId);
+  }
+
+  /** Внутренний id чата -> публичный («-00000000000001» для групп/каналов, иначе 8-значный). */
+  getPublicChatId(internalId, type) {
+    const cid = Number(internalId);
+    if (cid < 0) {
+      // Личный чат собеседника: публичный id = id собеседника (8 значных)
+      const other = this.getPrivateChatOtherUserId(cid);
+      return other ? this.getPublicUserId(other) : '';
+    }
+    const r = this.db.prepare('SELECT public_id, type FROM chats WHERE id = ?').get(cid);
+    if (r && r.public_id) return r.public_id;
+    return formatChatId(cid, (r && r.type) || type || 'private');
+  }
+
+  /** Для личного чата (id < 0) — внутренний id собеседника. */
+  getPrivateChatOtherUserId(negativeChatId, requesterInternalId) {
+    const cid = Number(negativeChatId);
+    if (cid >= 0) return null;
+    const members = this.db.prepare('SELECT user_id FROM chat_members WHERE chat_id = ?').all(cid);
+    if (!members.length) return null;
+    if (requesterInternalId != null) {
+      const other = members.find(m => Number(m.user_id) !== Number(requesterInternalId));
+      if (other) return Number(other.user_id);
+    }
+    return Number(members[0].user_id);
+  }
+
+  /** Публичный токен из URL -> внутренний id пользователя или чата (для групп — отрицательный). */
+  findInternalByPublicToken(token) {
+    const t = String(token || '').trim();
+    const neg = /^-\d+$/.test(t);
+    if (neg) {
+      const r = this.db.prepare('SELECT id FROM chats WHERE public_id = ?').get(t);
+      return r ? Number(r.id) : null;
+    }
+    const u = this.db.prepare('SELECT id FROM users WHERE public_id = ?').get(t);
+    if (u) return { userId: Number(u.id) };
+    const c = this.db.prepare('SELECT id, type FROM chats WHERE public_id = ?').get(t);
+    if (c) return { chatId: Number(c.id), type: c.type };
+    return null;
   }
 
   ensureSchema() {
@@ -498,12 +629,26 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
 
   addUser(u) {
     const id = u.id || this.nextId('users');
-    this.db.prepare(`INSERT OR REPLACE INTO users(id,phone,email,first_name,last_name,name,username,password_hash,avatar,bio,public_key,online,last_seen,hide_online,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    const publicId = u.public_id || formatUserId(id);
+    this.db.prepare(`INSERT OR REPLACE INTO users(id,phone,email,first_name,last_name,name,username,password_hash,avatar,bio,public_key,online,last_seen,hide_online,created_at,updated_at,public_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, u.phone || '', u.email || '', u.first_name || '', u.last_name || '', u.name || '', u.username || null,
       u.password_hash || '', u.avatar || '', u.bio || '', u.public_key || '', u.online ? 1 : 0,
-      u.last_seen || 0, u.hide_online ? 1 : 0, u.created_at || Date.now(), u.updated_at || Date.now()
+      u.last_seen || 0, u.hide_online ? 1 : 0, u.created_at || Date.now(), u.updated_at || Date.now(), publicId
     );
     return this.findUserById(id);
+  }
+
+  /** Внутренний id пользователя по публичному 8-значному id («00000001»). */
+  findUserByPublicId(publicId) {
+    const t = String(publicId || '').trim();
+    if (!t) return null;
+    let r = this.db.prepare('SELECT * FROM users WHERE public_id = ?').get(t);
+    if (!r) {
+      // Фолбэк: старые строки без заполненной колонки — совпадение по числу
+      const n = parsePublicId(t);
+      if (n != null && n > 0) r = this.db.prepare('SELECT * FROM users WHERE id = ?').get(n);
+    }
+    return r ? this._track(this._mapUser(r), 'users') : null;
   }
 
   updateUser(id, patch) {
@@ -534,11 +679,31 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
 
   addChat(c) {
     const id = c.id || this.nextId('chats');
-    this.db.prepare(`INSERT OR REPLACE INTO chats(id,type,name,avatar,description,owner_id,is_pinned,is_channel,folder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
-      id, c.type || 'private', c.name || '', c.avatar || '', c.description || '', c.owner_id || null,
-      c.is_pinned ? 1 : 0, c.is_channel ? 1 : 0, c.folder_id || null, c.created_at || Date.now(), c.updated_at || Date.now()
+    const type = c.type || 'private';
+    // Публичный id: группы/каналы — отрицательный 14-значный; личные чаты и
+    // «Избранное» получают его позже (для личных он равен id собеседника).
+    let publicId = c.public_id || '';
+    if (!publicId && Number(id) > 0) publicId = formatChatId(id, type);
+    this.db.prepare(`INSERT OR REPLACE INTO chats(id,type,name,avatar,description,owner_id,is_pinned,is_channel,folder_id,created_at,updated_at,public_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, type, c.name || '', c.avatar || '', c.description || '', c.owner_id || null,
+      c.is_pinned ? 1 : 0, c.is_channel ? 1 : 0, c.folder_id || null, c.created_at || Date.now(), c.updated_at || Date.now(), publicId
     );
     return this.findChatById(id);
+  }
+
+  /** Внутренний id нового личного чата между пользователями a и b (детерминированный, как в Telegram). */
+  nextPrivateChatId(a, b) {
+    const det = privateChatInternalId(a, b);
+    if (det == null) return this.nextId('chats');
+    if (!this.db.prepare('SELECT 1 FROM chats WHERE id = ?').get(det)) return det;
+    return this.nextId('chats'); // на случай конфликта — обычная генерация
+  }
+
+  findChatByPublicId(publicId) {
+    const t = String(publicId || '').trim();
+    if (!t) return null;
+    const r = this.db.prepare('SELECT * FROM chats WHERE public_id = ?').get(t);
+    return r || null;
   }
 
   updateChat(id, patch) {
