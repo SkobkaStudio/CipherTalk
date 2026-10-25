@@ -32,33 +32,128 @@ let notificationPermission = 'default';
 
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return false;
+  // Если разрешение уже «granted», НЕ зовём requestPermission() повторно —
+  // в Firefox это может сбросить состояние и уведомления «включены, но не приходят».
   if (Notification.permission === 'granted') {
     notificationPermission = 'granted';
     notificationsEnabled = true;
     return true;
   }
-  if (Notification.permission === 'denied') return false;
-  const perm = await Notification.requestPermission();
-  notificationPermission = perm;
-  notificationsEnabled = perm === 'granted';
-  return notificationsEnabled;
+  if (Notification.permission === 'denied') {
+    notificationPermission = 'denied';
+    notificationsEnabled = false;
+    return false;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    // Some browsers may report an unexpected value; normalize it.
+    notificationPermission = (perm === 'granted') ? 'granted' : (perm || 'default');
+    notificationsEnabled = notificationPermission === 'granted';
+    return notificationsEnabled;
+  } catch (e) {
+    console.warn('Notification.requestPermission failed:', e);
+    return false;
+  }
+}
+
+// Синхронизируем флаг разрешений с реальным состоянием браузера
+// (пользователь мог выдать/забрать разрешение в настройках сайта).
+if ('permissions' in navigator && 'Notification' in window) {
+  try {
+    navigator.permissions.query({ name: 'notifications' }).then(status => {
+      const sync = () => {
+        notificationPermission = status.state;
+        notificationsEnabled = status.state === 'granted';
+      };
+      sync();
+      status.onchange = sync;
+    }).catch(() => {});
+  } catch (e) { /* не поддерживается — не критично */ }
+}
+
+function getSWRegistration() {
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  if (!(location.protocol === 'https:' || location.hostname === 'localhost')) return Promise.resolve(null);
+  return navigator.serviceWorker.getRegistration('/').catch(() => null);
 }
 
 function showNotification(title, body, chatId) {
   if (!notificationsEnabled || notificationPermission !== 'granted') return;
   // Не показываем уведомление если приложение в фокусе
-  if (document.hasFocus()) return;
-  const notification = new Notification(title, {
+  if (document.hasFocus() && !document.hidden) return;
+
+  const options = {
     body,
     icon: '/icons/icon.svg',
+    badge: '/icons/icon.svg',
     tag: `chat-${chatId}`,
-    renotify: true
-  });
-  notification.onclick = () => {
-    window.focus();
-    if (chatId) openChat(chatId);
-    notification.close();
+    renotify: true,
+    data: { chatId },
+    vibrate: [80, 40, 80]
   };
+
+  // Показываем через service worker, когда он готов: на мобильных (Android Chrome)
+  // конструктор new Notification(...) из вкладки не работает без SW-регистрации,
+  // поэтому уведомления «не приходили», даже при включённом разрешении.
+  getSWRegistration().then(reg => {
+    if (reg && reg.showNotification) {
+      reg.showNotification(title, options).catch(() => fallbackNotify(title, options));
+    } else {
+      fallbackNotify(title, options);
+    }
+  });
+}
+
+function fallbackNotify(title, options) {
+  try {
+    new Notification(title, options);
+  } catch (e) {
+    console.warn('Notification failed:', e);
+  }
+}
+
+// ==================== МОСТ СО SERVICE WORKER (фон) ====================
+// SW держит собственный WebSocket и показывает уведомления, когда вкладка закрыта.
+// Страница передаёт ему токен/пользователя и принимает команды от него.
+
+function swPostMessage(data) {
+  try {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(data);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function syncSWBackground() {
+  if (authToken && currentUser) {
+    swPostMessage({ type: 'ct-bg-init', token: authToken, user: { id: currentUser.id } });
+  } else {
+    swPostMessage({ type: 'ct-bg-logout' });
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const d = event.data || {};
+    if (d.type === 'ct-bg-creds-request') {
+      const token = localStorage.getItem('ciphertalk_token') || null;
+      if (event.source) event.source.postMessage({ type: 'ct-bg-creds-response', token });
+    }
+    if (d.type === 'ct-open-chat' && d.chatId) {
+      // Дождаться загрузки чатов, затем открыть нужный
+      let tries = 0;
+      const timer = setInterval(() => {
+        if (getChatById(Number(d.chatId))) {
+          clearInterval(timer);
+          openChat(Number(d.chatId));
+        } else if (++tries > 20) {
+          clearInterval(timer);
+        }
+      }, 300);
+    }
+  });
+  // При смене активного SW (после update) передаём ему данные аккаунта
+  navigator.serviceWorker.addEventListener('controllerchange', syncSWBackground);
 }
 
 function renderChatListThrottled(filter = '') {
@@ -1853,7 +1948,7 @@ async function enterApp(data) {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   initApp();
-  requestNotificationPermission();
+  requestNotificationPermission().then(syncSWBackground);
   // Публикуем актуальный публичный ключ (перекрывает старый, если сменилось устройство)
   publishOwnPublicKey().catch(() => {});
   maybeLockApp();
@@ -4775,6 +4870,7 @@ function clearSession(reload) {
   persistedPlaintext = null;
   localStorage.removeItem('ciphertalk_token');
   localStorage.removeItem('ciphertalk_user');
+  swPostMessage({ type: 'ct-bg-logout' });
   // Сами E2EE-ключи не удаляем: иначе история перестанет расшифровываться
   if (ws) {
     ws.onclose = null;
@@ -5014,7 +5110,9 @@ window.addEventListener('load', async () => {
   I18N.applyI18n();
   updateLangChips();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => reg.update())
+      .catch(() => {});
   }
   loadAppearance();
   snow.init();
@@ -5043,6 +5141,7 @@ window.addEventListener('load', async () => {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'block';
         initApp();
+        requestNotificationPermission().then(syncSWBackground);
         publishOwnPublicKey().catch(() => {});
         maybeLockApp();
         return;
