@@ -1090,6 +1090,12 @@ function normalizeMessage(m) {
     header: m.header || m.last_message_header || '',
     type: m.type || 'text',
     reply_to: m.reply_to ?? m.replyTo ?? null,
+    // raw_content — незашифрованная служебная копия (например, JSON-мета стикера
+    // {url,name,mime}), чтобы UI мог выбрать тип рендера до дешифровки тела.
+    raw_content: m.raw_content ?? m.rawContent ?? '',
+    // Стикеры вне E2EE: сервер отдаёт публичные метаданные отдельным полем.
+    sticker_id: m.sticker_id ?? m.stickerId ?? null,
+    sticker: m.sticker || null,
     edited: m.edited || 0,
     deleted_for_all: m.deleted_for_all || m.deletedForAll || 0,
     forwarded_from: m.forwarded_from ?? m.forwardedFrom ?? null,
@@ -3186,6 +3192,10 @@ async function buildMessageElement(msg, chat, key, animate = false) {
 async function buildMessageContent(msg, chat, key, animate = false) {
   const chatId = chat?.id ?? msg.chat_id;
 
+  // type='sticker': контент не шифруется (E2EE-инвариант: encrypted_content IS
+  // NULL, sticker_id заполнен). Сервер положил публичные метаданные в msg.sticker.
+  if (msg.type === 'sticker' && msg.sticker) return renderStickerBubble(msg.sticker);
+
   if (msg.deleted_for_all) {
     const div = document.createElement('div');
     div.className = 'message-text message-deleted';
@@ -3772,23 +3782,775 @@ function openStickerPicker() {
   `);
 }
 
+// ==================== СОЗДАНИЕ СТИКЕРОВ: МОДАЛКА И ЗАГРУЗКА ====================
+
+const STICKER_MAX_UPLOAD_BYTES = 512 * 1024; // серверный лимит multer — держим в синхроне
+const STICKER_ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const stickerDefaultPackCache = new Map(); // userId -> packId (до logout не живёт долго, но хватает на сессию)
+
+/**
+ * Возвращает id дефолтного личного пака «Мои стикеры», создавая его при первом вызове.
+ * @returns {Promise<string|null>} id пака или null при ошибке сети/сервера
+ */
+async function getOrCreateDefaultPack() {
+  if (!currentUser) return null;
+  const uid = Number(currentUser.id);
+  if (stickerDefaultPackCache.has(uid)) return stickerDefaultPackCache.get(uid);
+  try {
+    const mine = await api('/api/stickers/packs?mine=1&limit=50');
+    if (mine.ok && Array.isArray(mine.data.packs)) {
+      const found = mine.data.packs.find((p) => p.name === 'My Stickers' || p.name === I18N.t('sticker.defaultPack'));
+      if (found) {
+        stickerDefaultPackCache.set(uid, found.id);
+        return found.id;
+      }
+    }
+    const created = await api('/api/stickers/packs', {
+      method: 'POST',
+      body: { name: I18N.t('sticker.defaultPack'), is_public: false }
+    });
+    if (created.ok && created.data.pack && created.data.pack.id) {
+      stickerDefaultPackCache.set(uid, created.data.pack.id);
+      return created.data.pack.id;
+    }
+    showToast((created.data && created.data.error) || I18N.t('sticker.errUpload'), 'error');
+    return null;
+  } catch (e) {
+    showToast(I18N.t('sticker.errUpload') + ' ' + e.message, 'error');
+    return null;
+  }
+}
+
+/**
+ * Публичная карта стикера для localStorage-кэша пикера.
+ * @param {{id:string,pack_id?:string,url:string,mime_type?:string,name?:string,emoji_tags?:string,width?:number,height?:number}} dto
+ * @param {string} [name] отображаемое имя (по умолчанию из dto/emoji_tags)
+ * @returns {object} плоский объект для кэша
+ */
+function buildPublicSticker(dto, name) {
+  const mime = dto.mime_type || dto.mime || 'image/webp';
+  return {
+    id: String(dto.id),
+    pack_id: dto.pack_id || '',
+    url: dto.url || '',
+    name: name || dto.name || dto.emoji_tags || String(dto.id).slice(0, 8),
+    mime,
+    animated: mime === 'image/gif' || /ANIM|ANMF/.test(dto.probe_flags || ''),
+    width: dto.width || 0,
+    height: dto.height || 0
+  };
+}
+
+/** HTML вкладки «Загрузить» модалки создания стикера. */
+function stickerUploadTabHtml() {
+  return `
+    <div class="sc-tabpane" id="sc-pane-upload">
+      <div class="input-group">
+        <label>${I18N.t('sticker.name')}</label>
+        <input type="text" id="sticker-name-input" maxlength="60" placeholder="${I18N.t('sticker.namePlaceholder')}">
+      </div>
+      <div class="sticker-dropzone" id="sticker-dropzone" tabindex="0" role="button"
+           aria-label="${escapeHtml(I18N.t('sticker.dropHint'))}">
+        ${Icons.svg('upload', { className: 'mq-icon--lg' })}
+        <p>${I18N.t('sticker.dropHint')}</p>
+        <input type="file" id="sticker-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/apng" hidden>
+      </div>
+      <div class="sticker-progress" id="sticker-progress" hidden>
+        <div class="sticker-progress-bar" id="sticker-progress-bar"></div>
+      </div>
+      <div class="sticker-upload-actions">
+        <button class="btn btn-secondary" data-action="stickerCancelUpload" id="sticker-cancel-btn" hidden>${I18N.t('sticker.cancel')}</button>
+        <button class="btn" data-action="createSticker">${I18N.t('sticker.upload')}</button>
+      </div>
+    </div>`;
+}
+
+let stickerCreatorActiveXhr = null; // текущий XHR загрузки (для кнопки «Отмена»)
+
+/** Отменяет активную загрузку стикера (xhr.abort), скрывает прогресс. */
+function cancelStickerUpload() {
+  if (stickerCreatorActiveXhr) {
+    stickerCreatorActiveXhr.abort();
+    stickerCreatorActiveXhr = null;
+  }
+  const bar = document.getElementById('sticker-progress-bar');
+  const prog = document.getElementById('sticker-progress');
+  const cancelBtn = document.getElementById('sticker-cancel-btn');
+  if (bar) bar.style.width = '0%';
+  if (prog) prog.hidden = true;
+  if (cancelBtn) cancelBtn.hidden = true;
+}
+
+/**
+ * Загружает blob на сервер через XMLHttpRequest (fetch не даёт upload.onprogress).
+ * @param {Blob} blob итоговый файл (после кропа или как есть для анимаций)
+ * @param {string} fileName имя файла в multipart
+ * @param {string} name название стикера (поле name)
+ * @param {string} packId id целевого пака
+ * @param {{onProgress?: (percent:number)=>void}} [hooks]
+ * @returns {Promise<object>} серверный DTO стикера
+ */
+function uploadStickerViaXhr(blob, fileName, name, packId, hooks = {}) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('name', name);
+    form.append('file', blob, fileName);
+    const xhr = new XMLHttpRequest();
+    stickerCreatorActiveXhr = xhr;
+    xhr.open('POST', SERVER_URL + '/api/stickers/packs/' + encodeURIComponent(packId) + '/stickers');
+    if (authToken) xhr.setRequestHeader('Authorization', 'Bearer ' + authToken);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable && hooks.onProgress) {
+        hooks.onProgress(Math.round((ev.loaded / ev.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      stickerCreatorActiveXhr = null;
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+      if (xhr.status >= 200 && xhr.status < 300 && data.sticker) resolve(data.sticker);
+      else reject(new Error(data.error || I18N.t('sticker.errHttp.' + xhr.status) + ''));
+    };
+    xhr.onerror = () => { stickerCreatorActiveXhr = null; reject(new Error(I18N.t('sticker.errNetwork'))); };
+    xhr.onabort = () => { stickerCreatorActiveXhr = null; reject(new Error(I18N.t('sticker.cancelled'))); };
+    xhr.send(form);
+  });
+}
+
+/** Общий финал успешной загрузки: кэш, тост, возврат к пикеру. */
+async function finishStickerUpload(stickerDto, name) {
+  userStickers.unshift(buildPublicSticker(stickerDto, name));
+  saveUserStickers();
+  closeModal();
+  showToast(I18N.t('sticker.created'), 'success');
+  openStickerPicker();
+}
+
+/** Валидация и отправка формы вкладки «Загрузить». */
+async function createSticker() {
+  const nameInput = document.getElementById('sticker-name-input');
+  const fileInput = document.getElementById('sticker-file-input');
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (!name) { showToast(I18N.t('sticker.errName'), 'error'); return; }
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  if (!file) { showToast(I18N.t('sticker.errFile'), 'error'); return; }
+  if (STICKER_ALLOWED_MIME.indexOf(file.type) === -1) { showToast(I18N.t('sticker.errType'), 'error'); return; }
+  if (file.size > STICKER_MAX_UPLOAD_BYTES) { showToast(I18N.t('sticker.errTooBig'), 'error'); return; }
+
+  let outBlob;
+  let outName;
+  try {
+    const animated = await isAnimatedFile(file);
+    // Статику кропаем до квадрата 512x512 в WebP; анимации (GIF/APNG/WebP ANIM) — как есть.
+    outBlob = animated ? file : await cropToSticker(file);
+    outName = animated ? (file.name || 'sticker.gif') : ('sticker-' + Date.now() + '.webp');
+  } catch (e) {
+    showToast(e && e.message ? e.message : I18N.t('sticker.errDecode'), 'error');
+    return;
+  }
+
+  const packId = await getOrCreateDefaultPack();
+  if (!packId) return;
+
+  const prog = document.getElementById('sticker-progress');
+  const bar = document.getElementById('sticker-progress-bar');
+  const cancelBtn = document.getElementById('sticker-cancel-btn');
+  if (prog) prog.hidden = false;
+  if (cancelBtn) cancelBtn.hidden = false;
+  try {
+    const dto = await uploadStickerViaXhr(outBlob, outName, name, packId, {
+      onProgress: (p) => { if (bar) bar.style.width = p + '%'; }
+    });
+    await finishStickerUpload(dto, name);
+  } catch (e) {
+    if (bar) bar.style.width = '0%';
+    if (prog) prog.hidden = true;
+    if (cancelBtn) cancelBtn.hidden = true;
+    if (e && e.message === I18N.t('sticker.cancelled')) {
+      showToast(I18N.t('sticker.cancelled'), 'info');
+    } else {
+      showToast(I18N.t('sticker.errUpload') + ' ' + (e && e.message ? e.message : ''), 'error');
+    }
+  }
+}
+
+/** Переключение вкладок модалки «Новый стикер». */
+function switchStickerTab(tab) {
+  const up = document.getElementById('sc-pane-upload');
+  const draw = document.getElementById('sc-pane-draw');
+  const tabUp = document.getElementById('sc-tab-upload');
+  const tabDraw = document.getElementById('sc-tab-draw');
+  if (!up || !draw) return;
+  const isDraw = tab === 'draw';
+  up.hidden = isDraw;
+  draw.hidden = !isDraw;
+  if (tabUp) tabUp.classList.toggle('active', !isDraw);
+  if (tabDraw) tabDraw.classList.toggle('active', isDraw);
+  if (isDraw) {
+    canvasEditor.init();
+  } else {
+    canvasEditor.destroy();
+  }
+}
+
+/**
+ * Модалка «Новый стикер» с двумя вкладками: «Загрузить» (файл) и «Нарисовать» (canvas).
+ * Оба пути приводят к POST /api/stickers/packs/:packId/stickers.
+ */
 async function openStickerCreator() {
   closeModal();
+  await new Promise((r) => setTimeout(r, 190)); // ждём завершения fade-out старого модального содержимого
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('sticker.createTitle')}</h2>
-    <div class="input-group">
-      <label>${I18N.t('sticker.name')}</label>
-      <input type="text" id="sticker-name-input" placeholder="${I18N.t('sticker.namePlaceholder')}">
+    <div class="sc-tabs" role="tablist">
+      <button class="sc-tab active" id="sc-tab-upload" role="tab" data-action="switchStickerTab" data-tab="upload">${I18N.t('sticker.tabUpload')}</button>
+      <button class="sc-tab" id="sc-tab-draw" role="tab" data-action="switchStickerTab" data-tab="draw">${I18N.t('sticker.tabDraw')}</button>
     </div>
-    <div class="input-group">
-      <label>${I18N.t('sticker.file')}</label>
-      <input type="file" id="sticker-file-input" accept="image/png,image/jpeg,image/webp,image/gif">
-      <small style="opacity:.7">${I18N.t('sticker.hint')}</small>
-    </div>
-    <button class="btn" data-action="createSticker">${I18N.t('sticker.upload')}</button>
+    ${stickerUploadTabHtml()}
+    <div class="sc-tabpane" id="sc-pane-draw" hidden>${canvasEditor.html()}</div>
   `);
+  const dz = document.getElementById('sticker-dropzone');
+  const fi = document.getElementById('sticker-file-input');
+  if (dz && fi) {
+    dz.addEventListener('click', () => fi.click());
+    dz.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dz.classList.remove('dragover');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      if (files.length > 1) { showToast(I18N.t('sticker.errOneFile'), 'error'); return; }
+      const dt = new DataTransfer();
+      dt.items.add(files[0]);
+      fi.files = dt.files;
+      dz.classList.add('has-file');
+    });
+  }
 }
+
+// ==================== CANVAS-РЕДАКТОР СТИКЕРОВ ====================
+/**
+ * Полноценный редактор: холст 512x512 (backing store x2 под retina),
+ * инструменты brush/eraser/line/rect/ellipse/fill/text/eyedropper,
+ * undo/redo до 60 снимков toDataURL('image/png'), сетка, горизонтальная
+ * симметрия. Все pointer-listener'ы и keydown снимаются в destroy(),
+ * который вызывается при закрытии модалки и переключении вкладки.
+ */
+const canvasEditor = (function () {
+  const LOGICAL = 512;      // логический размер холста (px)
+  const SCALE = 2;          // backing store 1024x1024 для devicePixelRatio-aware рендера
+  const HISTORY_MAX = 60;   // минимум 50 шагов по ТЗ
+  const GRID_STEP = 64;     // направляющие каждые 64 px
+
+  let mounted = false;
+  let stage = null;         // видимый canvas
+  let sctx = null;          // его 2D-контекст (масштабирован на SCALE)
+  let overlay = null;       // canvas превью фигур/сетки
+  let octx = null;
+  let wrapEl = null;
+  let colorInput = null;
+  let sizeRange = null;
+  let sizeLabel = null;
+  let gridBtn = null;
+  let mirrorBtn = null;
+  let keydownHandler = null;
+  let pendingShape = null;  // {tool,x0,y0,x1,y1,shift}
+  let painting = false;
+  let lastPt = null;
+  let textPos = null;
+  let resizeObserver = null;
+
+  const state = {
+    tool: 'brush',
+    color: '#ff5500',
+    size: 18,
+    history: [],
+    future: [],
+    showGrid: false,
+    mirrorX: false
+  };
+
+  /** HTML панели инструментов и холста (вставляется в вкладку «Нарисовать»). */
+  function html() {
+    return `
+      <div class="ce-wrap" id="ce-wrap">
+        <div class="ce-toolbar" role="toolbar" aria-label="${escapeHtml(I18N.t('sticker.editorTools'))}">
+          <button type="button" class="ce-tool active" data-ce-tool="brush" title="${escapeHtml(I18N.t('sticker.tool.brush'))}">${Icons.svg('edit', { className: 'mq-icon--sm' })}</button>
+          <button type="button" class="ce-tool" data-ce-tool="eraser" title="${escapeHtml(I18N.t('sticker.tool.eraser'))}">&#9633;</button>
+          <button type="button" class="ce-tool" data-ce-tool="line" title="${escapeHtml(I18N.t('sticker.tool.line'))}&#8571;</button>
+          <button type="button" class="ce-tool" data-ce-tool="rect" title="${escapeHtml(I18N.t('sticker.tool.rect'))}&#9645;</button>
+          <button type="button" class="ce-tool" data-ce-tool="ellipse" title="${escapeHtml(I18N.t('sticker.tool.ellipse'))}&#9711;</button>
+          <button type="button" class="ce-tool" data-ce-tool="fill" title="${escapeHtml(I18N.t('sticker.tool.fill'))}&#9698;</button>
+          <button type="button" class="ce-tool" data-ce-tool="text" title="${escapeHtml(I18N.t('sticker.tool.text'))}">T</button>
+          <button type="button" class="ce-tool" data-ce-tool="eyedropper" title="${escapeHtml(I18N.t('sticker.tool.eyedropper'))}&#128326;</button>
+          <span class="ce-sep"></span>
+          <input type="color" id="ce-color" value="${state.color}" title="${escapeHtml(I18N.t('sticker.editorColor'))}">
+          <label class="ce-size"><input type="range" id="ce-size" min="1" max="64" step="1" value="${state.size}"><span id="ce-size-label">${state.size}px</span></label>
+          <span class="ce-sep"></span>
+          <button type="button" class="ce-btn" data-ce-action="undo" title="${escapeHtml(I18N.t('sticker.undo'))}">&#8630;</button>
+          <button type="button" class="ce-btn" data-ce-action="redo" title="${escapeHtml(I18N.t('sticker.redo'))}">&#8631;</button>
+          <button type="button" class="ce-btn" data-ce-action="grid" id="ce-grid" title="${escapeHtml(I18N.t('sticker.editorGrid'))}">#</button>
+          <button type="button" class="ce-btn" data-ce-action="mirror" id="ce-mirror" title="${escapeHtml(I18N.t('sticker.editorMirror'))}&#8651;</button>
+          <button type="button" class="ce-btn ce-danger" data-ce-action="clear" title="${escapeHtml(I18N.t('sticker.editorClear'))}">&#10005;</button>
+        </div>
+        <div class="ce-stage" id="ce-stage">
+          <canvas id="ce-canvas" width="${LOGICAL * SCALE}" height="${LOGICAL * SCALE}"></canvas>
+          <canvas id="ce-overlay" class="ce-overlay" width="${LOGICAL * SCALE}" height="${LOGICAL * SCALE}"></canvas>
+          <input type="text" class="ce-text-input" id="ce-text-input" maxlength="60" hidden>
+        </div>
+        <div class="ce-actions">
+          <input type="text" id="ce-name-input" maxlength="60" placeholder="${escapeHtml(I18N.t('sticker.namePlaceholder'))}">
+          <button type="button" class="btn" data-ce-action="save">${I18N.t('sticker.saveSticker')}</button>
+        </div>
+      </div>`;
+  }
+
+  function getCtxImageData() {
+    return sctx.getImageData(0, 0, LOGICAL * SCALE, LOGICAL * SCALE);
+  }
+
+  function pushHistory() {
+    try {
+      state.history.push(stage.toDataURL('image/png'));
+      if (state.history.length > HISTORY_MAX) state.history.shift();
+      state.future.length = 0;
+    } catch (e) {
+      showToast(I18N.t('sticker.errHistory') + ' ' + e.message, 'error');
+    }
+  }
+
+  function restoreSnapshot(url, done) {
+    const img = new Image();
+    img.onload = () => {
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, LOGICAL * SCALE, LOGICAL * SCALE);
+      sctx.drawImage(img, 0, 0);
+      applyTransform();
+      if (done) done();
+    };
+    img.onerror = () => showToast(I18N.t('sticker.errDecode'), 'error');
+    img.src = url;
+  }
+
+  function undo() {
+    if (state.history.length < 2) { showToast(I18N.t('sticker.nothingToUndo'), 'info'); return; }
+    state.future.push(state.history.pop());
+    restoreSnapshot(state.history[state.history.length - 1]);
+  }
+
+  function redo() {
+    if (!state.future.length) { showToast(I18N.t('sticker.nothingToRedo'), 'info'); return; }
+    const snap = state.future.pop();
+    state.history.push(snap);
+    restoreSnapshot(snap);
+  }
+
+  function applyTransform() {
+    sctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    sctx.lineCap = 'round';
+    sctx.lineJoin = 'round';
+  }
+
+  /** Координаты указателя -> логические координаты холста (0..512). */
+  function pointFromEvent(ev) {
+    const rect = stage.getBoundingClientRect();
+    const x = ((ev.clientX - rect.left) / rect.width) * LOGICAL;
+    const y = ((ev.clientY - rect.top) / rect.height) * LOGICAL;
+    return { x: Math.max(0, Math.min(LOGICAL, x)), y: Math.max(0, Math.min(LOGICAL, y)) };
+  }
+
+  function strokeSegment(a, b) {
+    sctx.globalCompositeOperation = state.tool === 'eraser' ? 'destination-out' : 'source-over';
+    sctx.strokeStyle = state.color;
+    sctx.lineWidth = state.size;
+    sctx.beginPath();
+    sctx.moveTo(a.x, a.y);
+    sctx.lineTo(b.x, b.y);
+    sctx.stroke();
+    if (state.mirrorX) {
+      sctx.beginPath();
+      sctx.moveTo(LOGICAL - a.x, a.y);
+      sctx.lineTo(LOGICAL - b.x, b.y);
+      sctx.stroke();
+    }
+  }
+
+  function drawDot(p) {
+    sctx.globalCompositeOperation = state.tool === 'eraser' ? 'destination-out' : 'source-over';
+    sctx.fillStyle = state.color;
+    sctx.beginPath();
+    sctx.arc(p.x, p.y, state.size / 2, 0, Math.PI * 2);
+    sctx.fill();
+    if (state.mirrorX) {
+      sctx.beginPath();
+      sctx.arc(LOGICAL - p.x, p.y, state.size / 2, 0, Math.PI * 2);
+      sctx.fill();
+    }
+  }
+
+  function shapePath(a, b, shift) {
+    sctx.beginPath();
+    if (state.tool === 'line') {
+      if (shift) {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if (Math.abs(dx) > Math.abs(dy)) b = { x: a.x + (dx >= 0 ? Math.abs(dy) : -Math.abs(dy)), y: a.y + dy };
+        else b = { x: a.x + dx, y: a.y + (dy >= 0 ? Math.abs(dx) : -Math.abs(dx)) };
+      }
+      sctx.moveTo(a.x, a.y);
+      sctx.lineTo(b.x, b.y);
+    } else {
+      let w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      if (shift) { w = h = Math.max(w, h); }
+      const x = b.x >= a.x ? a.x : a.x - w;
+      const y = b.y >= a.y ? a.y : a.y - h;
+      if (state.tool === 'rect') sctx.rect(x, y, w, h);
+      else sctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    }
+    return b;
+  }
+
+  function paintShape(a, b, shift) {
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.strokeStyle = state.color;
+    sctx.lineWidth = state.size;
+    shapePath(a, b, shift);
+    sctx.stroke();
+  }
+
+  function renderOverlay() {
+    octx.clearRect(0, 0, LOGICAL * SCALE, LOGICAL * SCALE);
+    if (state.showGrid) {
+      octx.save();
+      octx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      octx.strokeStyle = 'rgba(128,128,128,.35)';
+      octx.lineWidth = 1;
+      for (let g = GRID_STEP; g < LOGICAL; g += GRID_STEP) {
+        octx.beginPath(); octx.moveTo(g, 0); octx.lineTo(g, LOGICAL); octx.stroke();
+        octx.beginPath(); octx.moveTo(0, g); octx.lineTo(LOGICAL, g); octx.stroke();
+      }
+      if (state.mirrorX) {
+        octx.strokeStyle = 'rgba(128,128,128,.6)';
+        octx.beginPath(); octx.moveTo(LOGICAL / 2, 0); octx.lineTo(LOGICAL / 2, LOGICAL); octx.stroke();
+      }
+      octx.restore();
+    }
+    if (pendingShape) {
+      octx.save();
+      octx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      octx.strokeStyle = state.color;
+      octx.lineWidth = state.size;
+      shapePath({ x: pendingShape.x0, y: pendingShape.y0 }, { x: pendingShape.x1, y: pendingShape.y1 }, pendingShape.shift);
+      octx.stroke();
+      octx.restore();
+    }
+  }
+
+  function hexToRgba(hex) {
+    const clean = String(hex || '').replace('#', '');
+    const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean.slice(0, 6);
+    const n = parseInt(full || '000000', 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  /** Scanline flood fill с фиксированным допуском по RGB (погрешность SCALE учтена сравнением на backing-store). */
+  function floodFill(startLogicalX, startLogicalY, hexColor, tolerance) {
+    const S = LOGICAL * SCALE;
+    const img = getCtxImageData();
+    const data = img.data;
+    const target = hexToRgba(state.color);
+    const sx = Math.round(startLogicalX * SCALE);
+    const sy = Math.round(startLogicalY * SCALE);
+    if (sx < 0 || sy < 0 || sx >= S || sy >= S) return false;
+    const idx0 = (sy * S + sx) * 4;
+    const from = [data[idx0], data[idx0 + 1], data[idx0 + 2], data[idx0 + 3]];
+    if (from[0] === target[0] && from[1] === target[1] && from[2] === target[2] && from[3] === 255) return false;
+    const tolSq = tolerance * tolerance * 3;
+    const matches = (i) => {
+      const dr = data[i] - from[0], dg = data[i + 1] - from[1], db = data[i + 2] - from[2], da = data[i + 3] - from[3];
+      return dr * dr + dg * dg + db * db + da * da <= tolSq;
+    };
+    const stack = [[sx, sy]];
+    while (stack.length) {
+      const pair = stack.pop();
+      let x = pair[0];
+      const y = pair[1];
+      let rowIdx = (y * S + x) * 4;
+      while (x >= 0 && matches(rowIdx)) { x--; rowIdx -= 4; }
+      x++;
+      rowIdx = (y * S + x) * 4;
+      let spanUp = false, spanDown = false;
+      while (x < S && matches(rowIdx)) {
+        data[rowIdx] = target[0];
+        data[rowIdx + 1] = target[1];
+        data[rowIdx + 2] = target[2];
+        data[rowIdx + 3] = 255;
+        if (y > 0) {
+          const up = matches(rowIdx - S * 4);
+          if (up && !spanUp) { stack.push([x, y - 1]); spanUp = true; }
+          else if (!up) spanUp = false;
+        }
+        if (y < S - 1) {
+          const dn = matches(rowIdx + S * 4);
+          if (dn && !spanDown) { stack.push([x, y + 1]); spanDown = true; }
+          else if (!dn) spanDown = false;
+        }
+        x++;
+        rowIdx += 4;
+      }
+    }
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.putImageData(img, 0, 0);
+    applyTransform();
+    return true;
+  }
+
+  function pickColor(p) {
+    const d = sctx.getImageData(Math.round(p.x * SCALE), Math.round(p.y * SCALE), 1, 1).data;
+    const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+    state.color = hex;
+    if (colorInput) colorInput.value = hex;
+    setTool(state.tool === 'eyedropper' ? 'brush' : state.tool);
+  }
+
+  function clearCanvas() {
+    if (!confirm(I18N.t('sticker.confirmClear'))) return;
+    pushHistory();
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, LOGICAL * SCALE, LOGICAL * SCALE);
+    applyTransform();
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    document.querySelectorAll('.ce-tool').forEach((b) => b.classList.toggle('active', b.dataset.ceTool === tool));
+    if (stage) stage.style.cursor = tool === 'text' ? 'text' : (tool === 'eyedropper' ? 'copy' : 'crosshair');
+  }
+
+  function onPointerDown(ev) {
+    ev.preventDefault();
+    if (stage.setPointerCapture) { try { stage.setPointerCapture(ev.pointerId); } catch (e) { /* браузер без capture — рисуем и так */ } }
+    const p = pointFromEvent(ev);
+    hideTextInput();
+    if (state.tool === 'eyedropper') { pickColor(p); return; }
+    if (state.tool === 'fill') {
+      pushHistory();
+      if (!floodFill(p.x, p.y, state.color, 24)) { state.history.pop(); }
+      return;
+    }
+    if (state.tool === 'text') {
+      textPos = p;
+      showTextInput(p);
+      return;
+    }
+    pushHistory();
+    if (state.tool === 'brush' || state.tool === 'eraser') {
+      painting = true;
+      lastPt = p;
+      drawDot(p);
+    } else {
+      pendingShape = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, shift: !!ev.shiftKey };
+      renderOverlay();
+    }
+  }
+
+  function onPointerMove(ev) {
+    const p = pointFromEvent(ev);
+    if (painting && (state.tool === 'brush' || state.tool === 'eraser')) {
+      strokeSegment(lastPt, p);
+      lastPt = p;
+    } else if (pendingShape) {
+      pendingShape.x1 = p.x;
+      pendingShape.y1 = p.y;
+      pendingShape.shift = !!ev.shiftKey;
+      renderOverlay();
+    }
+  }
+
+  function onPointerUp(ev) {
+    if (painting) { painting = false; lastPt = null; }
+    if (pendingShape) {
+      paintShape({ x: pendingShape.x0, y: pendingShape.y0 }, { x: pendingShape.x1, y: pendingShape.y1 }, pendingShape.shift);
+      pendingShape = null;
+      renderOverlay();
+    }
+    if (stage.releasePointerCapture && ev.pointerId != null) {
+      try { stage.releasePointerCapture(ev.pointerId); } catch (e) { /* уже отпущен */ }
+    }
+  }
+
+  function onPointerCancel() {
+    painting = false;
+    lastPt = null;
+    pendingShape = null;
+    renderOverlay();
+  }
+
+  function showTextInput(p) {
+    const input = document.getElementById('ce-text-input');
+    if (!input) return;
+    input.hidden = false;
+    input.style.left = (p.x / LOGICAL * 100) + '%';
+    input.style.top = (p.y / LOGICAL * 100) + '%';
+    input.value = '';
+    input.focus();
+  }
+
+  function hideTextInput() {
+    const input = document.getElementById('ce-text-input');
+    if (input) input.hidden = true;
+  }
+
+  function commitText() {
+    const input = document.getElementById('ce-text-input');
+    if (!input || input.hidden) return;
+    const value = input.value.trim();
+    hideTextInput();
+    if (!value || !textPos) return;
+    pushHistory();
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.fillStyle = state.color;
+    sctx.font = Math.max(12, state.size * 2) + 'px system-ui, sans-serif';
+    sctx.textBaseline = 'middle';
+    sctx.fillText(value, textPos.x, textPos.y);
+    if (state.mirrorX) {
+      const w = sctx.measureText(value).width;
+      sctx.fillText(value, LOGICAL - textPos.x - w, textPos.y);
+    }
+    textPos = null;
+  }
+
+  function onKeyDown(e) {
+    if (!mounted) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+    else if (mod && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); redo(); }
+  }
+
+  function onToolbarClick(e) {
+    const btn = e.target.closest('[data-ce-tool],[data-ce-action]');
+    if (!btn) return;
+    if (btn.dataset.ceTool) { setTool(btn.dataset.ceTool); return; }
+    switch (btn.dataset.ceAction) {
+      case 'undo': undo(); break;
+      case 'redo': redo(); break;
+      case 'grid':
+        state.showGrid = !state.showGrid;
+        if (gridBtn) gridBtn.classList.toggle('active', state.showGrid);
+        renderOverlay();
+        break;
+      case 'mirror':
+        state.mirrorX = !state.mirrorX;
+        if (mirrorBtn) mirrorBtn.classList.toggle('active', state.mirrorX);
+        renderOverlay();
+        break;
+      case 'clear': clearCanvas(); break;
+      case 'save': saveSticker(); break;
+      default: break;
+    }
+  }
+
+  async function saveSticker() {
+    const S = LOGICAL * SCALE;
+    const d = sctx.getImageData(0, 0, S, S).data;
+    let hasPixels = false;
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i] !== 0) { hasPixels = true; break; }
+    }
+    if (!hasPixels) { showToast(I18N.t('sticker.canvasEmpty'), 'error'); return; }
+    const nameInput = document.getElementById('ce-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) { showToast(I18N.t('sticker.errName'), 'error'); return; }
+    const blob = await new Promise((resolve) => stage.toBlob(resolve, 'image/webp', 0.9));
+    if (!blob) { showToast(I18N.t('sticker.errExport'), 'error'); return; }
+    if (blob.size > STICKER_MAX_UPLOAD_BYTES) { showToast(I18N.t('sticker.errTooBig'), 'error'); return; }
+    const packId = await getOrCreateDefaultPack();
+    if (!packId) return;
+    const prog = document.getElementById('sticker-progress');
+    try {
+      const dto = await uploadStickerViaXhr(blob, 'sticker-' + Date.now() + '.webp', name, packId, {});
+      await finishStickerUpload(dto, name);
+    } catch (err) {
+      if (prog) prog.hidden = true;
+      if (err && err.message !== I18N.t('sticker.cancelled')) {
+        showToast(I18N.t('sticker.errUpload') + ' ' + err.message, 'error');
+      }
+    }
+  }
+
+  /** Инициализация после вставки HTML в DOM. Идемпотентна. */
+  function init() {
+    if (mounted) return;
+    stage = document.getElementById('ce-canvas');
+    overlay = document.getElementById('ce-overlay');
+    wrapEl = document.getElementById('ce-wrap');
+    if (!stage || !overlay || !wrapEl) return;
+    sctx = stage.getContext('2d');
+    octx = overlay.getContext('2d');
+    applyTransform();
+    colorInput = document.getElementById('ce-color');
+    sizeRange = document.getElementById('ce-size');
+    sizeLabel = document.getElementById('ce-size-label');
+    gridBtn = document.getElementById('ce-grid');
+    mirrorBtn = document.getElementById('ce-mirror');
+    colorInput.addEventListener('input', () => { state.color = colorInput.value; });
+    sizeRange.addEventListener('input', () => {
+      state.size = Number(sizeRange.value) || 1;
+      sizeLabel.textContent = state.size + 'px';
+    });
+    stage.addEventListener('pointerdown', onPointerDown);
+    stage.addEventListener('pointermove', onPointerMove);
+    stage.addEventListener('pointerup', onPointerUp);
+    stage.addEventListener('pointercancel', onPointerCancel);
+    overlay.addEventListener('pointerdown', (e) => { e.preventDefault(); onPointerDown(e); });
+    overlay.addEventListener('pointermove', (e) => onPointerMove(e));
+    overlay.addEventListener('pointerup', (e) => onPointerUp(e));
+    overlay.addEventListener('pointercancel', onPointerCancel);
+    wrapEl.addEventListener('click', onToolbarClick);
+    const ti = document.getElementById('ce-text-input');
+    ti.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitText(); }
+      else if (e.key === 'Escape') { hideTextInput(); }
+    });
+    ti.addEventListener('blur', commitText);
+    keydownHandler = onKeyDown;
+    window.addEventListener('keydown', keydownHandler);
+    state.history = [];
+    state.future = [];
+    pushHistory(); // пустой холст — базовый кадр для undo
+    setTool('brush');
+    renderOverlay();
+    mounted = true;
+  }
+
+  /** Снимает все listener'ы; вызывается при закрытии модалки/смене вкладки. */
+  function destroy() {
+    if (!mounted) return;
+    if (stage) {
+      stage.removeEventListener('pointerdown', onPointerDown);
+      stage.removeEventListener('pointermove', onPointerMove);
+      stage.removeEventListener('pointerup', onPointerUp);
+      stage.removeEventListener('pointercancel', onPointerCancel);
+    }
+    if (wrapEl) wrapEl.removeEventListener('click', onToolbarClick);
+    if (keydownHandler) window.removeEventListener('keydown', keydownHandler);
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    stage = sctx = overlay = octx = wrapEl = null;
+    state.history = [];
+    state.future = [];
+    pendingShape = null;
+    painting = false;
+    mounted = false;
+  }
+
+  function isMounted() { return mounted; }
+
+  return { html, init, destroy, isMounted };
+})();
 
 // Проверка анимации на клиенте по «сырым» байтам (Canvas для GIF/WebP не
 // используется, чтобы не убить анимацию при перерисовке).
@@ -3837,68 +4599,6 @@ async function cropToSticker(file) {
   }
 }
 
-async function createSticker() {
-  const nameInput = document.getElementById('sticker-name-input');
-  const fileInput = document.getElementById('sticker-file-input');
-  const name = nameInput.value.trim();
-  if (!name) {
-    showToast(I18N.t('sticker.errName'), 'error');
-    return;
-  }
-  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
-    showToast(I18N.t('sticker.errFile'), 'error');
-    return;
-  }
-  const file = fileInput.files[0];
-  if (file.size > 1024 * 1024) {
-    showToast(I18N.t('sticker.errTooBig'), 'error');
-    return;
-  }
-
-  const animated = await isAnimatedFile(file);
-  // Статичные PNG/JPEG (и неанимированные WebP) режем через Canvas;
-  // анимированные GIF/WebP отправляем как есть.
-  const outBlob = animated ? file : await cropToSticker(file);
-  const outName = animated ? (file.name || 'sticker') : ('sticker-' + Date.now() + '.webp');
-
-  // Загружаем на сервер: POST /api/stickers (проверит размер и тип ещё раз)
-  const form = new FormData();
-  form.append('name', name);
-  form.append('file', outBlob, outName);
-  let serverData;
-  try {
-    const res = await fetch(SERVER_URL + '/api/stickers', {
-      method: 'POST',
-      headers: authToken ? { Authorization: 'Bearer ' + authToken } : {},
-      body: form
-    });
-    serverData = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      showToast(serverData.error || I18N.t('sticker.errUpload'), 'error');
-      return;
-    }
-  } catch (e) {
-    showToast(I18N.t('sticker.errUpload') + ' ' + e.message, 'error');
-    return;
-  }
-
-  // dataURL-копию храним локально: серверный файл — шифротекст, обычный
-  // <img src="/uploads/..."> его не отобразит без дешифровки на клиенте.
-  const previewUrl = await fileToDataURL(outBlob);
-  userStickers.unshift({
-    id: serverData.id,
-    fileId: serverData.fileId,
-    svg: previewUrl,
-    url: serverData.url,
-    name,
-    animated: !!serverData.animated,
-    server: true
-  });
-  saveUserStickers();
-  closeModal();
-  showToast(I18N.t('sticker.created'), 'success');
-  openStickerPicker();
-}
 
 // Вкладка «Мои стикеры»: список с кнопками «Удалить» и «Загрузить стикер»
 async function openMyStickers() {
@@ -5022,6 +5722,9 @@ const CLICK_ACTIONS = {
   sendSticker: (el) => sendSticker(el.dataset.id),
   sendUserSticker: (el) => sendUserSticker(el.dataset.id),
   openStickerCreator: () => openStickerCreator(),
+  createSticker: () => createSticker(),
+  openMyStickers: () => openMyStickers(),
+  deleteUserSticker: (el) => deleteUserSticker(el.dataset.id),
   toggleVoiceRecording: () => toggleVoiceRecording(),
   toggleVideoRecording: () => toggleVideoRecording(),
   sendMessage: () => sendMessage(),

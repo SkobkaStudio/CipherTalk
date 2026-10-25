@@ -1,8 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const BetterSqlite3 = require('better-sqlite3-multiple-ciphers');
 const config = require('../config');
+const logger = require('../utils/logger');
 const dbEncryptionService = require('../services/dbEncryptionService');
+const { probeImage } = require('../utils/imageHeaders');
 // User импортируется один раз в начале файла: так require не вызывается
 // из _mapUser при каждой загрузке строки (это ломало цикл инициализации
 // модулей и приводило к "TypeError: User is not a constructor").
@@ -101,6 +104,7 @@ class Database {
     this.db.pragma('busy_timeout = 5000');
     this.ensureSchema();
     this.migrateSchema();
+    this.migrateLegacyStickers();
     console.log('✅ База данных SQLite загружена (WAL)');
     return true;
   }
@@ -248,15 +252,42 @@ CREATE TABLE IF NOT EXISTS message_edits (
 );
 CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
 
-CREATE TABLE IF NOT EXISTS user_stickers (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  file_id INTEGER REFERENCES files(id) ON DELETE CASCADE,
-  name TEXT,
-  animated INTEGER DEFAULT 0,
-  created_at INTEGER
+CREATE TABLE IF NOT EXISTS sticker_packs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  cover_sticker_id TEXT,
+  is_public INTEGER NOT NULL DEFAULT 1,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
+CREATE TABLE IF NOT EXISTS stickers (
+  id TEXT PRIMARY KEY,
+  pack_id TEXT NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  emoji_tags TEXT,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_favorite_stickers (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sticker_id TEXT NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY(user_id, sticker_id)
+);
+CREATE TABLE IF NOT EXISTS user_recent_stickers (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sticker_id TEXT NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
+  used_at INTEGER NOT NULL,
+  PRIMARY KEY(user_id, sticker_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stickers_pack ON stickers(pack_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_packs_author ON sticker_packs(author_id);
+CREATE INDEX IF NOT EXISTS idx_recent_user ON user_recent_stickers(user_id, used_at DESC);
     `);
   }
 
@@ -282,7 +313,10 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
       ['chats', 'avatar', 'avatar TEXT'],
       ['sessions', 'token_hash', 'token_hash TEXT'],
       ['verification_codes', 'attempts', 'attempts INTEGER DEFAULT 0'],
-      ['messages', 'expires_at', 'expires_at INTEGER']
+      ['messages', 'expires_at', 'expires_at INTEGER'],
+      // Ровно одна колонка для инварианта E2EE: type='sticker' -> sticker_id != NULL,
+      // encrypted_content/iv/header = NULL; для остальных типов sticker_id = NULL.
+      ['messages', 'sticker_id', 'sticker_id TEXT']
     ];
 
     for (const [table, colName, columnDef] of columnsToAdd) {
@@ -309,17 +343,112 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
       'CREATE TABLE IF NOT EXISTS group_keys (chat_id INTEGER PRIMARY KEY, version INTEGER, wrapped TEXT, created_by INTEGER, created_at INTEGER, updated_at INTEGER)',
       'CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT, emoji TEXT, color TEXT, chat_ids TEXT, created_at INTEGER, updated_at INTEGER)',
       'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, original_name TEXT, size INTEGER, mimetype TEXT, uploader_id INTEGER, created_at INTEGER)',
-      'CREATE TABLE IF NOT EXISTS user_stickers (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, file_id INTEGER REFERENCES files(id) ON DELETE CASCADE, name TEXT, animated INTEGER DEFAULT 0, created_at INTEGER)',
-      'CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id)'
+      // Схемы паков/стикеров — в ensureSchema; здесь только идемпотентные индексы.
+      'CREATE INDEX IF NOT EXISTS idx_stickers_pack ON stickers(pack_id, order_index)',
+      'CREATE INDEX IF NOT EXISTS idx_packs_author ON sticker_packs(author_id)',
+      'CREATE INDEX IF NOT EXISTS idx_recent_user ON user_recent_stickers(user_id, used_at DESC)'
     ];
 
     for (const sql of schemasToAdd) {
       try {
         this.db.prepare(sql).run();
       } catch (e) {
-        // Игнорируем ошибки "table already exists" или "index already exists"
+        // Единственный допустимый «шум» — already exists; прочее пишем в лог.
+        if (!/already exists/i.test(e.message)) {
+          logger.error({ err: e.message }, '[DB] migrateSchema error');
+        }
       }
     }
+  }
+
+  // ==================== ЛЕГАСИ-МИГРАЦИЯ user_stickers -> packs/stickers ====================
+  /**
+   * Однократная миграция легаси-таблицы user_stickers в sticker_packs/stickers.
+   * Идемпотентна: повторный запуск — no-op (таблица отсутствует). Файлы из
+   * uploads/ НЕ являются шифротекстом (старый клиент заливал raw blob через
+   * multer), поэтому переносим их как есть: sniff MIME -> размеры -> uuid ->
+   * fs.rename в storage/stickers/<pack_id>/<uuid>.<ext>.
+   * Битые/отсутствующие файлы пропускаются с warning; DROP выполняется только
+   * если все строки обработаны (перенесены или осознанно пропущены), иначе —
+   * исключение и откат транзакции.
+   */
+  migrateLegacyStickers() {
+    const hasTable = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_stickers'")
+      .get();
+    if (!hasTable) return; // уже смигрировано (или чистая установка по новой схеме)
+
+    const legacyRows = this.db.prepare('SELECT * FROM user_stickers').all();
+    const extByMime = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+
+    const run = this.db.transaction(() => {
+      for (const row of legacyRows) {
+        const uid = Number(row.user_id);
+        if (!Number.isInteger(uid)) {
+          throw new Error(`[DB] legacy sticker ${row.id}: некорректный user_id`);
+        }
+        // Детерминированный pack_id: один Legacy-пак на пользователя.
+        const packId = 'legacy-' + crypto.createHash('sha1').update(String(uid)).digest('hex').slice(0, 24);
+        const now = Date.now();
+        this.db.prepare(`INSERT OR IGNORE INTO sticker_packs
+          (id, name, author_id, cover_sticker_id, is_public, order_index, created_at, updated_at)
+          VALUES (?, 'Legacy', ?, NULL, 0, 0, ?, ?)`).run(packId, uid, now, now);
+
+        const fileRow = row.file_id == null ? null
+          : this.db.prepare('SELECT filename FROM files WHERE id = ?').get(Number(row.file_id));
+        if (!fileRow || !fileRow.filename) {
+          logger.warn({ sticker: row.id, user: uid }, '[DB] legacy sticker без записи files — пропущен');
+          continue;
+        }
+        const base = path.basename(String(fileRow.filename));
+        if (!base || base.includes('..')) {
+          logger.warn({ sticker: row.id, user: uid }, '[DB] legacy sticker: некорректное имя файла — пропущен');
+          continue;
+        }
+        const srcPath = path.join(config.uploadsPath, base);
+        if (!fs.existsSync(srcPath)) {
+          logger.warn({ sticker: row.id, user: uid }, '[DB] legacy sticker: файл отсутствует в uploads — пропущен');
+          continue;
+        }
+        let buf;
+        try {
+          buf = fs.readFileSync(srcPath);
+        } catch (e) {
+          logger.warn({ sticker: row.id, err: e.code || e.message }, '[DB] legacy sticker: чтение файла не удалось — пропущен');
+          continue;
+        }
+        const info = probeImage(buf);
+        if (!info || !extByMime[info.mime]) {
+          logger.warn({ sticker: row.id }, '[DB] legacy sticker: sniff MIME не распознан — пропущен');
+          continue;
+        }
+        const stickerId = crypto.randomUUID();
+        const destDir = path.join(config.stickersPath, packId);
+        const destPath = path.join(destDir, stickerId + '.' + extByMime[info.mime]);
+        // Уже перенесён (идемпотентность при частичном сбое прошлого запуска)?
+        if (fs.existsSync(destPath)) {
+          logger.warn({ pack: packId, sticker: stickerId }, '[DB] legacy sticker: файл уже в storage — пропущен');
+          continue;
+        }
+        fs.mkdirSync(destDir, { recursive: true });
+        fs.renameSync(srcPath, destPath);
+        this.db.prepare(`INSERT INTO stickers
+          (id, pack_id, file_path, mime_type, width, height, emoji_tags, order_index, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(
+            stickerId, packId, `stickers/${packId}/${stickerId}.${extByMime[info.mime]}`,
+            info.mime, info.width, info.height, String(row.name || '').slice(0, 200),
+            Number(row.id) || 0, row.created_at || now
+          );
+      }
+
+      // Все строки разобраны — удаляем легаси-инфраструктуру.
+      this.db.prepare('DROP INDEX IF EXISTS idx_user_stickers_user').run();
+      this.db.prepare('DROP TABLE IF EXISTS user_stickers').run();
+      this.db.prepare('DELETE FROM counters WHERE name = ?').run('user_stickers');
+    });
+
+    run();
+    logger.info({ count: legacyRows.length }, '[DB] Миграция user_stickers -> sticker_packs/stickers выполнена');
   }
 
   nextId(name) {
@@ -406,11 +535,16 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
       );
     } else if (table === 'messages') {
       if (item.id === undefined || item.id === null) return;
-      this.db.prepare(`UPDATE messages SET encrypted_content=?, iv=?, header=?, type=?, reply_to=?, forwarded_from=?, edited=?, deleted_for_all=?, deleted_by=?, reactions=?, pinned=?, expires_at=? WHERE id=?`).run(
-        item.encrypted_content || '', item.iv || '', item.header || '', item.type || 'text', item.reply_to || null,
+      // sticker_id обязан обновляться здесь: иначе markDirty() после
+      // создания/редактирования стикер-сообщения затёр бы его в NULL.
+      this.db.prepare(`UPDATE messages SET encrypted_content=?, iv=?, header=?, type=?, reply_to=?, forwarded_from=?, edited=?, deleted_for_all=?, deleted_by=?, reactions=?, pinned=?, expires_at=?, sticker_id=? WHERE id=?`).run(
+        item.type === 'sticker' ? null : (item.encrypted_content || ''),
+        item.type === 'sticker' ? null : (item.iv || ''),
+        item.type === 'sticker' ? null : (item.header || ''),
+        item.type || 'text', item.reply_to || null,
         item.forwarded_from || null, item.edited ? 1 : 0, item.deleted_for_all ? 1 : 0,
         JSON.stringify(item.deleted_by || []), JSON.stringify(item.reactions || {}), item.pinned ? 1 : 0,
-        item.expires_at || null, Number(item.id)
+        item.expires_at || null, item.type === 'sticker' ? (item.sticker_id || null) : null, Number(item.id)
       );
     } else if (table === 'chat_members') {
       if (item.chat_id === undefined || item.user_id === undefined) return;
@@ -653,17 +787,22 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
     const id = message.id || this.nextId('messages');
     const deletedBy = Array.isArray(message.deleted_by) ? JSON.stringify(message.deleted_by) : JSON.stringify(message.deleted_by || []);
     const reactions = typeof message.reactions === 'object' ? JSON.stringify(message.reactions || {}) : (message.reactions || '{}');
-    this.db.prepare(`INSERT OR REPLACE INTO messages(id,chat_id,sender_id,encrypted_content,iv,header,type,reply_to,forwarded_from,edited,deleted_for_all,deleted_by,reactions,pinned,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      id, Number(message.chat_id), Number(message.sender_id), message.encrypted_content || '', message.iv || '',
-      message.header || '', message.type || 'text', message.reply_to || null, message.forwarded_from || null,
+    // E2EE-инвариант: type='sticker' -> encrypted_content/iv/header пустые, sticker_id задан;
+    // для остальных типов sticker_id всегда NULL.
+    const isSticker = message.type === 'sticker';
+    const stickerId = isSticker ? (message.sticker_id || null) : null;
+    this.db.prepare(`INSERT OR REPLACE INTO messages(id,chat_id,sender_id,encrypted_content,iv,header,type,reply_to,forwarded_from,edited,deleted_for_all,deleted_by,reactions,pinned,expires_at,sticker_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, Number(message.chat_id), Number(message.sender_id), isSticker ? null : (message.encrypted_content || ''),
+      isSticker ? null : (message.iv || ''), isSticker ? null : (message.header || ''),
+      message.type || 'text', message.reply_to || null, message.forwarded_from || null,
       message.edited ? 1 : 0, message.deleted_for_all ? 1 : 0, deletedBy, reactions,
-      message.pinned ? 1 : 0, message.expires_at || null, message.created_at || Date.now()
+      message.pinned ? 1 : 0, message.expires_at || null, stickerId, message.created_at || Date.now()
     );
     return this.findMessageById(id);
   }
 
   updateMessage(id, patch) {
-    const allowed = ['encrypted_content', 'iv', 'header', 'type', 'reply_to', 'forwarded_from', 'edited', 'deleted_for_all', 'deleted_by', 'reactions', 'pinned', 'expires_at'];
+    const allowed = ['encrypted_content', 'iv', 'header', 'type', 'reply_to', 'forwarded_from', 'edited', 'deleted_for_all', 'deleted_by', 'reactions', 'pinned', 'expires_at', 'sticker_id'];
     const sets = [];
     const values = [];
     for (const k of allowed) {
@@ -720,7 +859,7 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
       edited: r.edited, deleted_for_all: r.deleted_for_all,
       deleted_by: safeJson(r.deleted_by, []),
       reactions: safeJson(r.reactions, {}),
-      pinned: r.pinned, expires_at: r.expires_at, created_at: r.created_at
+      pinned: r.pinned, expires_at: r.expires_at, sticker_id: r.sticker_id || null, created_at: r.created_at
     };
   }
 
@@ -921,32 +1060,173 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
   get groupKeys() { return this.db.prepare('SELECT * FROM group_keys').all().map(r => ({ ...r, wrapped: safeJson(r.wrapped, {}) })); }
   get verificationCodes() { return this._wrap('verification_codes', this.db.prepare('SELECT * FROM verification_codes').all()); }
 
-  // ==================== USER STICKERS ====================
-  addUserSticker(sticker) {
-    const row = {
-      id: sticker.id,
-      user_id: Number(sticker.user_id),
-      file_id: Number(sticker.file_id),
-      name: sticker.name || '',
-      animated: sticker.animated ? 1 : 0,
-      created_at: sticker.created_at || Date.now()
-    };
-    this.db.prepare(`INSERT INTO user_stickers (id, user_id, file_id, name, animated, created_at)
-      VALUES (@id, @user_id, @file_id, @name, @animated, @created_at)`).run(row);
-    return row;
+  // ==================== USER STICKERS (legacy-методы удалены) ====================
+  // Старая таблица user_stickers мигрирует в sticker_packs/stickers методом
+  // migrateLegacyStickers() и DROP'ается. Ниже — новый слой доступа к пакам.
+
+  // ---------- Паки ----------
+
+  /**
+   * Список паков по SQL-условию прав (prepared statements, без конкатенации id).
+   * @param {string} where - 'author_id = ?' или '(is_public = 1 OR author_id = ?)'
+   */
+  listStickerPacks(where, userId, limit, offset) {
+    return this.db.prepare(
+      `SELECT * FROM sticker_packs WHERE ${where} ORDER BY order_index ASC, created_at DESC LIMIT ? OFFSET ?`
+    ).all(Number(userId), Number(limit), Number(offset));
   }
 
-  getUserStickers(userId) {
-    return this.db.prepare('SELECT * FROM user_stickers WHERE user_id = ? ORDER BY created_at DESC').all(Number(userId));
+  countStickerPacks(where, userId) {
+    const r = this.db.prepare(`SELECT COUNT(*) AS c FROM sticker_packs WHERE ${where}`).get(Number(userId));
+    return r ? r.c : 0;
   }
 
-  getUserStickerById(id) {
-    return this.db.prepare('SELECT * FROM user_stickers WHERE id = ?').get(Number(id)) || null;
+  findStickerPackById(id) {
+    return this.db.prepare('SELECT * FROM sticker_packs WHERE id = ?').get(String(id)) || null;
   }
 
-  deleteUserSticker(id, userId) {
-    const info = this.db.prepare('DELETE FROM user_stickers WHERE id = ? AND user_id = ?').run(Number(id), Number(userId));
+  /** INSERT OR IGNORE: идемпотентно при гонке/повторной миграции. true — создан. */
+  createStickerPack(pack) {
+    const info = this.db.prepare(`INSERT OR IGNORE INTO sticker_packs
+      (id, name, author_id, cover_sticker_id, is_public, order_index, created_at, updated_at)
+      VALUES (@id, @name, @author_id, @cover_sticker_id, @is_public, @order_index, @created_at, @updated_at)`).run(pack);
+    return info.changes > 0 ? this.findStickerPackById(pack.id) : null;
+  }
+
+  updateStickerPack(id, patch) {
+    const allowed = ['name', 'is_public', 'cover_sticker_id', 'order_index'];
+    const sets = [];
+    const values = [];
+    for (const k of allowed) {
+      if (patch[k] !== undefined) { sets.push(k + ' = ?'); values.push(patch[k]); }
+    }
+    if (!sets.length) return this.findStickerPackById(id);
+    sets.push('updated_at = ?');
+    values.push(Date.now(), String(id));
+    this.db.prepare(`UPDATE sticker_packs SET ${sets.join(',')} WHERE id = ?`).run(...values);
+    return this.findStickerPackById(id);
+  }
+
+  deleteStickerPack(id) {
+    // Каскад ON DELETE CASCADE снимает stickers, favorites, recent.
+    const info = this.db.prepare('DELETE FROM sticker_packs WHERE id = ?').run(String(id));
     return info.changes > 0;
+  }
+
+  nextPackOrderIndex(userId) {
+    const r = this.db.prepare('SELECT COALESCE(MAX(order_index), -1) AS m FROM sticker_packs WHERE author_id = ?').get(Number(userId));
+    return (r ? r.m : -1) + 1;
+  }
+
+  reorderStickerPacks(ids) {
+    const upd = this.db.prepare('UPDATE sticker_packs SET order_index = ?, updated_at = ? WHERE id = ?');
+    const tx = this.db.transaction(() => {
+      ids.forEach((id, i) => upd.run(i, Date.now(), String(id)));
+    });
+    tx();
+    return true;
+  }
+
+  // ---------- Стикеры ----------
+
+  findStickerById(id) {
+    return this.db.prepare('SELECT * FROM stickers WHERE id = ?').get(String(id)) || null;
+  }
+
+  /** Поиск стикера по относительному пути '<pack>/<file>' (для раздачи). */
+  findStickerByFile(relFile) {
+    return this.db.prepare("SELECT * FROM stickers WHERE file_path LIKE 'stickers/' || ?").get(String(relFile)) || null;
+  }
+
+  listStickersByPack(packId) {
+    return this.db.prepare('SELECT * FROM stickers WHERE pack_id = ? ORDER BY order_index ASC, created_at ASC').all(String(packId));
+  }
+
+  countStickersInPack(packId) {
+    const r = this.db.prepare('SELECT COUNT(*) AS c FROM stickers WHERE pack_id = ?').get(String(packId));
+    return r ? r.c : 0;
+  }
+
+  createSticker(sticker) {
+    this.db.prepare(`INSERT INTO stickers
+      (id, pack_id, file_path, mime_type, width, height, emoji_tags, order_index, created_at)
+      VALUES (@id, @pack_id, @file_path, @mime_type, @width, @height, @emoji_tags, @order_index, @created_at)`).run(sticker);
+    return sticker;
+  }
+
+  updateSticker(id, patch) {
+    const allowed = ['emoji_tags', 'order_index'];
+    const sets = [];
+    const values = [];
+    for (const k of allowed) {
+      if (patch[k] !== undefined) { sets.push(k + ' = ?'); values.push(patch[k]); }
+    }
+    if (!sets.length) return this.findStickerById(id);
+    values.push(String(id));
+    this.db.prepare(`UPDATE stickers SET ${sets.join(',')} WHERE id = ?`).run(...values);
+    return this.findStickerById(id);
+  }
+
+  deleteSticker(id) {
+    const info = this.db.prepare('DELETE FROM stickers WHERE id = ?').run(String(id));
+    return info.changes > 0;
+  }
+
+  nextStickerOrderIndex(packId) {
+    const r = this.db.prepare('SELECT COALESCE(MAX(order_index), -1) AS m FROM stickers WHERE pack_id = ?').get(String(packId));
+    return (r ? r.m : -1) + 1;
+  }
+
+  /** Присваивает order_index по позиции в массиве; чужие пака id игнорируются. */
+  reorderStickers(packId, ids) {
+    const upd = this.db.prepare('UPDATE stickers SET order_index = ? WHERE id = ? AND pack_id = ?');
+    const tx = this.db.transaction(() => {
+      ids.forEach((id, i) => upd.run(i, String(id), String(packId)));
+    });
+    tx();
+    return true;
+  }
+
+  // ---------- Избранное / недавние ----------
+
+  addFavoriteSticker(userId, stickerId) {
+    this.db.prepare('INSERT OR IGNORE INTO user_favorite_stickers(user_id, sticker_id, added_at) VALUES(?,?,?)')
+      .run(Number(userId), String(stickerId), Date.now());
+    return true;
+  }
+
+  removeFavoriteSticker(userId, stickerId) {
+    const info = this.db.prepare('DELETE FROM user_favorite_stickers WHERE user_id = ? AND sticker_id = ?')
+      .run(Number(userId), String(stickerId));
+    return info.changes > 0;
+  }
+
+  listFavoriteStickers(userId) {
+    return this.db.prepare(`SELECT s.* FROM stickers s
+      JOIN user_favorite_stickers f ON f.sticker_id = s.id
+      WHERE f.user_id = ? ORDER BY f.added_at DESC`).all(Number(userId));
+  }
+
+  touchRecentSticker(userId, stickerId) {
+    this.db.prepare(`INSERT INTO user_recent_stickers(user_id, sticker_id, used_at) VALUES(?,?,?)
+      ON CONFLICT(user_id, sticker_id) DO UPDATE SET used_at = excluded.used_at`)
+      .run(Number(userId), String(stickerId), Date.now());
+    // Удержание не более 20 записей на пользователя.
+    this.db.prepare(`DELETE FROM user_recent_stickers WHERE user_id = ? AND sticker_id NOT IN (
+      SELECT sticker_id FROM user_recent_stickers WHERE user_id = ? ORDER BY used_at DESC LIMIT 20)`)
+      .run(Number(userId), Number(userId));
+    return true;
+  }
+
+  listRecentStickers(userId, limit = 20) {
+    return this.db.prepare(`SELECT s.* FROM stickers s
+      JOIN user_recent_stickers r ON r.sticker_id = s.id
+      WHERE r.user_id = ? ORDER BY r.used_at DESC LIMIT ?`).all(Number(userId), Number(limit));
+  }
+
+  clearRecentStickers(userId) {
+    this.db.prepare('DELETE FROM user_recent_stickers WHERE user_id = ?').run(Number(userId));
+    return true;
   }
 
   get counters() {
