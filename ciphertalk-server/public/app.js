@@ -24,6 +24,15 @@ let searchTimeout = null;
 let lastTypingSent = 0;
 let sessionExpiredHandled = false;
 let typewriterTimers = new Set();
+let renderChatListTimer = null;
+
+function renderChatListThrottled(filter = '') {
+  if (renderChatListTimer) clearTimeout(renderChatListTimer);
+  renderChatListTimer = setTimeout(() => {
+    renderChatListTimer = null;
+    renderChatList(filter);
+  }, 60);
+}
 
 let regState = {
   phone: '', code: '', verifyToken: '', loginToken: '', firstName: '', lastName: '',
@@ -2107,7 +2116,7 @@ async function handleWSMessage(msg) {
         chat.last_sender_id = msg.lastSenderId || 0;
         reorderChat(chat);
       }
-      renderChatList();
+      renderChatListThrottled();
       break;
     }
 
@@ -2388,10 +2397,11 @@ function renderChatList(filter = '') {
   schedulePreviewRefresh(filtered);
 }
 
-// Превью расшифровываются в свободное время и только для видимых чатов
+// Превью расшифровываются в свободное время и только для видимых чатов.
+// Запускаются параллельно, чтобы не ждать каждую ECDH-операцию по очереди.
 function schedulePreviewRefresh(filtered) {
-  const run = () => {
-    for (const chat of filtered.slice(0, 24)) refreshChatPreview(chat);
+  const run = async () => {
+    await Promise.allSettled(filtered.slice(0, 24).map(chat => refreshChatPreview(chat)));
   };
   if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 900 });
   else setTimeout(run, 80);
@@ -2472,7 +2482,7 @@ function updateChatPreview(chatId, msg) {
   chat.last_message_time = msg.created_at ?? msg.createdAt ?? Date.now();
   chat.last_sender_id = msg.sender_id ?? msg.senderId ?? 0;
   reorderChat(chat);
-  renderChatList();
+  renderChatListThrottled();
 }
 
 // ==================== ОТМЕТКА ПРОЧТЕНИЯ ====================
