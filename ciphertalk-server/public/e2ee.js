@@ -176,11 +176,15 @@
   }
 
   async function ecdhSharedSecret(privateKeyB64, peerPublicKeyB64) {
-    const subtle = getCrypto().subtle;
-    const priv = await importPrivateKey(privateKeyB64);
-    const peer = await importPublicKey(peerPublicKeyB64);
-    const bits = await subtle.deriveBits({ name: 'ECDH', public: peer }, priv, 256);
-    return new Uint8Array(bits);
+    try {
+      const subtle = getCrypto().subtle;
+      const priv = await importPrivateKey(privateKeyB64);
+      const peer = await importPublicKey(peerPublicKeyB64);
+      const bits = await subtle.deriveBits({ name: 'ECDH', public: peer }, priv, 256);
+      return new Uint8Array(bits);
+    } catch (e) {
+      throw new Error('ECDH shared secret failed: ' + e.message);
+    }
   }
 
   // Соль сессии зависит от обеих публичных ключей и не зависит от того,

@@ -49,6 +49,11 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then(hit => hit || caches.match('/index.html')))
+      .catch(() => caches.match(req).then(hit => {
+    if (hit) return hit;
+    const accept = req.headers.get('accept') || '';
+    if (accept.includes('text/html')) return caches.match('/index.html');
+    return new Response('', { status: 404, statusText: 'Not Found' });
+  }))
   );
 });

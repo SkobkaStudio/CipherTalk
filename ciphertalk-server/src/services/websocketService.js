@@ -570,20 +570,18 @@ class WebSocketService {
     }
 
     const limit = Math.min(Math.max(parseInt(msg.limit, 10) || 50, 1), 500);
-    // beforeId — пагинация: отдаём сообщения строго старше указанного id
     const beforeId = parseInt(msg.beforeId, 10) || null;
     const clearedAt = this.db.getChatClearedAt(chatId, ws.userId);
-    const all = this.db.messages.filter(m =>
-      m.chat_id === chatId && !isExpired(m) && (!clearedAt || m.created_at > clearedAt)
-    );
-    const older = beforeId ? all.filter(m => m.id < beforeId) : all;
-    const hasMore = older.length > limit;
-    const page = older.slice(-limit).map(m => this.serializeMessage(m));
+    const pageRaw = this.db.getChatMessages(chatId, limit + 1, beforeId);
+    const page = pageRaw
+      .filter(m => !isExpired(m) && (!clearedAt || m.created_at > clearedAt))
+      .slice(0, limit);
+    const hasMore = pageRaw.length > limit;
 
     this.send(ws, {
       type: 'messages',
       chatId,
-      messages: page,
+      messages: page.map(m => this.serializeMessage(m)),
       hasMore,
       beforeId: page.length ? page[0].id : null,
       older: !!beforeId

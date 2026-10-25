@@ -3696,6 +3696,9 @@ function closeChat() {
   msgRender.chatId = null;
   msgRender.order = [];
   msgRender.nodes.clear();
+  // Сброс контекста ответа и состояния долгого нажатия — иначе ответ уйдёт в другой чат
+  if (typeof window._ctResetReply === 'function') window._ctResetReply();
+  if (typeof window._ctResetTouch === 'function') window._ctResetTouch();
 }
 
 function openSearch() {

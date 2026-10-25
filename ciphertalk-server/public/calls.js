@@ -223,6 +223,9 @@ function cleanupCall(sendSignal, reason) {
       callState.localStream.getTracks().forEach(t => t.stop());
     }
     if (callState.pc) {
+      callState.pc.onicecandidate = null;
+      callState.pc.ontrack = null;
+      callState.pc.onconnectionstatechange = null;
       try { callState.pc.close(); } catch (e) { /* ignore */ }
     }
     if (sendSignal && callState.peerId) {

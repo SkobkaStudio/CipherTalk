@@ -257,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
       ['messages', 'expires_at INTEGER']
     ];
     for (const [table, column] of columns) {
-      try { this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch (e) {}
+      try { this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch (e) { console.error('[DB] migrateSchema add column', table, column, ':', e.message); }
     }
     try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)').run(); } catch (e) {}
   }

@@ -411,6 +411,9 @@ async function forwardToChat(msgId, toChatId) {
       // Медиа: расшифровываем локально и перешифровываем ключом целевого чата
       const plain = await decryptChatText(sourceKey, msg, fromChatId, msg.sender_id === currentUser.id);
       const payload = JSON.parse(plain);
+      if (!payload.url || !payload.url.startsWith('/uploads/')) {
+        throw new Error(I18N.t('err.downloadAttachment'));
+      }
       const res = await fetch(SERVER_URL + payload.url, {
         headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
       });
@@ -829,3 +832,15 @@ Object.assign(INPUT_ACTIONS, {
 Object.assign(CHANGE_ACTIONS, {
   uploadAvatar: (el) => uploadAvatar(el)
 });
+
+// ==================== СБРОШ СОСТОЯНИЯ ПРИ СМЕНЕ ЧАТА ====================
+// Вызывается из app.js closeChat(), чтобы ответ и долгий тап не переносились в другой чат.
+window._ctResetReply = function () {
+  replyContext = null;
+  renderReplyBar();
+};
+
+window._ctResetTouch = function () {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  touchState = null;
+};

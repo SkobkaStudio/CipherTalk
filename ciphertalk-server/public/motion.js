@@ -10,8 +10,7 @@
   var Motion = {
     enabled: true,
     reduced: false,
-    level: 'normal',
-    _unsub: []
+    level: 'normal'
   };
 
   function prefersReduced() {
