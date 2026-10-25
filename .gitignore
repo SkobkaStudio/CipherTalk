@@ -1,1 +1,28 @@
-*.bak
+node_modules/
+.env
+*.key
+ciphertalk-server/ciphertalk-db.json
+ciphertalk-server/uploads/*
+!ciphertalk-server/uploads/.gitkeep
+*.log
+.DS_Store
+
+# Тестовые артефакты
+ciphertalk-server/test-*-db.json
+ciphertalk-server/test-*-uploads/
+ciphertalk-server/test-*.key
+
+*.jwt-secret
+*.dbkey
+ciphertalk-server/test-*.jwt-secret
+# Локальные бинарники и runtime-состояние
+ciphertalk-server/bin/
+ciphertalk-server/.public-url
+
+# SQLite runtime-состояние (не коммитим БД и ключи)
+ciphertalk-server/ciphertalk-db.sqlite
+ciphertalk-server/ciphertalk-db.sqlite-*
+ciphertalk-server/ciphertalk-db.sqlite.bak.*
+ciphertalk-server/test-*.sqlite
+ciphertalk-server/test-*.sqlite-*
+ciphertalk-server/test-*.sqlite.*.bak.*
