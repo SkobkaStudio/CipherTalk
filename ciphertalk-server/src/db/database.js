@@ -3,6 +3,10 @@ const path = require('path');
 const BetterSqlite3 = require('better-sqlite3-multiple-ciphers');
 const config = require('../config');
 const dbEncryptionService = require('../services/dbEncryptionService');
+// User импортируется один раз в начале файла: так require не вызывается
+// из _mapUser при каждой загрузке строки (это ломало цикл инициализации
+// модулей и приводило к "TypeError: User is not a constructor").
+const User = require('../models/User');
 
 const DEFAULT_COUNTERS = {
   users: 0,
@@ -10,7 +14,8 @@ const DEFAULT_COUNTERS = {
   messages: 0,
   files: 0,
   sessions: 0,
-  folders: 0
+  folders: 0,
+  user_stickers: 0
 };
 
 function safeJson(value, fallback) {
@@ -242,6 +247,16 @@ CREATE TABLE IF NOT EXISTS message_edits (
   edited_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
+
+CREATE TABLE IF NOT EXISTS user_stickers (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  file_id INTEGER REFERENCES files(id) ON DELETE CASCADE,
+  name TEXT,
+  animated INTEGER DEFAULT 0,
+  created_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
     `);
   }
 
@@ -251,23 +266,35 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
   // попытки создать уже существующие таблицы/индексы, а ошибки 
   // "duplicate column" мы перехватываем. Это 100% надёжный метод.
   migrateSchema() {
+    // Проверяем реальную схему таблицы через PRAGMA table_info,
+    // чтобы не пытаться добавить уже существующую колонку и не спамить
+    // в консоль ошибкой "duplicate column name".
+    const existingColumns = (table) => new Set(
+      this.db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name)
+    );
+
     const columnsToAdd = [
-      ['users', 'email TEXT'],
-      ['users', 'bio TEXT'],
-      ['users', 'hide_online INTEGER DEFAULT 0'],
-      ['chats', 'is_channel INTEGER DEFAULT 0'],
-      ['chats', 'folder_id INTEGER'],
-      ['chats', 'avatar TEXT'],
-      ['sessions', 'token_hash TEXT'],
-      ['verification_codes', 'attempts INTEGER DEFAULT 0'],
-      ['messages', 'expires_at INTEGER']
+      ['users', 'email', 'email TEXT'],
+      ['users', 'bio', 'bio TEXT'],
+      ['users', 'hide_online', 'hide_online INTEGER DEFAULT 0'],
+      ['chats', 'is_channel', 'is_channel INTEGER DEFAULT 0'],
+      ['chats', 'folder_id', 'folder_id INTEGER'],
+      ['chats', 'avatar', 'avatar TEXT'],
+      ['sessions', 'token_hash', 'token_hash TEXT'],
+      ['verification_codes', 'attempts', 'attempts INTEGER DEFAULT 0'],
+      ['messages', 'expires_at', 'expires_at INTEGER']
     ];
 
-    for (const [table, column] of columnsToAdd) {
+    for (const [table, colName, columnDef] of columnsToAdd) {
+      if (existingColumns(table).has(colName)) continue; // дубликат — пропускаем молча
       try {
-        this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run();
+        this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`).run();
       } catch (e) {
-        // Игнорируем ошибку "duplicate column name"
+        // Ошибки дубликата колонки не выводим в консоль;
+        // любые прочие — тоже глушим, они не критичны для работы.
+        if (!/duplicate column name/i.test(e.message)) {
+          console.error('[DB] migrateSchema column error:', e.message);
+        }
       }
     }
 
@@ -281,7 +308,9 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
       'CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)',
       'CREATE TABLE IF NOT EXISTS group_keys (chat_id INTEGER PRIMARY KEY, version INTEGER, wrapped TEXT, created_by INTEGER, created_at INTEGER, updated_at INTEGER)',
       'CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT, emoji TEXT, color TEXT, chat_ids TEXT, created_at INTEGER, updated_at INTEGER)',
-      'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, original_name TEXT, size INTEGER, mimetype TEXT, uploader_id INTEGER, created_at INTEGER)'
+      'CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, original_name TEXT, size INTEGER, mimetype TEXT, uploader_id INTEGER, created_at INTEGER)',
+      'CREATE TABLE IF NOT EXISTS user_stickers (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, file_id INTEGER REFERENCES files(id) ON DELETE CASCADE, name TEXT, animated INTEGER DEFAULT 0, created_at INTEGER)',
+      'CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id)'
     ];
 
     for (const sql of schemasToAdd) {
@@ -494,7 +523,6 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
   }
 
   _mapUser(r) {
-    const User = require('../models/User');
     return new User(r);
   }
 
@@ -892,6 +920,35 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
   get folders() { return this._wrap('folders', this.db.prepare('SELECT * FROM folders').all().map(r => this._mapFolder(r))); }
   get groupKeys() { return this.db.prepare('SELECT * FROM group_keys').all().map(r => ({ ...r, wrapped: safeJson(r.wrapped, {}) })); }
   get verificationCodes() { return this._wrap('verification_codes', this.db.prepare('SELECT * FROM verification_codes').all()); }
+
+  // ==================== USER STICKERS ====================
+  addUserSticker(sticker) {
+    const row = {
+      id: sticker.id,
+      user_id: Number(sticker.user_id),
+      file_id: Number(sticker.file_id),
+      name: sticker.name || '',
+      animated: sticker.animated ? 1 : 0,
+      created_at: sticker.created_at || Date.now()
+    };
+    this.db.prepare(`INSERT INTO user_stickers (id, user_id, file_id, name, animated, created_at)
+      VALUES (@id, @user_id, @file_id, @name, @animated, @created_at)`).run(row);
+    return row;
+  }
+
+  getUserStickers(userId) {
+    return this.db.prepare('SELECT * FROM user_stickers WHERE user_id = ? ORDER BY created_at DESC').all(Number(userId));
+  }
+
+  getUserStickerById(id) {
+    return this.db.prepare('SELECT * FROM user_stickers WHERE id = ?').get(Number(id)) || null;
+  }
+
+  deleteUserSticker(id, userId) {
+    const info = this.db.prepare('DELETE FROM user_stickers WHERE id = ? AND user_id = ?').run(Number(id), Number(userId));
+    return info.changes > 0;
+  }
+
   get counters() {
     const rows = this.db.prepare('SELECT * FROM counters').all();
     const out = {};

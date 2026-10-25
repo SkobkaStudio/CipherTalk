@@ -16,6 +16,48 @@ const iceService = require('./services/iceService');
 const tunnelService = require('./services/tunnelService');
 const qrService = require('./services/qrService');
 const File = require('./models/File');
+const UserSticker = require('./models/UserSticker');
+
+// Лимит для пользовательских стикеров — 1 МБ (требование ТЗ), независимо от
+// общего config.maxFileSize для обычных вложений.
+const STICKER_MAX_SIZE = 1024 * 1024;
+const multer = require('multer');
+const stickerStorage = multer.diskStorage({
+  destination: config.uploadsPath,
+  filename: (req, file, cb) => {
+    const uniqueName = 'sticker-' + Date.now() + '-' + require('crypto').randomBytes(8).toString('hex');
+    const ext = path.extname(file.originalname || '').replace(/[^a-zA-Z0-9.]/g, '').slice(0, 16);
+    cb(null, uniqueName + ext);
+  }
+});
+const uploadSticker = multer({
+  storage: stickerStorage,
+  limits: { fileSize: STICKER_MAX_SIZE, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Допустимы только PNG/JPEG/WebP/GIF'));
+  }
+});
+
+// Детект анимации по «сырым» байтам файла (буфер читается асинхронно один раз).
+async function isAnimatedImage(buffer, mimetype) {
+  if (mimetype === 'image/gif') {
+    // GIF87a/GIF89a + наличие Graphics Control Extension и более одного кадра:
+    // простой эвристический признак — блок 0x21 0xF9 встречается >= 2 раз.
+    let frames = 0;
+    for (let i = 0; i + 1 < buffer.length; i++) {
+      if (buffer[i] === 0x21 && buffer[i + 1] === 0xF9) frames++;
+      if (frames >= 2) return true;
+    }
+    return false;
+  }
+  if (mimetype === 'image/webp') {
+    // Анимированный WebP содержит чанк ANIM/ANMF.
+    return buffer.includes('ANIM') || buffer.includes('ANMF');
+  }
+  return false;
+}
 
 // Роуты
 const authRoutes = require('./routes/authRoutes');
@@ -150,6 +192,102 @@ class App {
         });
       }
     );
+
+    // ==================== ПОЛЬЗОВАТЕЛЬСКИЕ СТИКЕРЫ ====================
+    // POST /api/stickers — загрузка стикера (PNG/JPEG/WebP/GIF, до 1 МБ).
+    // Анимированные GIF/WebP сохраняются как есть; статичные картинки клиент
+    // заранее обрезает до квадрата 512x512 через Canvas (см. public/app.js).
+    this.app.post('/api/stickers',
+      authMiddleware.authenticate,
+      (req, res, next) => uploadSticker.single('file')(req, res, (err) => {
+        if (err) {
+          if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: 'Стикер слишком большой (максимум 1 МБ)' });
+          }
+          return res.status(400).json({ error: err.message || 'Ошибка загрузки' });
+        }
+        next();
+      }),
+      async (req, res) => {
+        try {
+          if (!req.file) return res.status(400).json({ error: 'Файл не получен' });
+
+          const buffer = fs.readFileSync(path.join(config.uploadsPath, req.file.filename));
+          const animated = await isAnimatedImage(buffer, req.file.mimetype);
+
+          const file = new File({
+            id: this.db.nextId('files'),
+            filename: req.file.filename,
+            original_name: req.file.originalname,
+            size: req.file.size,
+            mimetype: req.file.mimetype,
+            uploader_id: req.userId
+          });
+          this.db.files.push(file);
+
+          const sticker = this.db.addUserSticker(new UserSticker({
+            id: this.db.nextId('user_stickers'),
+            user_id: req.userId,
+            file_id: file.id,
+            name: (req.body && req.body.name ? String(req.body.name) : '').slice(0, 64),
+            animated,
+            created_at: Date.now()
+          }));
+
+          this.db.markDirty();
+          res.json({
+            id: sticker.id,
+            fileId: file.id,
+            name: sticker.name,
+            animated: !!sticker.animated,
+            url: `/uploads/${file.filename}`,
+            created_at: sticker.created_at
+          });
+        } catch (e) {
+          console.error('Sticker upload error:', e);
+          res.status(500).json({ error: 'Ошибка сохранения стикера' });
+        }
+      }
+    );
+
+    // GET /api/stickers — список стикеров текущего пользователя
+    this.app.get('/api/stickers', authMiddleware.authenticate, (req, res) => {
+      const rows = this.db.getUserStickers(req.userId);
+      const filesById = new Map(this.db.files.map((f) => [f.id, f]));
+      res.json({
+        stickers: rows.map((s) => {
+          const f = filesById.get(s.file_id);
+          return {
+            id: s.id,
+            fileId: s.file_id,
+            name: s.name,
+            animated: !!s.animated,
+            url: f ? `/uploads/${f.filename}` : null,
+            createdAt: s.created_at
+          };
+        })
+      });
+    });
+
+    // DELETE /api/stickers/:id — удаление своего стикера
+    this.app.delete('/api/stickers/:id', authMiddleware.authenticate, (req, res) => {
+      const id = Number(req.params.id);
+      const sticker = this.db.getUserStickerById(id);
+      if (!sticker || Number(sticker.user_id) !== Number(req.userId)) {
+        return res.status(404).json({ error: 'Стикер не найден' });
+      }
+      this.db.deleteUserSticker(id, req.userId);
+      // Удаляем сам файл с диска и запись из files
+      const file = this.db.files.find((f) => f.id === sticker.file_id);
+      if (file) {
+        const filePath = path.join(config.uploadsPath, file.filename);
+        try { fs.unlinkSync(filePath); } catch (e) { /* уже удалён */ }
+        const rest = this.db.files.filter((f) => f.id !== file.id);
+        this.db.files = rest;
+      }
+      this.db.markDirty();
+      res.json({ ok: true });
+    });
 
     // Health check
     this.app.get('/api/health', (req, res) => {

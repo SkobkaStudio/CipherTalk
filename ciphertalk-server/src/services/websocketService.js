@@ -10,7 +10,7 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 
 const MAX_SOCKETS_PER_USER = 20;
-const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video', 'sticker']);
+const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video', 'sticker', 'custom_sticker']);
 const MAX_CIPHERTEXT_CHARS = 400 * 1024;
 
 class WebSocketService {
