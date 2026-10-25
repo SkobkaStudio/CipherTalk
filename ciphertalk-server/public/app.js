@@ -599,6 +599,7 @@ function updateEncryptionBadge() {
 
 // Медиа
 const mediaCache = new Map(); // url -> objectUrl
+const activeMediaUrls = new Set(); // URL, которые сейчас используются для воспроизведения
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordingType = null;
@@ -3061,9 +3062,18 @@ async function getMediaObjectUrl(payload, key) {
   );
 
   if (mediaCache.size >= MEDIA_CACHE_LIMIT) {
-    const oldest = mediaCache.keys().next().value;
-    URL.revokeObjectURL(mediaCache.get(oldest));
-    mediaCache.delete(oldest);
+    let evicted = false;
+    for (const [url, objUrl] of mediaCache) {
+      if (activeMediaUrls.has(url)) continue;
+      URL.revokeObjectURL(objUrl);
+      mediaCache.delete(url);
+      evicted = true;
+      break;
+    }
+    if (!evicted) {
+      // Все кэшированные URL активны — отдаём новый без кэширования
+      return objectUrl;
+    }
   }
   mediaCache.set(payload.url, objectUrl);
   return objectUrl;
@@ -3117,21 +3127,38 @@ function buildVoice(payload, key) {
   duration.textContent = formatDuration(payload.duration);
 
   let audio = null;
+  let audioSrc = null;
   btn.onclick = async () => {
     try {
       if (!audio) {
         btn.disabled = true;
-        const src = await getMediaObjectUrl(payload, key);
-        audio = new Audio(src);
+        audioSrc = await getMediaObjectUrl(payload, key);
+        activeMediaUrls.add(audioSrc);
+        audio = new Audio(audioSrc);
+        btn._audio = audio; // храним ссылку на элементе, чтобы не verlorсь при GC
         audio.onplay = () => { btn.innerHTML = Icons.svg('pause', { className: 'mq-icon--sm' }); };
         audio.onpause = () => { btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' }); };
-        audio.onended = () => { btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' }); };
+        audio.onended = () => {
+          btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' });
+          if (audioSrc) { activeMediaUrls.delete(audioSrc); }
+        };
+        audio.onerror = () => {
+          btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' });
+          if (audioSrc) { activeMediaUrls.delete(audioSrc); }
+        };
         btn.disabled = false;
       }
       if (audio.paused) await audio.play();
       else audio.pause();
     } catch (e) {
       btn.disabled = false;
+      if (e.message && (e.message.includes('interrupted') || e.name === 'NotAllowedError')) {
+        audio = null;
+        audioSrc = null;
+        btn._audio = null;
+        btn.innerHTML = Icons.svg('play', { className: 'mq-icon--sm' });
+        return;
+      }
       showToast(I18N.t('err.play', { error: e.message }), 'error');
     }
   };
