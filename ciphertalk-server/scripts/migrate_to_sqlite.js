@@ -176,7 +176,7 @@ const tx = db.transaction(() => {
   // counters
   const c = data.counters || {};
   const insC = db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)');
-  for (const k of ['users','chats','messages','files','sessions','folders']) {
+  for (const k of ['users','chats','chats_pos','chats_neg','messages','files','sessions','folders']) {
     insC.run(k, c[k] || 0);
   }
 

@@ -1020,6 +1020,89 @@ function normalizeChat(chat) {
   };
 }
 
+// ==================== ПУБЛИЧНЫЕ ID / URL ====================
+// Пользователи: 8 знаков с ведущими нулями (1 → "00000001").
+// Группы/каналы: отрицательные, знак + 14 знаков (-1 → "-00000000000001").
+// Приватный чат в URL представлен id собеседника — у обеих сторон один и тот же адрес.
+function userIdToUrl(id) {
+  const n = Math.abs(Number(id));
+  if (!Number.isFinite(n)) return '';
+  return String(n).padStart(8, '0');
+}
+
+function chatIdToUrl(id) {
+  id = Number(id);
+  if (!Number.isFinite(id)) return '';
+  if (id < 0) return '-' + String(Math.abs(id)).padStart(14, '0');
+  // положительный id приватного чата не несёт смысла для собеседника —
+  // но если это saved/приватный чат, URL строится по id собеседника (см. chatUrl)
+  return userIdToUrl(id);
+}
+
+// URL-токен открытого чата: для private — id собеседника, для saved — id чата,
+// для групп/каналов — сам отрицательный id чата.
+function chatUrl(chat) {
+  if (!chat) return '/';
+  if (chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel') {
+    return '/' + chatIdToUrl(chat.id);
+  }
+  if (chat.type === 'saved') {
+    return '/s/' + userIdToUrl(chat.id);
+  }
+  const peer = (chat.members || []).find(m => Number(m.id) !== Number(currentUser && currentUser.id));
+  return '/' + (peer ? userIdToUrl(peer.id) : userIdToUrl(chat.id));
+}
+
+function updateLocationForChat(chat) {
+  try {
+    history.replaceState(null, '', chat ? chatUrl(chat) : '/');
+  } catch (_) { /* file:// или песочница без History API */ }
+}
+
+// Разбор "/00000001" или "/-00000000000001" из адресной строки
+function parseIdFromPath(pathname) {
+  const m = String(pathname || '').match(/^\/(?:s\/)?(-?\d{1,14})\/?$/);
+  if (!m) return null;
+  const tok = m[1];
+  const savedOnly = /^\/s\//.test(pathname);
+  const num = parseInt(tok, 10);
+  if (!Number.isFinite(num)) return null;
+  if (tok.startsWith('-')) return { kind: 'chat', id: num };
+  if (savedOnly) return { kind: 'saved_chat', id: num };
+  return { kind: 'user', id: num };
+}
+
+let pendingDeepLinkTries = 0;
+function resolveDeepLink() {
+  const parsed = parseIdFromPath(location.pathname);
+  if (!parsed) return false;
+  if (!currentUser || !chats.length) return false;
+  let target = null;
+  if (parsed.kind === 'chat') {
+    target = getChatById(parsed.id);
+  } else if (parsed.kind === 'saved_chat') {
+    target = chats.find(c => Number(c.id) === parsed.id && c.type === 'saved');
+  } else {
+    // id пользователя: найти приватный чат с этим собеседником
+    if (Number(parsed.id) === Number(currentUser.id)) {
+      target = chats.find(c => c.type === 'saved');
+    } else {
+      target = chats.find(c =>
+        (c.type === 'private' || c.type === 'direct') &&
+        Array.isArray(c.members) &&
+        c.members.some(m => Number(m.id) === parsed.id)
+      );
+    }
+  }
+  if (target) {
+    openChat(target.id);
+    return true;
+  }
+  // чаты ещё не все пришли — повторить короткое время
+  if (++pendingDeepLinkTries <= 20) setTimeout(resolveDeepLink, 300);
+  return false;
+}
+
 // ==================== ВЛАДЕЛЕЦ ПРОЕКТА ====================
 // Только серверный флаг is_owner. Телефон на клиенте не сравниваем:
 // у чужих участников он замаскирован, а у обычных аккаунтов может
@@ -2123,6 +2206,7 @@ async function hydrateFromCache() {
   });
   rebuildOnlineSet();
   renderChatList();
+  resolveDeepLink();
 }
 
 // ==================== ПРОКРУТКА СПИСКА СООБЩЕНИЙ ====================
@@ -2268,6 +2352,7 @@ async function handleWSMessage(msg) {
       rebuildOnlineSet();
       renderChatList();
       if (currentChatId && !getChatById(currentChatId)) closeChat();
+      if (!currentChatId) resolveDeepLink();
       // Удалили чат на другом устройстве — вычищаем его из локального кэша
       for (const id of Object.keys(messages)) {
         if (!prevIds.has(Number(id))) continue;
@@ -3008,6 +3093,7 @@ function openChat(chatId) {
   if (!chat) return;
 
   currentChatId = chatId;
+  updateLocationForChat(chat);
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('active-chat').style.display = 'flex';
   document.getElementById('app-container').classList.add('chat-open');
@@ -4602,6 +4688,7 @@ function closeChat() {
   for (const t of typewriterTimers) clearTimeout(t);
   typewriterTimers.clear();
   currentChatId = null;
+  updateLocationForChat(null);
   hideChatLoadOverlay(0);
   document.getElementById('app-container').classList.remove('chat-open');
   updateMobileNav();

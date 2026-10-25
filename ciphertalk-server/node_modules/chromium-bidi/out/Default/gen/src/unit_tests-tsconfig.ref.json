@@ -1,0 +1,80 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationDir": ".",
+    "emitDeclarationOnly": true,
+    "outDir": ".",
+    "rootDir": "../../../../../../third_party/chromium-bidi/src",
+    "rootDirs": [
+      "../../../../../../third_party/devtools-frontend/src/",
+      "../../devtools-frontend/src/"
+    ],
+    "skipLibCheck": true
+  },
+  "files": [
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/browser/BrowserProcessot.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/browser/ContextConfigStorage.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/context/BrowsingContextStorage.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/context/NavigationTracker.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/digitalCredentials/DigitalCredentialsProcessor.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/emulation/EmulationProcessor.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/log/logHelper.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/network/NetworkModuleMocks.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/network/NetworkProcessor.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/network/NetworkStorage.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/network/NetworkUtils.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/script/PreloadScriptStorage.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/script/SharedId.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/session/EventManager.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/session/SubscriptionManager.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/session/events.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/bidiMapper/modules/storage/StorageProcessor.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/cdp/CdpClient.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/cdp/CdpConnection.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol/ErrorResponse.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/Buffer.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/DefaultMap.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/Deferred.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/EventEmitter.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/IdWrapper.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/Mutex.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/ProcessingQueue.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/assert.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/base64.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/graphemeTools.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/time.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/transportStub.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/unitConversions.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/urlHelpers.test.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/uuid.test.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/legacy/legacy-defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/global_typings/global_defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filesystem/index.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filewriter/index.d.ts",
+    "devtools_protocol_declare.d.ts",
+    "devtools_protocol_ambient.d.ts",
+    "../../blink/public/devtools_protocol/types/protocol.d.ts",
+    "../../blink/public/devtools_protocol/types/protocol-mapping.d.ts"
+  ],
+  "references": [
+    {
+      "path": "bidi_mapper-tsconfig.ref.json"
+    },
+    {
+      "path": "bidi_tab-tsconfig.ref.json"
+    },
+    {
+      "path": "cdp-tsconfig.ref.json"
+    },
+    {
+      "path": "protocol-tsconfig.ref.json"
+    },
+    {
+      "path": "protocol_parser-tsconfig.ref.json"
+    },
+    {
+      "path": "utils-tsconfig.ref.json"
+    }
+  ]
+}
