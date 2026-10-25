@@ -1323,9 +1323,18 @@ class WebSocketService {
     this.db.chatMembers
       .filter(m => m.chat_id === chat.id)
       .forEach(m => { lastReadBy[m.user_id] = m.last_read_message_id || 0; });
+    let other_user = null;
+    if (chat && chat.type === 'private' && Array.isArray(members)) {
+      const other = members.find(m => m && requesterId && m.id !== requesterId) || members[0];
+      if (other) {
+        const u = this.db.findUserById(other.id);
+        other_user = { id: other.id, avatar: u ? u.avatar : (other.avatar || '') };
+      }
+    }
     return {
       ...(chat.toJSON ? chat.toJSON() : chat),
       members,
+      other_user,
       last_message: lastContent || '',
       last_message_iv: lastMsg && !lastMsg.deleted_for_all ? lastMsg.iv : '',
       last_message_header: lastMsg && !lastMsg.deleted_for_all ? (lastMsg.header || '') : '',

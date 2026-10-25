@@ -304,10 +304,19 @@ class ChatController {
     // Никакой расшифровки на сервере: отдаём шифротекст + iv + header,
     // расшифрует клиент, у которого есть ключ.
     const lastContent = lastMsg && !lastMsg.deleted_for_all ? lastMsg.encrypted_content : '';
+    let other_user = null;
+    if (chat && chat.type === 'private' && Array.isArray(members) && requesterId) {
+      const other = members.find(m => m && m.id !== requesterId) || members[0];
+      if (other) {
+        const u = this.db.findUserById(other.id);
+        other_user = { id: other.id, avatar: u ? u.avatar : (other.avatar || '') };
+      }
+    }
 
     return {
       ...(chat.toJSON ? chat.toJSON() : chat),
       members,
+      other_user,
       last_message: lastContent || '',
       last_message_iv: lastMsg && !lastMsg.deleted_for_all ? lastMsg.iv : '',
       last_message_header: lastMsg && !lastMsg.deleted_for_all ? (lastMsg.header || '') : '',

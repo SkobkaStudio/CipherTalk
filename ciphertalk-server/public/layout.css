@@ -237,3 +237,13 @@
 @media (pointer: none) {
   #mq-cursor { display: none !important; }
 }
+
+@media (max-width: 640px) {
+  .back-btn { display: flex !important; align-items: center; justify-content: center; width: 44px; height: 44px; background: transparent; border: none; color: inherit; cursor: pointer; padding: 0; margin-right: 6px; flex-shrink: 0; }
+  .back-btn svg { width: 24px; height: 24px; }
+  #app-container.chat-open .sidebar { display: none !important; }
+  #app-container.chat-open .chat-area { display: flex !important; width: 100%; flex: 1 1 100%; }
+  .message-input { font-size: 16px !important; }
+  .send-btn, .attach-btn { min-width: 44px; min-height: 44px; }
+  .chat-item { min-height: 64px; }
+}

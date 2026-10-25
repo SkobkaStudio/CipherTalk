@@ -947,8 +947,26 @@ function chatAvatarMarkup(chat) {
 function setChatAvatar(el, chat) {
   if (!el) return;
   const icon = getChatAvatarIcon(chat);
-  if (icon) el.innerHTML = Icons.svg(icon, { className: 'mq-icon--lg' });
-  else el.textContent = getChatAvatar(chat);
+  if (icon) {
+    el.innerHTML = Icons.svg(icon, { className: 'mq-icon--lg' });
+    return;
+  }
+  // Приоритет: аватарка собеседника для приватного чата
+  let avatarUrl = null;
+  if (chat && chat.type === 'private') {
+    if (chat.other_user && chat.other_user.avatar) avatarUrl = chat.other_user.avatar;
+    else if (Array.isArray(chat.members)) {
+      const other = chat.members.find(m => m.id !== (currentUser && currentUser.id));
+      if (other && other.avatar) avatarUrl = other.avatar;
+    }
+  } else if (chat && chat.avatar) {
+    avatarUrl = chat.avatar;
+  }
+  if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.length > 0) {
+    el.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+    return;
+  }
+  el.textContent = getChatAvatar(chat);
 }
 
 function isChatOnline(chat) {
@@ -2495,7 +2513,18 @@ function updateTicksForChat(chatId) {
   });
 }
 
-async function openChat(chatId) {
+async function backToChats() {
+  currentChatId = null;
+  const area = document.getElementById('active-chat');
+  if (area) area.style.display = 'none';
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.style.display = 'flex';
+  const app = document.getElementById('app-container');
+  if (app) app.classList.remove('chat-open');
+  renderChatList();
+}
+
+function openChat(chatId) {
   // Очищаем анимации печати от предыдущего чата
   for (const t of typewriterTimers) clearTimeout(t);
   typewriterTimers.clear();

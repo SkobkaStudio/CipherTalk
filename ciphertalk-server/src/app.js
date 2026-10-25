@@ -109,6 +109,16 @@ class App {
     this.app.use('/api', profileRoutes);
     this.app.use('/api', chatRoutes);
 
+    try {
+      const swaggerUi = require('swagger-ui-express');
+      const swaggerSpec = require('./swagger');
+      this.app.get('/api/docs.json', (req, res) => res.json(swaggerSpec));
+      this.app.use('/api/docs', swaggerUi.serve);
+      this.app.get('/api/docs', swaggerUi.setup(swaggerSpec));
+    } catch (e) {
+      console.error('Swagger init failed:', e.message);
+    }
+
     // Загрузка файлов (только для авторизованных)
     this.app.post('/api/upload',
       authMiddleware.authenticate,
