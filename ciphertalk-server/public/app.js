@@ -4007,10 +4007,11 @@ function showChatInfo() {
     ${isGroup && ownerOrAdmin ? `
     <div style="margin-top:16px;">
       <div class="input-group">
-        <label>${I18N.t('chat.avatarChange')}</label>
-        <input type="file" id="chat-avatar-input" accept="image/*">
+        <label class="btn btn-secondary" style="cursor:pointer;display:inline-block;text-align:center">
+          ${I18N.t('chat.avatarChange')}
+          <input type="file" id="chat-avatar-input" accept="image/*" style="display:none" data-action="setChatAvatarFile">
+        </label>
       </div>
-      <button class="btn btn-secondary" data-action="setChatAvatar">${I18N.t('chat.avatarChange')}</button>
     </div>
     <div style="margin-top:10px;">
       <div class="input-group">
@@ -4031,14 +4032,14 @@ function showChatInfo() {
   }
 }
 
-async function setChatAvatar() {
+async function setChatAvatar(el) {
   const chat = getChatById(currentChatId);
   if (!chat) return;
-  const fileInput = document.getElementById('chat-avatar-input');
-  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
-    showToast(I18N.t('chat.selectFile'), 'error');
-    return;
-  }
+  // Файл берём из скрытого input, который передал событие change.
+  // Если файл не выбран (например, диалог закрыт без выбора) — молча выходим,
+  // без ошибки «Выберите файл».
+  const fileInput = el && el.files ? el : document.getElementById('chat-avatar-input');
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
   const file = fileInput.files[0];
   if (file.size > 2 * 1024 * 1024) {
     showToast(I18N.t('profile.tooBig'), 'error');
@@ -4741,12 +4742,12 @@ const CLICK_ACTIONS = {
   removePin: () => removePin(),
   resetE2EE: () => resetE2EE(),
   setLang: (el) => setLanguage(el.dataset.id),
-  setChatAvatar: () => setChatAvatar(),
   copyInviteLink: () => copyInviteLink()
 };
 
 const CHANGE_ACTIONS = {
-  setCustomBg: (el) => setCustomBg(el)
+  setCustomBg: (el) => setCustomBg(el),
+  setChatAvatarFile: (el) => setChatAvatar(el)
 };
 
 const INPUT_ACTIONS = {
