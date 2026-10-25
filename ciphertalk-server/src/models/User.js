@@ -1,9 +1,13 @@
 const encryptionService = require('../services/encryptionService');
 const { isOwnerPhone } = require('../utils/owner');
+const { formatUserId } = require('../utils/ids');
 
 class User {
   constructor(data) {
     this.id = data.id;
+    // Публичный 8-значный id («00000001»). Для старых записей без колонки
+    // вычисляется из внутреннего id, чтобы клиент всегда видел единый формат.
+    this.public_id = data.public_id || (data.id ? formatUserId(data.id) : '');
     this.phone = data.phone || '';
     this.email = data.email || '';
     this.first_name = data.first_name || '';
@@ -46,6 +50,7 @@ class User {
   toJSON() {
     return {
       id: this.id,
+      public_id: this.public_id,
       phone: this.phone,
       email: this.email || '',
       first_name: this.first_name,
