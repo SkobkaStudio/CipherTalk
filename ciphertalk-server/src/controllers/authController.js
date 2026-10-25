@@ -52,13 +52,56 @@ class AuthController {
     return String(value || '').replace(/^@/, '').trim().toLowerCase();
   }
 
+  normalizePhone(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (!digits) return raw;
+    // Если начинается с 8 и длина 11 — конвертируем в +7
+    if (digits.length === 11 && digits.startsWith('8')) {
+      return '+7' + digits.slice(1);
+    }
+    // Если начинается с 7 и длина 11 — добавляем +
+    if (digits.length === 11 && digits.startsWith('7')) {
+      return '+' + digits;
+    }
+    // Если 10 цифр — считаем российским номером
+    if (digits.length === 10) {
+      return '+7' + digits;
+    }
+    // Уже с +? но мы нормализовали цифры; если в исходнике был + и цифры совпадают
+    if (raw.startsWith('+')) {
+      return '+' + digits;
+    }
+    return '+' + digits;
+  }
+
   // 1. Отправка кода
   async sendCode(req, res) {
     try {
-      const phone = String(req.body.phone || '').trim();
+      let phone = String(req.body.phone || '').trim();
+      phone = this.normalizePhone(phone);
       if (!PHONE_RE.test(phone)) {
         return res.status(400).json({ error: 'Введите корректный номер телефона' });
       }
+
+      // Инвалидируем старые коды для всех возможных форматов номера
+      try {
+        const digits = phone.replace(/[^0-9]/g, '');
+        const variants = new Set([phone, digits, '+' + digits]);
+        if (digits.length === 11 && digits.startsWith('7')) {
+          variants.add('8' + digits.slice(1));
+        } else if (digits.length === 11 && digits.startsWith('8')) {
+          variants.add('7' + digits.slice(1));
+          variants.add('+' + '7' + digits.slice(1));
+        } else if (digits.length === 10) {
+          variants.add('8' + digits);
+          variants.add('+7' + digits);
+        }
+        for (const v of variants) {
+          try { this.db.deleteVerificationCode(v); } catch (e) {}
+        }
+      } catch (e) {}
 
       const lastSent = this.sendCooldowns.get(phone) || 0;
       const wait = config.sendCodeCooldownMs - (Date.now() - lastSent);
@@ -112,7 +155,8 @@ class AuthController {
   // 2. Проверка кода
   verifyCode(req, res) {
     try {
-      const phone = String(req.body.phone || '').trim();
+      let phone = String(req.body.phone || '').trim();
+      phone = this.normalizePhone(phone);
       const code = String(req.body.code || '').trim();
 
       if (!phone || !code) {
@@ -127,12 +171,41 @@ class AuthController {
         });
       }
 
-      const records = this.db.findVerificationCode(phone);
+      // Ищем код во всех возможных форматах номера
+      let records = this.db.findVerificationCode(phone);
+      if (!records.length) {
+        try {
+          const digits = phone.replace(/[^0-9]/g, '');
+          const variants = [digits, '+' + digits];
+          if (digits.length === 11 && digits.startsWith('7')) {
+            variants.push('8' + digits.slice(1));
+          } else if (digits.length === 11 && digits.startsWith('8')) {
+            variants.push('+' + '7' + digits.slice(1));
+            variants.push('7' + digits.slice(1));
+          } else if (digits.length === 10) {
+            variants.push('8' + digits);
+            variants.push('+7' + digits);
+          }
+          for (const v of variants) {
+            if (v === phone) continue;
+            const r = this.db.findVerificationCode(v);
+            if (r && r.length) { records = r; break; }
+          }
+        } catch (e) {}
+      }
       if (!records.length) {
         return res.status(400).json({ error: 'Неверный или просроченный код' });
       }
 
       const record = records[records.length - 1];
+      // Проверка TTL
+      if (record.expires_at && record.expires_at < Date.now()) {
+        this.db.deleteVerificationCode(record.phone || phone);
+        return res.status(400).json({ error: 'Неверный или просроченный код' });
+      }
+      if (record.used) {
+        return res.status(400).json({ error: 'Неверный или просроченный код' });
+      }
       if ((record.attempts || 0) >= config.codeMaxAttempts) {
         this.db.deleteVerificationCode(phone);
         return res.status(429).json({ error: 'Слишком много попыток. Запросите новый код.' });
@@ -141,12 +214,14 @@ class AuthController {
       const storedCode = encryptionService.decryptMessage(record.code);
       if (!storedCode || !encryptionService.safeCompare(storedCode, code)) {
         record.attempts = (record.attempts || 0) + 1;
+        try { if (record.used !== undefined) record.used = 0; } catch (e) {}
         this.db.markDirty();
         return res.status(400).json({ error: 'Неверный или просроченный код' });
       }
 
       this.clearRateLimit(rlKey);
-      this.db.deleteVerificationCode(phone);
+      try { this.db.deleteVerificationCode(record.phone || phone); } catch (e) {}
+      try { this.db.deleteVerificationCode(phone); } catch (e) {}
       const existingUser = this.db.findUserByPhone(phone);
 
       if (existingUser) {
@@ -178,7 +253,8 @@ class AuthController {
   register(req, res) {
     try {
       const { firstName, lastName, password, publicKey, verifyToken, email } = req.body;
-      const phone = String(req.body.phone || '').trim();
+      let phone = String(req.body.phone || '').trim();
+      phone = this.normalizePhone(phone);
       const username = this.normalizeUsername(req.body.username);
 
       // Телефон должен быть подтверждён кодом из SMS
@@ -195,7 +271,8 @@ class AuthController {
           error: `Username ${config.usernameMinLength}-32 символа: латиница, цифры и _`
         });
       }
-      if (!password || password.length < config.passwordMinLength) {
+      const hasPassword = password !== undefined && password !== null && String(password).trim() !== '';
+      if (hasPassword && String(password).length < config.passwordMinLength) {
         return res.status(400).json({ error: `Пароль минимум ${config.passwordMinLength} символов` });
       }
       if (this.db.findUserByPhone(phone)) {
@@ -225,7 +302,12 @@ class AuthController {
         username,
         public_key: typeof publicKey === 'string' ? publicKey.slice(0, 4096) : ''
       });
-      user.setPassword(password);
+      const hasPassword2 = password !== undefined && password !== null && String(password).trim() !== '';
+      if (hasPassword2) {
+        user.setPassword(password);
+      } else {
+        user.password_hash = null;
+      }
       this.db.users.push(user);
 
       // "Избранное"

@@ -22,3 +22,22 @@ router.get('/sessions', authMiddleware.authenticate, c.listSessions.bind(c));
 router.delete('/sessions/:id', authMiddleware.authenticate, c.revokeSession.bind(c));
 
 module.exports = router;
+/**
+ * @swagger
+ * /api/send-code:
+ *   post:
+ *     summary: Send verification code
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               phone:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Code sent
+ */

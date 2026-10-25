@@ -3,6 +3,8 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { getDatabase } = require('./db/database');
 const WebSocketService = require('./services/websocketService');
@@ -37,8 +39,15 @@ class App {
     if (process.env.TRUST_PROXY) {
       const hops = Number(process.env.TRUST_PROXY);
       this.app.set('trust proxy', Number.isInteger(hops) && hops > 0 ? hops : 1);
+    } else {
+      this.app.set('trust proxy', 1);
     }
 
+    this.app.use(helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: { policy: 'same-origin' }
+    }));
     this.app.use(securityHeaders);
 
     // CORS: по умолчанию same-origin. Разрешаем список через CORS_ORIGIN.
@@ -48,11 +57,32 @@ class App {
       .filter(Boolean);
 
     this.app.use(cors({
-      // Без CORS_ORIGIN браузерный cross-origin доступ запрещён (same-origin).
-      origin: allowedOrigins.length ? allowedOrigins : false,
+      // Строгий CORS: только явно разрешённые домены или same-origin
+      origin: function (origin, callback) {
+        if (!origin) return callback(null, true); // same-origin/non-browser
+        if (allowedOrigins.length === 0) {
+          // По умолчанию same-origin; разрешаем только localhost и trycloudflare
+          if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('trycloudflare.com')) {
+            return callback(null, true);
+          }
+          return callback(null, false);
+        }
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(null, false);
+      },
+      credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
     }));
+
+    const apiLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Слишком много запросов, попробуйте позже' }
+    });
+    this.app.use('/api', apiLimiter);
 
     this.app.use(express.json({ limit: config.maxJsonBody }));
     this.app.use(express.urlencoded({ extended: true, limit: config.maxJsonBody }));

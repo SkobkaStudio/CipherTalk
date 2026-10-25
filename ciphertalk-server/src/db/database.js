@@ -229,6 +229,19 @@ CREATE TABLE IF NOT EXISTS counters (
   name TEXT PRIMARY KEY,
   value INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at);
+CREATE INDEX IF NOT EXISTS idx_vcodes_expires ON verification_codes(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+CREATE TABLE IF NOT EXISTS message_edits (
+  id INTEGER PRIMARY KEY,
+  message_id INTEGER,
+  old_content TEXT,
+  new_content TEXT,
+  edited_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
     `);
   }
 
