@@ -26,6 +26,41 @@ let sessionExpiredHandled = false;
 let typewriterTimers = new Set();
 let renderChatListTimer = null;
 
+// ==================== СИСТЕМНЫЕ УВЕДОМЛЕНИЯ ====================
+let notificationsEnabled = false;
+let notificationPermission = 'default';
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') {
+    notificationPermission = 'granted';
+    notificationsEnabled = true;
+    return true;
+  }
+  if (Notification.permission === 'denied') return false;
+  const perm = await Notification.requestPermission();
+  notificationPermission = perm;
+  notificationsEnabled = perm === 'granted';
+  return notificationsEnabled;
+}
+
+function showNotification(title, body, chatId) {
+  if (!notificationsEnabled || notificationPermission !== 'granted') return;
+  // Не показываем уведомление если приложение в фокусе
+  if (document.hasFocus()) return;
+  const notification = new Notification(title, {
+    body,
+    icon: '/icons/icon.svg',
+    tag: `chat-${chatId}`,
+    renotify: true
+  });
+  notification.onclick = () => {
+    window.focus();
+    if (chatId) openChat(chatId);
+    notification.close();
+  };
+}
+
 function renderChatListThrottled(filter = '') {
   if (renderChatListTimer) clearTimeout(renderChatListTimer);
   renderChatListTimer = setTimeout(() => {
@@ -608,6 +643,7 @@ function updateEncryptionBadge() {
 
 // Медиа
 const mediaCache = new Map(); // url -> objectUrl
+const userStickers = [];      // пользовательские стикеры { id, svg, name }
 const activeMediaUrls = new Set(); // URL, которые сейчас используются для воспроизведения
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -939,7 +975,7 @@ function getChatName(chat) {
 }
 
 function getChatAvatar(chat) {
-  if (chat.type === 'saved') return '';
+  if (chat.type === 'saved') return '⭐';
   const name = getChatName(chat);
   return name[0]?.toUpperCase() || '?';
 }
@@ -1771,6 +1807,7 @@ async function enterApp(data) {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   initApp();
+  requestNotificationPermission();
   // Публикуем актуальный публичный ключ (перекрывает старый, если сменилось устройство)
   publishOwnPublicKey().catch(() => {});
   maybeLockApp();
@@ -2062,6 +2099,13 @@ async function handleWSMessage(msg) {
       }
       updateChatPreview(message.chat_id, message);
       if (isNew && currentChatId === message.chat_id) markChatRead(message.chat_id);
+      // Системное уведомление о новом сообщении вне текущего чата
+      if (isNew && currentChatId !== message.chat_id) {
+        const chat = getChatById(message.chat_id);
+        const senderName = message.sender_name || (chat ? getChatName(chat) : I18N.t('chat.user'));
+        const preview = message.encrypted_content ? I18N.t('chat.encryptedMessage') : String(message.sender_name || '');
+        showNotification(senderName, preview, message.chat_id);
+      }
       break;
     }
 
@@ -3557,19 +3601,70 @@ function openStickerPicker() {
     showToast(I18N.t('err.pickChat'), 'error');
     return;
   }
-  const items = Icons.STICKERS.map((s) => `
+  const systemItems = Icons.STICKERS.map((s) => `
     <button class="sticker-item" data-action="sendSticker" data-id="${s.id}" title="${escapeHtml(s.id)}">
       <img src="data:image/svg+xml;utf8,${encodeURIComponent(s.svg)}" alt="${escapeHtml(s.id)}" loading="lazy">
+    </button>`).join('');
+  const userItems = userStickers.map((s) => `
+    <button class="sticker-item" data-action="sendUserSticker" data-id="${s.id}" title="${escapeHtml(s.name || s.id)}">
+      <img src="${escapeHtml(s.svg)}" alt="${escapeHtml(s.name || s.id)}" loading="lazy">
     </button>`).join('');
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('chat.stickers')}</h2>
-    <div class="sticker-picker">${items}</div>
+    <div class="sticker-picker">${systemItems}${userItems}</div>
+    <div style="margin-top:12px;padding:8px;border-top:1px solid var(--border);">
+      <button class="btn btn-secondary" data-action="openStickerCreator" style="width:100%;padding:8px;">
+        ${Icons.svg('plus', { className: 'mq-icon--sm' })} ${I18N.t('sticker.create')}
+      </button>
+    </div>
   `);
 }
 
-async function sendSticker(stickerId) {
-  const sticker = Icons.STICKERS.find((s) => s.id === stickerId);
+async function openStickerCreator() {
+  closeModal();
+  showModal(`
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
+    <h2>${I18N.t('sticker.createTitle')}</h2>
+    <div class="input-group">
+      <label>${I18N.t('sticker.name')}</label>
+      <input type="text" id="sticker-name-input" placeholder="${I18N.t('sticker.namePlaceholder')}">
+    </div>
+    <div class="input-group">
+      <label>${I18N.t('sticker.file')}</label>
+      <input type="file" id="sticker-file-input" accept="image/*">
+    </div>
+    <button class="btn" data-action="createSticker">${I18N.t('sticker.create')}</button>
+  `);
+}
+
+async function createSticker() {
+  const nameInput = document.getElementById('sticker-name-input');
+  const fileInput = document.getElementById('sticker-file-input');
+  const name = nameInput.value.trim();
+  if (!name) {
+    showToast(I18N.t('sticker.errName'), 'error');
+    return;
+  }
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    showToast(I18N.t('sticker.errFile'), 'error');
+    return;
+  }
+  const file = fileInput.files[0];
+  if (file.size > 2 * 1024 * 1024) {
+    showToast(I18N.t('profile.tooBig'), 'error');
+    return;
+  }
+  const dataUrl = await fileToDataURL(file);
+  const stickerId = 'user-' + Date.now();
+  userStickers.push({ id: stickerId, svg: dataUrl, name });
+  closeModal();
+  showToast(I18N.t('sticker.created'), 'success');
+  openStickerPicker();
+}
+
+async function sendUserSticker(stickerId) {
+  const sticker = userStickers.find(s => s.id === stickerId);
   if (!sticker) return;
   if (!currentChatId) {
     showToast(I18N.t('err.pickChat'), 'error');
@@ -3578,16 +3673,23 @@ async function sendSticker(stickerId) {
   const chatIdAtStart = currentChatId;
   closeModal();
   try {
-    const blob = new Blob([sticker.svg], { type: 'image/svg+xml' });
+    // Конвертируем dataURL в blob
+    const response = await fetch(sticker.svg);
+    const blob = await response.blob();
     await sendMediaBlob(blob, 'sticker', {
       chatId: chatIdAtStart,
       duration: 0,
-      name: `sticker-${sticker.id}.svg`,
-      mime: 'image/svg+xml'
+      name: `sticker-${sticker.name}.${fileInputMime(blob)}`,
+      mime: blob.type || 'image/png'
     });
   } catch (err) {
     showToast(I18N.t('err.upload') + ' ' + err.message, 'error', 'alert-circle');
   }
+}
+
+function fileInputMime(blob) {
+  const type = blob.type || 'image/png';
+  return type.split('/').pop() || 'png';
 }
 
 // Стикер в сообщении — это картинка (SVG/Lottie), а не текстовый смайлик
@@ -3934,7 +4036,7 @@ async function setChatAvatar() {
   if (!chat) return;
   const fileInput = document.getElementById('chat-avatar-input');
   if (!fileInput || !fileInput.files || !fileInput.files[0]) {
-    showToast(I18N.t('err.nameRequired2'), 'error');
+    showToast(I18N.t('chat.selectFile'), 'error');
     return;
   }
   const file = fileInput.files[0];
@@ -4601,6 +4703,8 @@ const CLICK_ACTIONS = {
   attachFile: () => attachFile(),
   openStickerPicker: () => openStickerPicker(),
   sendSticker: (el) => sendSticker(el.dataset.id),
+  sendUserSticker: (el) => sendUserSticker(el.dataset.id),
+  openStickerCreator: () => openStickerCreator(),
   toggleVoiceRecording: () => toggleVoiceRecording(),
   toggleVideoRecording: () => toggleVideoRecording(),
   sendMessage: () => sendMessage(),
