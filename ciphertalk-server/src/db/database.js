@@ -1040,4 +1040,3 @@ module.exports = {
     return instance;
   }
 };
-EOF
