@@ -47,6 +47,17 @@ function isUserToken(token) {
 }
 
 /**
+ * Токен из URL -> внутренний id пользователя (или null).
+ * Работает и с дополненными нулями ('00000001'), и с сырыми числами ('1').
+ */
+function publicIdToUserId(token) {
+  const t = String(token == null ? '' : token).trim();
+  if (!/^\d{1,8}$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
  * Разбирает токен из URL (/00000001, /35742553, /-00000000000001 …)
  * во внутренний числовой id. Возвращает null, если токен не похож на id.
  */
@@ -107,6 +118,7 @@ module.exports = {
   publicTokenToInternal,
   isNegativeChatToken,
   isUserToken,
+  publicIdToUserId,
   privateChatInternalId,
   privateChatMembersFromInternalId
 };
