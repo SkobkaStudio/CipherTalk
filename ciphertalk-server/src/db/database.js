@@ -713,7 +713,7 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
   addUser(u) {
     const id = u.id || this.nextId('users');
     const publicId = u.public_id || this.nextPublicUserId();
-    this.db.prepare(`INSERT OR REPLACE INTO users(id,phone,email,first_name,last_name,name,username,password_hash,avatar,bio,public_key,online,last_seen,hide_online,created_at,updated_at,public_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    this.db.prepare(`INSERT OR REPLACE INTO users(id,phone,email,first_name,last_name,name,username,password_hash,avatar,bio,public_key,online,last_seen,hide_online,created_at,updated_at,public_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, u.phone || '', u.email || '', u.first_name || '', u.last_name || '', u.name || '', u.username || null,
       u.password_hash || '', u.avatar || '', u.bio || '', u.public_key || '', u.online ? 1 : 0,
       u.last_seen || 0, u.hide_online ? 1 : 0, u.created_at || Date.now(), u.updated_at || Date.now(), publicId
