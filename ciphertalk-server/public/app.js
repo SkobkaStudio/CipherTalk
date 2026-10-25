@@ -2418,23 +2418,17 @@ async function handleWSMessage(msg) {
         const notifTitle = (chat && (chat.type === 'group' || chat.type === 'supergroup'))
           ? `${senderName}: ${getChatName(chat)}`
           : senderName;
-        // Показываем уведомление СРАЗУ с меткой типа (📷/🎥/🎤/… или «Сообщение»),
-        // не дожидаясь криптографии — иначе при заблокированном экране фон
-        // успевает показать служебный текст раньше нас.
-        const quickBody = notifTypeLabel(message.type) || I18N.t('notif.newMessage');
-        showNotification(notifTitle, quickBody, message.chat_id);
-        // Асинхронно догоняем: если удалось расшифровать текст локально —
-        // заменяем уведомление на настоящее превью (тот же tag → без дубля).
-        if (!notifTypeLabel(message.type)) {
-          buildNotificationBody(message, chat).then(preview => {
-            if (!preview || preview === quickBody) return;
-            swPostMessage({ type: 'ct-notif-body', chatId: message.chat_id, body: preview });
-            // Если вкладка снова видима и в фокусе — показывать нечего, но фон
-            // мог успеть показать «Сообщение»: попросим его заменить текст.
-            if (document.visibilityState === 'visible' && document.hasFocus()) return;
-            showNotification(notifTitle, preview, message.chat_id);
-          });
-        }
+        // Уведомление показываем ТОЛЬКО с текстом самого сообщения: сначала
+        // расшифровываем (обычно это доли секунды — ключи и текст уже в памяти),
+        // и лишь потом показываем. Никаких заглушек «Новое сообщение» /
+        // «Зашифрованное сообщение» пользователь не увидит.
+        buildNotificationBody(message, chat).then(bodyText => {
+          if (!bodyText) return; // расшифровка не удалась — молчим, а не глушим
+          // Сообщаем фону превью ДО показа: если фоновый сокет получит это
+          // сообщение первым, он подставит наш текст вместо своей метки.
+          swPostMessage({ type: 'ct-notif-body', chatId: message.chat_id, body: bodyText });
+          showNotification(notifTitle, bodyText, message.chat_id);
+        });
       }
       break;
     }
@@ -2868,9 +2862,11 @@ function notifTypeLabel(type) {
   return typeLabels[type] || null;
 }
 
-// Превью для системного уведомления: вместо абстрактного «Новое сообщение»
-// показываем расшифрованный текст (для текста) или понятную метку типа
-// (📷 фото, 🎥 видео, 🎤 голосовое, 📄 файл, 🎨 стикер и т.д.).
+// Превью для системного уведомления: ВСЕГДА показываем расшифрованный текст
+// сообщения (или понятную метку типа для медиа: 📷 фото, 🎥 видео, 🎤 голосовое,
+// 📄 файл, 🎨 стикер). Заглушек вроде «Новое сообщение» / «Зашифрованное
+// сообщение» нет: если расшифровать не удалось — возвращаем null и
+// уведомление просто не показывается, а не показывается с служебным текстом.
 async function buildNotificationBody(message, chat) {
   const t = message.type || 'text';
   // Медиа: не пытаемся расшифровывать JSON-полезную нагрузку — сразу метка типа
@@ -2881,10 +2877,10 @@ async function buildNotificationBody(message, chat) {
     if (!key) {
       // Ключа в памяти нет (чат ещё не открывали) — получаем его асинхронно.
       // Для групп это может запросить ключ у участников через WS, поэтому
-      // ставим общий лимит 6 секунд: не успели — fallback, без зависаний.
+      // ставим лимит 15 секунд: за это время ключ почти всегда приходит.
       key = await Promise.race([
         getChatKeySafe(message.chat_id, chat),
-        new Promise(res => setTimeout(() => res(null), 6000))
+        new Promise(res => setTimeout(() => res(null), 15000))
       ]);
     }
     if (!key) throw new Error('no key');
@@ -2903,8 +2899,8 @@ async function buildNotificationBody(message, chat) {
     }
     const clean = String(text).replace(/\s+/g, ' ').trim();
     if (clean) return clean.length > 120 ? clean.slice(0, 120) + '…' : clean;
-  } catch (e) { /* не удалось — fallback ниже */ }
-  return I18N.t('chat.encryptedMessage');
+  } catch (e) { /* не удалось — вернём null, без служебных заглушек */ }
+  return null;
 }
 
 function updateChatPreview(chatId, msg) {
