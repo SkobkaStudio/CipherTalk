@@ -63,6 +63,7 @@ async function isAnimatedImage(buffer, mimetype) {
 const authRoutes = require('./routes/authRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const { createStickerRouter } = require('./routes/stickerRoutes'); // стикеры: POST/GET/DELETE /api/stickers
 
 class App {
   constructor() {
@@ -150,6 +151,7 @@ class App {
     this.app.use('/api', authRoutes);
     this.app.use('/api', profileRoutes);
     this.app.use('/api', chatRoutes);
+    this.app.use('/api/stickers', createStickerRouter(this.db)); // стикеры: POST/GET/DELETE /api/stickers
 
     try {
       const swaggerUi = require('swagger-ui-express');

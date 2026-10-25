@@ -3,13 +3,16 @@ class Message {
     this.id = data.id;
     this.chat_id = data.chat_id;
     this.sender_id = data.sender_id;
+    this.type = data.type || 'text';
+    // E2EE-инвариант: стикер — публичная метаданные (ссылка на sticker_packs/stickers),
+    // шифротекста у него нет; для всех остальных типов sticker_id всегда null.
+    this.sticker_id = this.type === 'sticker' ? (data.sticker_id || null) : null;
     // Клиентский шифротекст. Сервер НЕ расшифровывает и не перешифровывает:
     // хранит ровно то, что прислал браузер (ciphertext + iv + header).
-    this.encrypted_content = data.encrypted_content || '';
-    this.iv = data.iv || '';
+    this.encrypted_content = this.sticker_id ? '' : (data.encrypted_content || '');
+    this.iv = this.sticker_id ? '' : (data.iv || '');
     // Заголовок Double Ratchet (JSON): { dh, n, ts } — нужен получателю.
-    this.header = data.header || '';
-    this.type = data.type || 'text';
+    this.header = this.sticker_id ? '' : (data.header || '');
     this.reply_to = data.reply_to || null;
     this.forwarded_from = data.forwarded_from || null;
     this.edited = data.edited || 0;
@@ -31,6 +34,7 @@ class Message {
       iv: this.iv,
       header: this.header,
       type: this.type,
+      sticker_id: this.sticker_id || null,
       reply_to: this.reply_to,
       forwarded_from: this.forwarded_from,
       edited: this.edited,

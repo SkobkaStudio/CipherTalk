@@ -27,6 +27,8 @@ module.exports = {
   // Шифровать SQLite at-rest через SQLCipher. Отключается только явно: DB_ENCRYPTION=false
   dbEncryption: process.env.DB_ENCRYPTION !== 'false',
   uploadsPath: resolveFromRoot(process.env.UPLOADS_DIR || './uploads'),
+  // Файлы стикеров (публичные картинки): storage/stickers/<pack_id>/<sticker_id>.<ext>
+  stickersPath: path.join(SERVER_ROOT, process.env.STICKERS_DIR || 'storage/stickers'),
 
   maxFileSize: Math.min(
     parseInt(process.env.MAX_FILE_SIZE, 10) || MAX_UPLOAD_BYTES,
@@ -59,6 +61,11 @@ module.exports = {
   // Секрет HMAC для подписи JWT. Если не задан — генерируется в
   // <db>.jwt-secret с правами 600 и переиспользуется после рестартов.
   jwtSecret: process.env.JWT_SECRET || '',
+
+  // Секрет HMAC для подписанных URL приватных стикеров (?exp=&uid=&sig=).
+  // Если пусто — stickerService генерирует и сохраняет в <dbFile>.sticker-secret (0600),
+  // по аналогии с jwtSecret.
+  stickerUrlSecret: process.env.STICKER_URL_SECRET || '',
 
   // SMS-провайдер для кодов подтверждения.
   // console — только для разработки (в production код в логи не пишется),
