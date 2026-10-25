@@ -688,9 +688,31 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
     return !!(r && r.c > 0);
   }
 
+  /**
+   * Следующий незанятый публичный 8-значный id («00000001» …).
+   * Счётчик user_public живёт отдельно от внутреннего id: при регистрации
+   * новых аккаунтов после миграции старых номера не сталкиваются.
+   */
+  nextPublicUserId() {
+    const up = this.db.prepare("SELECT value FROM counters WHERE name = 'user_public'").get();
+    let counter = up && Number.isFinite(up.value) ? Math.floor(up.value) : 0;
+    const exists = this.db.prepare('SELECT 1 FROM users WHERE public_id = ?');
+    for (let i = 0; i < MAX_USER_INTERNAL_ID; i++) {
+      counter += 1;
+      if (counter > MAX_USER_INTERNAL_ID) break;
+      const token = formatUserId(counter);
+      if (!exists.get(token)) {
+        this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run('user_public', counter);
+        return token;
+      }
+    }
+    // Лимит исчерпан — отдаём детерминированный id по внутреннему счётчику
+    return formatUserId(this.nextId('users') + counter);
+  }
+
   addUser(u) {
     const id = u.id || this.nextId('users');
-    const publicId = u.public_id || formatUserId(id);
+    const publicId = u.public_id || this.nextPublicUserId();
     this.db.prepare(`INSERT OR REPLACE INTO users(id,phone,email,first_name,last_name,name,username,password_hash,avatar,bio,public_key,online,last_seen,hide_online,created_at,updated_at,public_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, u.phone || '', u.email || '', u.first_name || '', u.last_name || '', u.name || '', u.username || null,
       u.password_hash || '', u.avatar || '', u.bio || '', u.public_key || '', u.online ? 1 : 0,
