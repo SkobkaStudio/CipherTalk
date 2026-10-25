@@ -368,7 +368,7 @@ function unpinFromModal(messageId) {
 
 // ==================== ПЕРЕСЫЛКА ====================
 function openForwardModal(msg) {
-  const targets = chats.filter(c => c.id !== currentChatId || true);
+  const targets = chats.filter(c => c.id !== currentChatId);
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('forward.title')}</h2>

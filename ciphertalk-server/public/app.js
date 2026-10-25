@@ -723,6 +723,7 @@ function normalizeUser(user) {
   if (!user) return user;
   return {
     ...user,
+    name: user.name || user.firstName || user.first_name || '',
     firstName: user.firstName || user.first_name || '',
     lastName: user.lastName || user.last_name || ''
   };
@@ -2926,7 +2927,7 @@ async function buildMessageElement(msg, chat, key, animate = false) {
       } else {
         chip.textContent = `${emoji} ${(users || []).length}`;
       }
-      chip.title = `${(users || []).length}`;
+      chip.title = `${emoji} ${(users || []).length}`;
       chip.addEventListener('click', () => sendReaction(msg.id, emoji));
       row.appendChild(chip);
     });
@@ -3644,7 +3645,7 @@ async function sendMediaBlob(blob, kind, opts) {
   };
 
   const envelope = await encryptChatText(key, JSON.stringify(payload), chatId);
-  rememberSent(currentChatId, envelope.content, JSON.stringify(payload));
+  rememberSent(chatId, envelope.content, JSON.stringify(payload));
   const sent = sendWs({
     type: 'send_message',
     chatId,
@@ -4308,6 +4309,8 @@ function handleSessionExpired() {
 
 function clearSession(reload) {
   authToken = '';
+  sessionExpiredHandled = false;
+  appearanceTimerStarted = false;
   // Чистим кэш текущего аккаунта до сброса currentUser (ключ зависит от него).
   clearPlaintextCache();
   currentUser = null;
