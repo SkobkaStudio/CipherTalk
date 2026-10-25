@@ -2418,14 +2418,23 @@ async function handleWSMessage(msg) {
         const notifTitle = (chat && (chat.type === 'group' || chat.type === 'supergroup'))
           ? `${senderName}: ${getChatName(chat)}`
           : senderName;
-        // Уведомление показываем асинхронно: сначала пробуем расшифровать текст
-        // и показать превью сообщения; для медиа — понятную метку типа.
-        buildNotificationBody(message, chat).then(preview => {
-          // Если фон уже показал уведомление с этой же вкладкой — обновим его
-          // текст на нормальное превью (было «Новое сообщение» / метка типа).
-          swPostMessage({ type: 'ct-notif-body', chatId: message.chat_id, body: preview });
-          showNotification(notifTitle, preview, message.chat_id);
-        });
+        // Показываем уведомление СРАЗУ с меткой типа (📷/🎥/🎤/… или «Сообщение»),
+        // не дожидаясь криптографии — иначе при заблокированном экране фон
+        // успевает показать служебный текст раньше нас.
+        const quickBody = notifTypeLabel(message.type) || I18N.t('notif.newMessage');
+        showNotification(notifTitle, quickBody, message.chat_id);
+        // Асинхронно догоняем: если удалось расшифровать текст локально —
+        // заменяем уведомление на настоящее превью (тот же tag → без дубля).
+        if (!notifTypeLabel(message.type)) {
+          buildNotificationBody(message, chat).then(preview => {
+            if (!preview || preview === quickBody) return;
+            swPostMessage({ type: 'ct-notif-body', chatId: message.chat_id, body: preview });
+            // Если вкладка снова видима и в фокусе — показывать нечего, но фон
+            // мог успеть показать «Сообщение»: попросим его заменить текст.
+            if (document.visibilityState === 'visible' && document.hasFocus()) return;
+            showNotification(notifTitle, preview, message.chat_id);
+          });
+        }
       }
       break;
     }
@@ -2843,10 +2852,8 @@ function reorderChat(chat) {
   }
 }
 
-// Превью для системного уведомления: вместо абстрактного «Новое сообщение»
-// показываем расшифрованный текст (для текста) или понятную метку типа
-// (📷 фото, 🎥 видео, 🎤 голосовое, 📄 файл, 🎨 стикер и т.д.).
-async function buildNotificationBody(message, chat) {
+// Метки типов для уведомлений (синхронная часть — без криптографии).
+function notifTypeLabel(type) {
   const typeLabels = {
     image: '📷 ' + I18N.t('notif.photo'),
     photo: '📷 ' + I18N.t('notif.photo'),
@@ -2858,12 +2865,28 @@ async function buildNotificationBody(message, chat) {
     custom_sticker: '🎨 ' + I18N.t('notif.sticker'),
     call: '📞 ' + I18N.t('notif.call')
   };
+  return typeLabels[type] || null;
+}
+
+// Превью для системного уведомления: вместо абстрактного «Новое сообщение»
+// показываем расшифрованный текст (для текста) или понятную метку типа
+// (📷 фото, 🎥 видео, 🎤 голосовое, 📄 файл, 🎨 стикер и т.д.).
+async function buildNotificationBody(message, chat) {
   const t = message.type || 'text';
   // Медиа: не пытаемся расшифровывать JSON-полезную нагрузку — сразу метка типа
-  if (typeLabels[t]) return typeLabels[t];
-  // Текст: пробуем расшифровать локально (ключи чата есть только на устройстве)
+  const mediaLabel = notifTypeLabel(t);
+  if (mediaLabel) return mediaLabel;
   try {
-    const key = await getChatKeySafe(message.chat_id, chat);
+    let key = chatKeys[message.chat_id] || null;
+    if (!key) {
+      // Ключа в памяти нет (чат ещё не открывали) — получаем его асинхронно.
+      // Для групп это может запросить ключ у участников через WS, поэтому
+      // ставим общий лимит 6 секунд: не успели — fallback, без зависаний.
+      key = await Promise.race([
+        getChatKeySafe(message.chat_id, chat),
+        new Promise(res => setTimeout(() => res(null), 6000))
+      ]);
+    }
     if (!key) throw new Error('no key');
     const text = await decryptChatText(key, message, message.chat_id,
       currentUser && message.sender_id === currentUser.id);

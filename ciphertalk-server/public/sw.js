@@ -9,7 +9,7 @@
       и фону; уведомление показывает ТОТ, кто первый: страница, если её
       вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
       через ct-notif-shown и не дублирует. */
-const CACHE = 'ciphertalk-v16';
+const CACHE = 'ciphertalk-v17';
 const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',
@@ -80,6 +80,7 @@ let bgReconnectTimer = null;
 let bgPingTimer = null;
 let bgCreds = null;          // { token, user: {id}, granted } — синхронизируется с Cache Storage
 let recentShown = new Map();  // chatId -> timestamp: уведомления, показанные страницей (дедуп)
+const pendingNotifBody = new Map(); // chatId -> { body, at }: превью пришло раньше нашего уведомления
 let credsLoaded = false;      // попытка восстановить креды из хранилища уже была
 
 // ----------Постоянное хранилище кредов (переживает выгрузку SW) ----------
@@ -198,8 +199,9 @@ async function bgConnect() {
     if (bgCreds && bgCreds.granted === false) return;
 
     // Контент end-to-end шифрован — в фоне доступен только тип сообщения,
-    // поэтому показываем понятную метку вместо абстрактного «Новое сообщение».
-    // Страница при возможности присылает расшифрованное превью через ct-notif-body.
+    // поэтому показываем понятную метку. Для текста — «Сообщение»: страница
+    // при возможности сразу пришлёт расшифрованное превью (ct-notif-body),
+    // и мы заменим им это уведомление, не плодя дубли (тот же tag).
     const typeLabels = {
       image: '📷 Фото',
       photo: '📷 Фото',
@@ -212,9 +214,16 @@ async function bgConnect() {
       call: '📞 Звонок'
     };
     const title = String(m.senderName || m.sender_name || 'CipherTalk');
-    const body = typeLabels[m.type] || '🔒 Зашифрованное сообщение';
+    let body = typeLabels[m.type] || 'Сообщение';
 
     try {
+      // Страница могла прислать расшифрованное превью чуть раньше, чем дошло
+      // до нас это сообщение (сокет страницы быстрее фонового) — берём его.
+      if (chatId != null && pendingNotifBody.has(chatId)) {
+        const p = pendingNotifBody.get(chatId);
+        pendingNotifBody.delete(chatId);
+        if (p && p.body && Date.now() - p.at < 15000) body = p.body;
+      }
       await self.registration.showNotification(title, {
         body,
         icon: '/icons/icon.svg',
@@ -224,6 +233,9 @@ async function bgConnect() {
         data: { chatId, url: '/', body },
         vibrate: [80, 40, 80]
       });
+      // Ждём немного расшифрованное превью от страницы: если она открыта
+      // (но не в фокусе / видима) — она сама перезаменит уведомление через
+      // ct-notif-body. Здесь лишь подстраховка, ничего лишнего не делаем.
     } catch (e) {
       console.warn('[CT-SW] showNotification failed:', e && e.message);
     }
@@ -286,15 +298,17 @@ self.addEventListener('message', (event) => {
     return;
   }
   // Страница прислала расшифрованное превью — обновим уже показанное фоновое
-  // уведомление (была метка типа / «Зашифрованное сообщение» → текст сообщения).
+  // уведомление (была метка типа / «Сообщение» → текст сообщения).
   if (d.type === 'ct-notif-body') {
     const chatId = Number(d.chatId) || null;
     const body = String(d.body || '');
     if (chatId == null || !body) return;
     self.registration.getNotifications().then(list => {
+      let found = false;
       for (const n of list) {
         const data = n.data || {};
         if (Number(data.chatId) !== chatId) continue;
+        found = true;
         if (data.body === body) return; // уже актуально
         try {
           n.close();
@@ -309,6 +323,15 @@ self.addEventListener('message', (event) => {
           });
         } catch (e) { /* ignore */ }
         return;
+      }
+      // Уведомления ещё нет (фон покажет его с секундной задержкой) —
+      // сохраняем превью, чтобы фон подставил его сразу при показе.
+      if (!found) {
+        pendingNotifBody.set(chatId, { body, at: Date.now() });
+        if (pendingNotifBody.size > 30) {
+          const cutoff = Date.now() - 20000;
+          for (const [k, v] of pendingNotifBody) if (v.at < cutoff) pendingNotifBody.delete(k);
+        }
       }
     }).catch(() => {});
     return;
