@@ -263,6 +263,15 @@ class Database {
         return r.public_id;
       }
     }
+    // Пустая колонка (чаты, созданные в текущей сессии до фоновой проставки):
+    // вычисляем токен на лету, чтобы ссылка /XXXXXXXX работала сразу.
+    if ((type || (r && r.type)) === 'private') {
+      const other = this.getPrivateChatOtherUserId(cid, requesterId != null ? Number(requesterId) : null);
+      return other ? this.getPublicUserId(other) : '';
+    }
+    if (r && r.type === 'saved' && r.owner_id != null) {
+      return this.getPublicUserId(r.owner_id);
+    }
     if (Number.isInteger(cid) && cid > 0) {
       return formatChatId(cid, (r && r.type) || type || 'private');
     }
