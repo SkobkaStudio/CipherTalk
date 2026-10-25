@@ -1,4 +1,3 @@
-cat > /home/CipherTalk/ciphertalk-server/src/db/database.js << 'EOF'
 const fs = require('fs');
 const path = require('path');
 const BetterSqlite3 = require('better-sqlite3-multiple-ciphers');
