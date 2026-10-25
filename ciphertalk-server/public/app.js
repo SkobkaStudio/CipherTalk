@@ -1022,6 +1022,67 @@ function normalizeChat(chat) {
   };
 }
 
+// ==================== ПУБЛИЧНЫЕ ID / ССЫЛКИ В БРАУЗЕРЕ ====================
+// Каждый чат имеет публичный id: пользователь — 8 знаков (00000001…99999999),
+// группа/канал — отрицательный 14-значный (-00000000000001…).
+// Открытый чат отображается в адресной строке как https://…/<публичный id>,
+// «Избранное» = собственный id пользователя. Прямая загрузка такой ссылки
+// открывает соответствующий чат.
+let pendingUrlToken = null;
+
+function chatTokenOf(chat) {
+  if (!chat) return '';
+  if (chat.public_id) return String(chat.public_id);
+  // Личный чат без public_id (старый кэш) — id собеседника из members
+  if (chat.type === 'private' && Array.isArray(chat.members)) {
+    const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
+    if (other && other.public_id) return String(other.public_id);
+  }
+  return '';
+}
+
+function syncUrlToChat(chat) {
+  try {
+    const token = chat ? chatTokenOf(chat) : '';
+    const url = token ? '/' + encodeURIComponent(token) : '/';
+    if (location.pathname !== url) history.pushState({ ctToken: token || null }, '', url);
+  } catch (e) { /* не критично */ }
+}
+
+function readChatTokenFromUrl() {
+  const m = decodeURIComponent(location.pathname || '').match(/^\/(-?\d{1,14})\/?$/);
+  return m ? m[1] : null;
+}
+
+function openChatByToken(token) {
+  token = String(token || '');
+  if (!token) return;
+  // Сначала пробуем найти чат с таким публичным id локально
+  const local = chats.find(c => chatTokenOf(c) === token);
+  if (local) {
+    pendingUrlToken = null;
+    openChat(local.id);
+    return;
+  }
+  // Иначе просим сервер разобрать токен (ответ: 'public_resolved')
+  pendingUrlToken = token;
+  sendWs({ type: 'resolve_public_id', token });
+}
+
+window.addEventListener('popstate', () => {
+  const t = readChatTokenFromUrl();
+  if (!t) {
+    if (currentChatId != null) closeChat();
+    return;
+  }
+  if (t !== readCurrentUrlToken()) openChatByToken(t);
+});
+
+function readCurrentUrlToken() {
+  const c = currentChatId != null ? getChatById(currentChatId) : null;
+  return c ? chatTokenOf(c) : '';
+}
+
 // ==================== ВЛАДЕЛЕЦ ПРОЕКТА ====================
 // Только серверный флаг is_owner. Телефон на клиенте не сравниваем:
 // у чужих участников он замаскирован, а у обычных аккаунтов может
@@ -2363,7 +2424,10 @@ async function handleWSMessage(msg) {
         let tries = 0;
         const timer = setInterval(() => {
           if (getChatById(cid)) { clearInterval(timer); openChat(cid); }
-          else if (++tries > 20) { clearInterval(timer); }
+          else if (++tries > 20) {
+            clearInterval(timer);
+            showToast('Чат не найден: /' + msg.token, 'error');
+          }
         }, 300);
       }
       break;
@@ -2989,6 +3053,7 @@ async function backToChats() {
   if (empty) empty.style.display = 'flex';
   const app = document.getElementById('app-container');
   if (app) app.classList.remove('chat-open');
+  syncUrlToChat(null);
   renderChatList();
 }
 
@@ -3002,6 +3067,8 @@ function openChat(chatId) {
   if (!chat) return;
 
   currentChatId = chatId;
+  // Публичный id в адресной строке: https://…/00000001 или https://…/-00000000000001
+  syncUrlToChat(chat);
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('active-chat').style.display = 'flex';
   document.getElementById('app-container').classList.add('chat-open');
@@ -4582,6 +4649,7 @@ function closeChat() {
   for (const t of typewriterTimers) clearTimeout(t);
   typewriterTimers.clear();
   currentChatId = null;
+  syncUrlToChat(null);
   document.getElementById('app-container').classList.remove('chat-open');
   updateMobileNav();
   document.getElementById('active-chat').style.display = 'none';
