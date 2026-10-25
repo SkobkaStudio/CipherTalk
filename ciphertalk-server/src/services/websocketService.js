@@ -107,7 +107,8 @@ class WebSocketService {
       'delete_folder': () => this.handleDeleteFolder(ws, msg),
       'set_chat_folder': () => this.handleSetChatFolder(ws, msg),
       'set_chat_avatar': () => this.handleSetChatAvatar(ws, msg),
-      'delete_chat': () => this.handleDeleteChat(ws, msg)
+      'delete_chat': () => this.handleDeleteChat(ws, msg),
+      'resolve_public_id': () => this.handleResolvePublicId(ws, msg)
     };
 
     const handler = handlers[msg.type];
@@ -261,7 +262,16 @@ class WebSocketService {
 
   handleStartChat(ws, msg) {
     const currentUserId = ws.userId;
-    const targetUserId = Number(msg.targetUserId);
+    let targetUserId = Number(msg.targetUserId);
+
+    // Клиент может прислать публичный 8-значный id из URL (например «00000002»)
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      const t = String(msg.targetUserId || '').trim();
+      if (/^\d{1,8}$/.test(t)) {
+        const byPub = this.db.findUserByPublicId ? this.db.findUserByPublicId(t) : null;
+        if (byPub) targetUserId = Number(byPub.id);
+      }
+    }
 
     if (!Number.isInteger(targetUserId)) {
       return this.sendError(ws, 'bad_request', 'Некорректный targetUserId');
@@ -308,7 +318,7 @@ class WebSocketService {
     this.db.restoreChatForUser(chatId, targetUserId);
 
     const members = this.getChatMembersWithDetails(chatId, currentUserId);
-    this.send(ws, { type: 'chat_created', chatId, members });
+    this.send(ws, { type: 'chat_created', chatId, members, public_id: this.db.getPublicChatId(chatId, 'private', currentUserId) });
 
     if (created) {
       const chat = this.db.findChatById(chatId);
@@ -319,6 +329,84 @@ class WebSocketService {
       // Уведомляем собеседника; телефон каждого маскируется относительно него.
       presenceService.sendToUser(targetUserId, notification);
     }
+  }
+
+  /**
+   * Разбор токена из URL (/00000001, /-00000000000001) в конкретный чат.
+   * Ответ: 'public_resolved' с { token, chatId } либо 'not_found'.
+   */
+  handleResolvePublicId(ws, msg) {
+    const currentUserId = ws.userId;
+    const token = String(msg.token || '').trim();
+    if (!token) return this.sendError(ws, 'bad_request', 'Пустой токен');
+
+    // Токен может быть публичным id пользователя или чата (группа/канал)
+    let resolved = null;
+    if (/^-?\d{1,14}$/.test(token)) {
+      resolved = this.db.findInternalByPublicToken ? this.db.findInternalByPublicToken(token) : null;
+    }
+    if (!resolved) return this.sendError(ws, 'not_found', 'Идентификатор не найден: ' + token);
+
+    let chatId = null;
+    if (resolved.userId != null) {
+      if (Number(resolved.userId) === Number(currentUserId)) {
+        // Свой id = «Избранное»
+        const saved = this.db.chats
+          ? this.db.chats.filter(c => c.type === 'saved' && Number(c.owner_id) === Number(currentUserId))
+          : [];
+        if (saved.length) chatId = Number(saved[0].id);
+      } else if (this.db.findUserById(resolved.userId)) {
+        // Ищем существующий личный чат с этим пользователем
+        const myChats = this.db.chatMembers
+          .filter(cm => cm.user_id === currentUserId)
+          .map(cm => cm.chat_id);
+        for (const cid of myChats) {
+          const chat = this.db.findChatById(cid);
+          if (!chat || chat.type !== 'private') continue;
+          if (this.db.isChatMember(cid, resolved.userId)) { chatId = Number(cid); break; }
+        }
+        if (chatId == null) {
+          // Чата ещё нет — создаём его так же, как handleStartChat
+          chatId = this.db.nextPrivateChatId
+            ? this.db.nextPrivateChatId(currentUserId, resolved.userId)
+            : this.db.nextId('chats');
+          const Chat = require('../models/Chat');
+          this.db.chats.push(new Chat({ id: chatId, type: 'private', owner_id: null }));
+          const now = Date.now();
+          this.db.chatMembers.push({ chat_id: chatId, user_id: currentUserId, role: 'member', joined_at: now });
+          this.db.chatMembers.push({ chat_id: chatId, user_id: resolved.userId, role: 'member', joined_at: now });
+          this.db.markDirty();
+          const other = this.db.findUserById(resolved.userId);
+          presenceService.sendToUser(resolved.userId, {
+            type: 'new_chat',
+            chat: this.getChatWithDetails(this.db.findChatById(chatId), this.getChatMembersWithDetails(chatId, resolved.userId), resolved.userId)
+          });
+          void other;
+        }
+      }
+    } else if (resolved.chatId != null) {
+      const chat = this.db.findChatById(resolved.chatId);
+      if (chat && (this.db.isChatMember(resolved.chatId, currentUserId) || Number(chat.owner_id) === Number(currentUserId))) {
+        chatId = Number(resolved.chatId);
+      } else if (chat && chat.type === 'channel') {
+        // Публичный канал — можно открыть даже без членства (просмотр)
+        chatId = Number(resolved.chatId);
+      }
+    }
+
+    if (chatId == null) return this.sendError(ws, 'not_found', 'Чат не найден для токена: ' + token);
+    // Токен = чужой публичный id, а личного чата с этим человеком ещё нет —
+    // вместо пустого окна возвращаем клиента в список чатов (chatId = -1).
+    const isForeignUserToken = resolved.userId != null && Number(resolved.userId) !== Number(currentUserId);
+    const hasPrivateChat = this.db.chatMembers.some(cm =>
+      cm.user_id === currentUserId &&
+      (() => { const c = this.db.findChatById(cm.chat_id); return c && c.type === 'private' && Number(c.id) === Number(chatId); })()
+    );
+    if (isForeignUserToken && !hasPrivateChat) {
+      return this.send(ws, { type: 'public_resolved', token, chatId: -1 });
+    }
+    this.db.restoreChatForUser(chatId, currentUserId);
+    this.send(ws, { type: 'public_resolved', token, chatId });
   }
 
   handleCreateGroup(ws, msg) {

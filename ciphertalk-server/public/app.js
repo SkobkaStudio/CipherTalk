@@ -2270,6 +2270,11 @@ async function handleWSMessage(msg) {
       rebuildOnlineSet();
       renderChatList();
       if (currentChatId && !getChatById(currentChatId)) closeChat();
+      // Первичная загрузка по ссылке /<публичный id>: открываем чат из URL
+      if (!pendingUrlToken) {
+        const t0 = readChatTokenFromUrl();
+        if (t0) openChatByToken(t0);
+      }
       // Удалили чат на другом устройстве — вычищаем его из локального кэша
       for (const id of Object.keys(messages)) {
         if (!prevIds.has(Number(id))) continue;
@@ -2338,10 +2343,29 @@ async function handleWSMessage(msg) {
 
     case 'chat_created': {
       if (!getChatById(msg.chatId)) {
-        chats.unshift(normalizeChat({ id: msg.chatId, type: 'private', members: msg.members }));
+        chats.unshift(normalizeChat({ id: msg.chatId, type: 'private', members: msg.members, public_id: msg.public_id || '' }));
         renderChatList();
       }
       openChat(msg.chatId);
+      break;
+    }
+
+    case 'public_resolved': {
+      // Сервер разобрал токен из URL в chatId — открываем чат
+      const cid = Number(msg.chatId);
+      pendingUrlToken = null;
+      if (cid === -1) {
+        closeChat();
+        syncUrlToChat(null);
+      } else if (getChatById(cid)) {
+        openChat(cid);
+      } else {
+        let tries = 0;
+        const timer = setInterval(() => {
+          if (getChatById(cid)) { clearInterval(timer); openChat(cid); }
+          else if (++tries > 20) { clearInterval(timer); }
+        }, 300);
+      }
       break;
     }
 
