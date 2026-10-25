@@ -643,7 +643,53 @@ function updateEncryptionBadge() {
 
 // Медиа
 const mediaCache = new Map(); // url -> objectUrl
-const userStickers = [];      // пользовательские стикеры { id, svg, name }
+const USER_STICKERS_KEY = 'ciphertalk_user_stickers';
+// Пользовательские стикеры: { id, fileId, svg (dataURL-кэш для локальных),
+// url (серверный путь /uploads/...), name, animated }
+const userStickers = loadUserStickers();
+
+function loadUserStickers() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(USER_STICKERS_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((s) => s && s.id && (s.svg || s.url))
+      : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveUserStickers() {
+  try {
+    localStorage.setItem(USER_STICKERS_KEY, JSON.stringify(userStickers));
+  } catch (e) { /* ignore */ }
+}
+
+// Подтягиваем серверные стикеры пользователя (E2EE: сам файл на сервере —
+// шифротекст; здесь мы храним только URL и метаду).
+async function fetchServerStickers() {
+  if (!authToken) return;
+  try {
+    const res = await fetch(SERVER_URL + '/api/stickers', {
+      headers: { Authorization: 'Bearer ' + authToken }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const s of (data.stickers || [])) {
+      if (!userStickers.find((u) => u.id === s.id)) {
+        userStickers.push({
+          id: s.id,
+          fileId: s.fileId,
+          url: s.url,
+          name: s.name,
+          animated: !!s.animated,
+          server: true
+        });
+      }
+    }
+    saveUserStickers();
+  } catch (e) { /* сеть недоступна — работаем с локальным кэшем */ }
+}
 const activeMediaUrls = new Set(); // URL, которые сейчас используются для воспроизведения
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -975,7 +1021,7 @@ function getChatName(chat) {
 }
 
 function getChatAvatar(chat) {
-  if (chat.type === 'saved') return '⭐';
+  if (chat.type === 'saved') return '*';
   const name = getChatName(chat);
   return name[0]?.toUpperCase() || '?';
 }
@@ -3095,7 +3141,7 @@ async function buildMessageContent(msg, chat, key, animate = false) {
     return div;
   }
 
-  if (msg.type === 'sticker') return buildSticker(payload, key);
+  if (msg.type === 'sticker' || msg.type === 'custom_sticker') return buildSticker(payload, key);
   if (msg.type === 'image') return buildImage(payload, key);
   if (msg.type === 'voice') return buildVoice(payload, key);
   if (msg.type === 'video') return buildVideo(payload, key);
@@ -3596,6 +3642,12 @@ function resetRecordingUI() {
 }
 
 // ==================== СТИКЕРЫ ====================
+function stickerSrc(s) {
+  // Для серверных стикеров картинка зашифрована (application/octet-stream),
+  // поэтому <img src> по URL не сработает — используем локальный dataURL-кэш.
+  return s.svg || s.url || '';
+}
+
 function openStickerPicker() {
   if (!currentChatId) {
     showToast(I18N.t('err.pickChat'), 'error');
@@ -3607,15 +3659,19 @@ function openStickerPicker() {
     </button>`).join('');
   const userItems = userStickers.map((s) => `
     <button class="sticker-item" data-action="sendUserSticker" data-id="${s.id}" title="${escapeHtml(s.name || s.id)}">
-      <img src="${escapeHtml(s.svg)}" alt="${escapeHtml(s.name || s.id)}" loading="lazy">
+      <img src="${escapeHtml(stickerSrc(s))}" alt="${escapeHtml(s.name || s.id)}" loading="lazy">
+      ${s.animated ? '<span class="sticker-animated-badge">GIF</span>' : ''}
     </button>`).join('');
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('chat.stickers')}</h2>
     <div class="sticker-picker">${systemItems}${userItems}</div>
-    <div style="margin-top:12px;padding:8px;border-top:1px solid var(--border);">
-      <button class="btn btn-secondary" data-action="openStickerCreator" style="width:100%;padding:8px;">
+    <div style="margin-top:12px;padding:8px;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <button class="btn btn-secondary" data-action="openStickerCreator" style="flex:1;padding:8px;">
         ${Icons.svg('plus', { className: 'mq-icon--sm' })} ${I18N.t('sticker.create')}
+      </button>
+      <button class="btn btn-secondary" data-action="openMyStickers" style="flex:1;padding:8px;">
+        ${Icons.svg('settings', { className: 'mq-icon--sm' })} ${I18N.t('sticker.myStickers')}
       </button>
     </div>
   `);
@@ -3632,10 +3688,58 @@ async function openStickerCreator() {
     </div>
     <div class="input-group">
       <label>${I18N.t('sticker.file')}</label>
-      <input type="file" id="sticker-file-input" accept="image/*">
+      <input type="file" id="sticker-file-input" accept="image/png,image/jpeg,image/webp,image/gif">
+      <small style="opacity:.7">${I18N.t('sticker.hint')}</small>
     </div>
-    <button class="btn" data-action="createSticker">${I18N.t('sticker.create')}</button>
+    <button class="btn" data-action="createSticker">${I18N.t('sticker.upload')}</button>
   `);
+}
+
+// Проверка анимации на клиенте по «сырым» байтам (Canvas для GIF/WebP не
+// используется, чтобы не убить анимацию при перерисовке).
+async function isAnimatedFile(file) {
+  if (file.type === 'image/gif') {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let frames = 0;
+    for (let i = 0; i + 1 < buf.length; i++) {
+      if (buf[i] === 0x21 && buf[i + 1] === 0xF9) frames++;
+      if (frames >= 2) return true;
+    }
+    return false;
+  }
+  if (file.type === 'image/webp') {
+    const head = new Uint8Array(await file.slice(0, Math.min(file.size, 64 * 1024)).arrayBuffer());
+    const asChars = String.fromCharCode.apply(null, head);
+    return asChars.includes('ANIM') || asChars.includes('ANMF');
+  }
+  return false;
+}
+
+// Центрированная обрезка до квадрата 512x512 + сжатие в WebP (только статика)
+async function cropToSticker(file) {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  try {
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error(I18N.t('sticker.errDecode')));
+      img.src = url;
+    });
+    const SIZE = 512;
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const sx = Math.round((img.naturalWidth - side) / 2);
+    const sy = Math.round((img.naturalHeight - side) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
+    return blob || file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function createSticker() {
@@ -3651,20 +3755,113 @@ async function createSticker() {
     return;
   }
   const file = fileInput.files[0];
-  if (file.size > 2 * 1024 * 1024) {
-    showToast(I18N.t('profile.tooBig'), 'error');
+  if (file.size > 1024 * 1024) {
+    showToast(I18N.t('sticker.errTooBig'), 'error');
     return;
   }
-  const dataUrl = await fileToDataURL(file);
-  const stickerId = 'user-' + Date.now();
-  userStickers.push({ id: stickerId, svg: dataUrl, name });
+
+  const animated = await isAnimatedFile(file);
+  // Статичные PNG/JPEG (и неанимированные WebP) режем через Canvas;
+  // анимированные GIF/WebP отправляем как есть.
+  const outBlob = animated ? file : await cropToSticker(file);
+  const outName = animated ? (file.name || 'sticker') : ('sticker-' + Date.now() + '.webp');
+
+  // Загружаем на сервер: POST /api/stickers (проверит размер и тип ещё раз)
+  const form = new FormData();
+  form.append('name', name);
+  form.append('file', outBlob, outName);
+  let serverData;
+  try {
+    const res = await fetch(SERVER_URL + '/api/stickers', {
+      method: 'POST',
+      headers: authToken ? { Authorization: 'Bearer ' + authToken } : {},
+      body: form
+    });
+    serverData = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(serverData.error || I18N.t('sticker.errUpload'), 'error');
+      return;
+    }
+  } catch (e) {
+    showToast(I18N.t('sticker.errUpload') + ' ' + e.message, 'error');
+    return;
+  }
+
+  // dataURL-копию храним локально: серверный файл — шифротекст, обычный
+  // <img src="/uploads/..."> его не отобразит без дешифровки на клиенте.
+  const previewUrl = await fileToDataURL(outBlob);
+  userStickers.unshift({
+    id: serverData.id,
+    fileId: serverData.fileId,
+    svg: previewUrl,
+    url: serverData.url,
+    name,
+    animated: !!serverData.animated,
+    server: true
+  });
+  saveUserStickers();
   closeModal();
   showToast(I18N.t('sticker.created'), 'success');
   openStickerPicker();
 }
 
-async function sendUserSticker(stickerId) {
-  const sticker = userStickers.find(s => s.id === stickerId);
+// Вкладка «Мои стикеры»: список с кнопками «Удалить» и «Загрузить стикер»
+async function openMyStickers() {
+  closeModal();
+  await fetchServerStickers();
+  renderMyStickers();
+}
+
+function renderMyStickers() {
+  const items = userStickers.map((s) => `
+    <div class="my-sticker-item">
+      <img src="${escapeHtml(stickerSrc(s))}" alt="${escapeHtml(s.name || '')}" loading="lazy">
+      <div class="my-sticker-meta">
+        <span class="my-sticker-name">${escapeHtml(s.name || s.id)}</span>
+        ${s.animated ? '<span class="sticker-animated-badge">GIF</span>' : ''}
+      </div>
+      <button class="btn btn-danger btn-sm" data-action="deleteUserSticker" data-id="${s.id}">
+        ${Icons.svg('trash', { className: 'mq-icon--sm' })} ${I18N.t('sticker.delete')}
+      </button>
+    </div>`).join('');
+  showModal(`
+    <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
+    <h2>${I18N.t('sticker.myStickers')}</h2>
+    <div class="my-stickers-list">${items || `<p style="opacity:.7">${I18N.t('sticker.empty')}</p>`}</div>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <button class="btn" data-action="openStickerCreator" style="flex:1;">
+        ${Icons.svg('upload', { className: 'mq-icon--sm' })} ${I18N.t('sticker.upload')}
+      </button>
+    </div>
+  `);
+}
+
+async function deleteUserSticker(stickerId) {
+  const idx = userStickers.findIndex((s) => String(s.id) === String(stickerId));
+  if (idx === -1) return;
+  const sticker = userStickers[idx];
+  try {
+    const res = await fetch(SERVER_URL + '/api/stickers/' + encodeURIComponent(stickerId), {
+      method: 'DELETE',
+      headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
+    });
+    if (!res.ok && res.status !== 404) {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || I18N.t('sticker.errDelete'), 'error');
+      return;
+    }
+  } catch (e) {
+    showToast(I18N.t('sticker.errDelete') + ' ' + e.message, 'error');
+    return;
+  }
+  userStickers.splice(idx, 1);
+  saveUserStickers();
+  renderMyStickers();
+  showToast(I18N.t('sticker.deleted'), 'success');
+}
+
+async function sendSticker(stickerId) {
+  const sticker = Icons.STICKERS.find((s) => s.id === stickerId);
   if (!sticker) return;
   if (!currentChatId) {
     showToast(I18N.t('err.pickChat'), 'error');
@@ -3673,14 +3870,37 @@ async function sendUserSticker(stickerId) {
   const chatIdAtStart = currentChatId;
   closeModal();
   try {
-    // Конвертируем dataURL в blob
-    const response = await fetch(sticker.svg);
-    const blob = await response.blob();
+    const blob = new Blob([sticker.svg], { type: 'image/svg+xml' });
     await sendMediaBlob(blob, 'sticker', {
       chatId: chatIdAtStart,
       duration: 0,
-      name: `sticker-${sticker.name}.${fileInputMime(blob)}`,
-      mime: blob.type || 'image/png'
+      name: `sticker-${sticker.id}.svg`,
+      mime: 'image/svg+xml'
+    });
+  } catch (err) {
+    showToast(I18N.t('err.sendFailed') + ' ' + err.message, 'error');
+  }
+}
+
+async function sendUserSticker(stickerId) {
+  const sticker = userStickers.find(s => String(s.id) === String(stickerId));
+  if (!sticker) return;
+  if (!currentChatId) {
+    showToast(I18N.t('err.pickChat'), 'error');
+    return;
+  }
+  const chatIdAtStart = currentChatId;
+  closeModal();
+  try {
+    // Берём локальную dataURL-копию (или серверный URL, если он доступен как
+    // картинка напрямую). Браузер сам проиграет анимацию GIF/WebP в <img>.
+    const response = await fetch(stickerSrc(sticker));
+    const blob = await response.blob();
+    await sendMediaBlob(blob, 'custom_sticker', {
+      chatId: chatIdAtStart,
+      duration: 0,
+      name: `sticker-${sticker.name || sticker.id}.${fileInputMime(blob)}`,
+      mime: blob.type || 'image/webp'
     });
   } catch (err) {
     showToast(I18N.t('err.upload') + ' ' + err.message, 'error', 'alert-circle');
