@@ -1,3 +1,4 @@
+cat > /home/CipherTalk/ciphertalk-server/src/db/database.js << 'EOF'
 const fs = require('fs');
 const path = require('path');
 const BetterSqlite3 = require('better-sqlite3-multiple-ciphers');
@@ -18,6 +19,9 @@ function safeJson(value, fallback) {
   if (typeof value === 'object') return value;
   try { return JSON.parse(value); } catch (e) { return fallback; }
 }
+
+// Константа вынесена ЗА пределы класса, чтобы избежать синтаксической ошибки
+const SCHEMA_VERSION = 6;
 
 class Database {
   constructor() {
@@ -248,12 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
 
   // ==================== ЗАЩИТА БД ОТ ПОЛОМОК ====================
 
-  // Текущая версия схемы. При каждом изменении структуры таблиц увеличивайте.
-  const SCHEMA_VERSION = 6;
-
-  async function backupDbFile() {
-    const fs = require('fs');
-    const path = require('path');
+  async backupDbFile() {
     const src = this.sqlitePath;
     if (!fs.existsSync(src)) return null;
     const backupDir = path.join(path.dirname(src), 'backups');
@@ -262,7 +261,6 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
     const dst = path.join(backupDir, `ciphertalk-db.sqlite.bak.${ts}`);
     try {
       fs.copyFileSync(src, dst);
-      // Также бэкапим ключи шифрования и JWT
       for (const suffix of ['.dbkey', '.key', '.jwt-secret', '-wal', '-shm']) {
         const p = src + suffix;
         if (fs.existsSync(p)) {
@@ -277,7 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
     }
   }
 
-  function runIntegrityCheck() {
+  runIntegrityCheck() {
     try {
       const row = this.db.prepare('PRAGMA integrity_check').get();
       return row && row.integrity_check === 'ok';
@@ -287,7 +285,7 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
     }
   }
 
-  function checkpointWal() {
+  checkpointWal() {
     try {
       this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').run();
     } catch (e) {
@@ -296,7 +294,6 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
   }
 
   migrateSchema() {
-    // Создаём таблицу метаданных схемы, если ещё нет
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS db_meta (
         key TEXT PRIMARY KEY,
@@ -304,25 +301,21 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
       );
     `);
 
-    // Проверяем текущую версию
     const row = this.db.prepare('SELECT value FROM db_meta WHERE key = ?').get('schema_version');
     const currentVersion = row ? Number(row.value) : 0;
 
     if (currentVersion >= SCHEMA_VERSION) {
-      // Схема актуальна — только проверяем целостность и чистим WAL
-      if (!runIntegrityCheck.call(this)) {
+      if (!this.runIntegrityCheck()) {
         console.error('[DB] Integrity check failed! Attempting restore from backup...');
         this.restoreFromLatestBackup();
       }
-      checkpointWal.call(this);
+      this.checkpointWal();
       return;
     }
 
-    // Бэкап перед любыми изменениями схемы
-    backupDbFile.call(this);
+    this.backupDbFile();
 
     const migrations = [
-      // v1 -> v2
       () => {
         const cols = [
           ['users', 'email TEXT'],
@@ -335,15 +328,13 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
           ['messages', 'expires_at INTEGER']
         ];
         for (const [table, column] of cols) {
-          try { this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch (e) { /* columna ya existe */ }
+          try { this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column}`).run(); } catch (e) {}
         }
       },
-      // v2 -> v3
       () => {
         try { this.db.prepare('CREATE TABLE IF NOT EXISTS message_edits (id INTEGER PRIMARY KEY, message_id INTEGER, old_content TEXT, new_content TEXT, edited_at INTEGER)').run(); } catch (e) {}
         try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id)').run(); } catch (e) {}
       },
-      // v3 -> v4
       () => {
         try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)').run(); } catch (e) {}
         try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id)').run(); } catch (e) {}
@@ -351,19 +342,16 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
         try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_vcodes_expires ON verification_codes(expires_at)').run(); } catch (e) {}
         try { this.db.prepare('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)').run(); } catch (e) {}
       },
-      // v4 -> v5
       () => {
         try { this.db.prepare('CREATE TABLE IF NOT EXISTS group_keys (chat_id INTEGER PRIMARY KEY, version INTEGER, wrapped TEXT, created_by INTEGER, created_at INTEGER, updated_at INTEGER)').run(); } catch (e) {}
         try { this.db.prepare('CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT, emoji TEXT, color TEXT, chat_ids TEXT, created_at INTEGER, updated_at INTEGER)').run(); } catch (e) {}
         try { this.db.prepare('CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, filename TEXT, original_name TEXT, size INTEGER, mimetype TEXT, uploader_id INTEGER, created_at INTEGER)').run(); } catch (e) {}
       },
-      // v5 -> v6
       () => {
         try { this.db.prepare('ALTER TABLE chats ADD COLUMN avatar TEXT').run(); } catch (e) {}
       }
     ];
 
-    // Применяем миграции последовательно от текущей версии до целевой
     for (let v = currentVersion; v < SCHEMA_VERSION; v++) {
       try {
         console.log(`[DB] Applying migration v${v} -> v${v + 1}...`);
@@ -371,33 +359,27 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
         this.db.prepare('INSERT OR REPLACE INTO db_meta(key, value) VALUES(?, ?)').run('schema_version', String(v + 1));
       } catch (e) {
         console.error(`[DB] Migration v${v} -> v${v + 1} failed:`, e.message);
-        // Пытаемся восстановить из бэкапа
         this.restoreFromLatestBackup();
         throw e;
       }
     }
 
-    // Финальная проверка целостности
-    if (!runIntegrityCheck.call(this)) {
+    if (!this.runIntegrityCheck()) {
       console.error('[DB] Integrity check failed after migration! Restoring backup...');
       this.restoreFromLatestBackup();
     }
-    checkpointWal.call(this);
+    this.checkpointWal();
     console.log('[DB] Schema migration complete. Version:', SCHEMA_VERSION);
   }
 
   restoreFromLatestBackup() {
-    const fs = require('fs');
-    const path = require('path');
     const backupDir = path.join(path.dirname(this.sqlitePath), 'backups');
     if (!fs.existsSync(backupDir)) return false;
     const files = fs.readdirSync(backupDir).filter(f => f.startsWith('ciphertalk-db.sqlite.bak.')).sort().reverse();
     if (!files.length) return false;
     const latest = path.join(backupDir, files[0]);
     try {
-      // Восстанавливаем основной файл БД
       fs.copyFileSync(latest, this.sqlitePath);
-      // Восстанавливаем ключи
       for (const suffix of ['.dbkey', '.key', '.jwt-secret', '-wal', '-shm']) {
         const p = latest + suffix;
         if (fs.existsSync(p)) {
@@ -412,14 +394,13 @@ CREATE INDEX IF NOT EXISTS idx_message_edits_mid ON message_edits(message_id);
     }
   }
 
-  // Запускается при старте: гарантирует целую БД без потери данных
   ensureDatabaseHealth() {
     try {
-      if (!runIntegrityCheck.call(this)) {
+      if (!this.runIntegrityCheck()) {
         console.error('[DB] Database corrupted on startup! Restoring from backup...');
         this.restoreFromLatestBackup();
       }
-      checkpointWal.call(this);
+      this.checkpointWal();
     } catch (e) {
       console.error('[DB] Health check error:', e.message);
     }
@@ -1060,3 +1041,4 @@ module.exports = {
     return instance;
   }
 };
+EOF
