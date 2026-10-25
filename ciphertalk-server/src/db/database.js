@@ -8,10 +8,13 @@ const dbEncryptionService = require('../services/dbEncryptionService');
 // модулей и приводило к "TypeError: User is not a constructor").
 const User = require('../models/User');
 const {
+  padDigits,
   formatUserId,
   formatChatId,
   parsePublicId,
   privateChatInternalId,
+  USER_ID_DIGITS,
+  CHAT_ID_DIGITS,
   MAX_USER_INTERNAL_ID,
   MAX_CHAT_INTERNAL_ID
 } = require('../utils/ids');
@@ -146,11 +149,23 @@ class Database {
       this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_public_id ON chats(public_id)').run();
     } catch (e) { /* индекс уже есть */ }
 
+    // Счётчики считаются от максимального выданного номера (а не от числа
+    // строк): так вставка id «в разрыв» (после досрочного break при лимите)
+    // не создаёт дубликаты уникальных public_id.
+    const maxAssigned = (table) => {
+      const rows = this.db.prepare(`SELECT public_id FROM ${table} WHERE public_id IS NOT NULL AND public_id != ''`).all();
+      let mx = 0;
+      for (const r of rows) {
+        const digits = String(r.public_id).replace(/^-/, '');
+        const n = Number(digits);
+        if (Number.isFinite(n) && n > mx) mx = Math.floor(n);
+      }
+      return mx;
+    };
+
     const tx = this.db.transaction(() => {
       // --- Пользователи: счётчик с 1, сортировка по дате регистрации (старые первыми)
-      let userCounter = Number(
-        this.db.prepare("SELECT COUNT(*) AS c FROM users WHERE public_id IS NOT NULL AND public_id != ''").get().c
-      );
+      let userCounter = maxAssigned('users');
       const usersWithout = this.db.prepare(
         "SELECT id FROM users WHERE public_id IS NULL OR public_id = '' ORDER BY created_at ASC, id ASC"
       ).all();
@@ -164,21 +179,54 @@ class Database {
         upU.run(formatUserId(userCounter), row.id);
       }
 
-      // --- Чаты: группы/каналы -> отрицательные 14-значные, личные/избранное -> 8-значные
-      let chatCounter = Number(
-        this.db.prepare("SELECT COUNT(*) AS c FROM chats WHERE public_id IS NOT NULL AND public_id != ''").get().c
-      );
-      const chatsWithout = this.db.prepare(
-        "SELECT id, type FROM chats WHERE public_id IS NULL OR public_id = '' ORDER BY created_at ASC, id ASC"
+      // --- Группы и каналы: отрицательные 14-значные (-00000000000001 …)
+      let groupCounter = 0;
+      {
+        const gRows = this.db.prepare(
+          "SELECT public_id FROM chats WHERE public_id LIKE '-%'"
+        ).all();
+        for (const r of gRows) {
+          const n = Number(String(r.public_id).replace(/^-/, ''));
+          if (Number.isFinite(n) && n > groupCounter) groupCounter = Math.floor(n);
+        }
+      }
+      const groupsWithout = this.db.prepare(
+        "SELECT id FROM chats WHERE (public_id IS NULL OR public_id = '') " +
+        "AND type IN ('group', 'supergroup', 'channel') ORDER BY created_at ASC, id ASC"
       ).all();
-      const upC = this.db.prepare('UPDATE chats SET public_id = ? WHERE id = ?');
-      for (const row of chatsWithout) {
-        chatCounter += 1;
-        if (chatCounter > MAX_CHAT_INTERNAL_ID) {
-          console.error('[DB] Лимит 14-значных id чатов исчерпан');
+      const upG = this.db.prepare('UPDATE chats SET public_id = ? WHERE id = ?');
+      for (const row of groupsWithout) {
+        groupCounter += 1;
+        if (groupCounter > MAX_CHAT_INTERNAL_ID) {
+          console.error('[DB] Лимит 14-значных id групп/каналов исчерпан');
           break;
         }
-        upC.run(formatChatId(chatCounter, row.type || 'private'), row.id);
+        upG.run('-' + padDigits(groupCounter, CHAT_ID_DIGITS), row.id);
+      }
+
+      // --- «Избранное»: публичный id = публичный id владельца (ссылка /00000001)
+      this.db.prepare(
+        "UPDATE chats SET public_id = " +
+        "(SELECT u.public_id FROM users u WHERE u.id = chats.owner_id) " +
+        "WHERE type = 'saved' AND owner_id IS NOT NULL " +
+        "AND (public_id IS NULL OR public_id = '') " +
+        "AND EXISTS (SELECT 1 FROM users u WHERE u.id = chats.owner_id AND u.public_id IS NOT NULL AND u.public_id != '')"
+      ).run();
+
+      // --- Остальные личные чаты: публичный id = id собеседника (обновляется
+      // при каждом старте — участники могли смениться)
+      const privChats = this.db.prepare(
+        "SELECT id FROM chats WHERE type = 'private' OR (type = 'saved' AND (public_id IS NULL OR public_id = ''))"
+      ).all();
+      const upP = this.db.prepare('UPDATE chats SET public_id = ? WHERE id = ?');
+      const mRow = this.db.prepare('SELECT user_id FROM chat_members WHERE chat_id = ? ORDER BY joined_at ASC, rowid ASC LIMIT 2');
+      const uPub = this.db.prepare('SELECT public_id FROM users WHERE id = ?');
+      for (const row of privChats) {
+        const ms = mRow.all(row.id);
+        if (!ms.length) continue;
+        const otherId = ms.length > 1 ? ms[1].user_id : ms[0].user_id;
+        const pu = uPub.get(otherId);
+        if (pu && pu.public_id) upP.run(pu.public_id, row.id);
       }
     });
 
@@ -196,15 +244,28 @@ class Database {
   }
 
   /** Внутренний id чата -> публичный («-00000000000001» для групп/каналов, иначе 8-значный). */
-  getPublicChatId(internalId, type) {
+  getPublicChatId(internalId, type, requesterId = null) {
     const cid = Number(internalId);
     if (cid < 0) {
       // Личный чат собеседника: публичный id = id собеседника (8 значных)
-      const other = this.getPrivateChatOtherUserId(cid);
+      const other = this.getPrivateChatOtherUserId(cid, requesterId != null ? Number(requesterId) : null);
       return other ? this.getPublicUserId(other) : '';
     }
-    const r = this.db.prepare('SELECT public_id, type FROM chats WHERE id = ?').get(cid);
-    if (r && r.public_id) return r.public_id;
+    const r = this.db.prepare('SELECT public_id, type, owner_id FROM chats WHERE id = ?').get(cid);
+    if (r && r.public_id) {
+      // «Избранное»: токен совпадает с id владельца; если у токена уже есть
+      // владелец-пользователь (например, аккаунт удалили и id освободился),
+      // отдаём id собеседника, чтобы ссылка вела в нужный диалог.
+      if (r.type === 'saved' && requesterId != null && Number(r.owner_id) !== Number(requesterId)) {
+        const u = this.db.prepare('SELECT id FROM users WHERE public_id = ? AND id != ?').get(r.public_id, Number(requesterId));
+        if (!u) return r.public_id;
+      } else {
+        return r.public_id;
+      }
+    }
+    if (Number.isInteger(cid) && cid > 0) {
+      return formatChatId(cid, (r && r.type) || type || 'private');
+    }
     return formatChatId(cid, (r && r.type) || type || 'private');
   }
 

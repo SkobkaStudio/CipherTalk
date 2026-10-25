@@ -17,7 +17,7 @@ const MAX_CHAT_INTERNAL_ID = 99999999999999; // 10^14 - 1
 // 'private' — не в списке: публичный id личного чата совпадает с id собеседника.
 const NEGATIVE_CHAT_TYPES = new Set(['group', 'supergroup', 'channel']);
 
-function padDigits(n, digits) {
+function padDigits(n, digits) { // eslint-disable-line no-unused-vars
   let s = String(Math.abs(Math.trunc(Number(n) || 0)));
   if (s.length < digits) s = '0'.repeat(digits - s.length) + s;
   return s;
@@ -100,6 +100,7 @@ module.exports = {
   MAX_CHAT_INTERNAL_ID,
   NEGATIVE_CHAT_TYPES,
   PRIVATE_CHAT_MULT,
+  padDigits,
   formatUserId,
   formatChatId,
   parsePublicId,

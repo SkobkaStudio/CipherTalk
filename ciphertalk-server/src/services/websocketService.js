@@ -1366,6 +1366,10 @@ class WebSocketService {
     }
     return {
       ...(chat.toJSON ? chat.toJSON() : chat),
+      // Публичный id для ссылки в браузере: /00000001 (собеседник/Избранное)
+      // или /-00000000000001 (группа/канал). Для личного чата — id
+      // собеседника относительно конкретного участника.
+      public_id: this.db.getPublicChatId(chat.id, chat.type, requesterId),
       members,
       other_user,
       last_message: lastContent || '',
@@ -1400,6 +1404,7 @@ class WebSocketService {
         const isSelf = requesterId === null || u.id === requesterId;
         return {
           id: u.id,
+          public_id: this.db.getPublicUserId(u.id),
           name: u.name,
           firstName: u.first_name,
           lastName: u.last_name,
