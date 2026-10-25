@@ -5,15 +5,11 @@ const { maskPhone } = require('../utils/mask');
 const { isOwnerPhone } = require('../utils/owner');
 const { normalizeTtlSeconds, expiresAtFor, isExpired } = require('../utils/messageExpiry');
 const sessionService = require('./sessionService');
-const logger = require('../utils/logger');
 const { getDatabase } = require('../db/database');
-const { StickerService } = require('./stickerService');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 
 const MAX_SOCKETS_PER_USER = 20;
-// custom_sticker оставлен на один релиз для старых клиентов: новый UI шлёт
-// фрейм sticker_send и тип 'sticker'. @deprecated — удалить после релиза N+1.
 const ALLOWED_MESSAGE_TYPES = new Set(['text', 'file', 'image', 'voice', 'video', 'sticker', 'custom_sticker']);
 const MAX_CIPHERTEXT_CHARS = 400 * 1024;
 
@@ -24,7 +20,6 @@ class WebSocketService {
       maxPayload: config.wsMaxPayload
     });
     this.db = getDatabase();
-    this.stickers = new StickerService(this.db);
     this.heartbeatTimer = null;
     this.onlinePingTimer = null;
     this.expiryTimer = null;
@@ -86,8 +81,6 @@ class WebSocketService {
       'create_group': () => this.handleCreateGroup(ws, msg),
       'create_channel': () => this.handleCreateChannel(ws, msg),
       'send_message': () => this.handleSendMessage(ws, msg),
-      // Единое имя поля чата для новых стикер-фреймов — chat_id (как в REST).
-      'sticker_send': () => this.handleStickerSend(ws, msg),
       'edit_message': () => this.handleEditMessage(ws, msg),
       'delete_message': () => this.handleDeleteMessage(ws, msg),
       'get_messages': () => this.handleGetMessages(ws, msg),
@@ -483,86 +476,6 @@ class WebSocketService {
     });
   }
 
-  /**
-   * Фрейм {type:'sticker_send', chat_id, sticker_id, client_msg_id} — отдельный
-   * от send_message путь стикеров. Стикеры не являются частью E2EE-контента:
-   * в БД сохраняется type='sticker' с sticker_id и пустыми encrypted_content/iv/header.
-   * @param {WebSocket} ws
-   * @param {{chat_id: number|string, sticker_id: string, client_msg_id?: string}} msg
-   */
-  handleStickerSend(ws, msg) {
-    const currentUserId = ws.userId;
-    const chatId = Number(msg.chat_id);
-    if (!Number.isInteger(chatId) || chatId <= 0) {
-      return this.sendError(ws, 'bad_request', 'Некорректный chat_id');
-    }
-    if (!this.db.isChatMember(chatId, currentUserId)) {
-      return this.sendError(ws, 'forbidden', 'Вы не участник этого чата');
-    }
-
-    const stickerId = typeof msg.sticker_id === 'string' ? msg.sticker_id.slice(0, 64) : '';
-    const sticker = stickerId ? this.db.findStickerById(stickerId) : null;
-    if (!sticker) {
-      return this.sendError(ws, 'bad_request', 'Стикер не найден');
-    }
-    // Доступ: публичный пак — всем, приватный — только владельцу.
-    if (!this.stickers.checkAccess(sticker.id, currentUserId)) {
-      return this.sendError(ws, 'forbidden', 'Нет доступа к этому стикеру');
-    }
-
-    const now = Date.now();
-    const message = new Message({
-      id: this.db.nextId('messages'),
-      chat_id: chatId,
-      sender_id: currentUserId,
-      type: 'sticker',
-      sticker_id: sticker.id,
-      created_at: now
-    });
-    this.db.addMessage(message);
-    this.stickers.markUsed(currentUserId, sticker.id);
-
-    const sender = this.db.findUserById(currentUserId);
-    const members = this.getChatMemberIds(chatId);
-    const restored = this.db.restoreHiddenChatMembers(chatId);
-    const chatForRestored = restored.length ? this.db.findChatById(chatId) : null;
-    restored.forEach(uid => {
-      if (!chatForRestored) return;
-      presenceService.sendToUser(uid, {
-        type: 'new_chat',
-        chat: this.getChatWithDetails(chatForRestored, this.getChatMembersWithDetails(chatId, uid), uid)
-      });
-    });
-
-    // <img src> не передаёт Authorization: приватные паки раздаются по signed
-    // URL, поэтому сериализуем сообщение отдельно для каждого зрителя.
-    for (const uid of members) {
-      presenceService.sendToUser(uid, {
-        type: 'new_message',
-        client_msg_id: typeof msg.client_msg_id === 'string' ? msg.client_msg_id.slice(0, 64) : undefined,
-        message: this.serializeMessage(this.db.findMessageById(message.id), uid)
-      });
-    }
-
-    presenceService.sendToChatMembers(members, {
-      type: 'chat_updated',
-      chatId,
-      lastMessage: '[стикер]',
-      lastMessageIv: '',
-      lastMessageHeader: '',
-      lastMessageType: 'sticker',
-      lastMessageTime: now,
-      lastSenderId: currentUserId,
-      senderName: sender?.name
-    });
-
-    this.send(ws, {
-      type: 'sticker_sent',
-      client_msg_id: typeof msg.client_msg_id === 'string' ? msg.client_msg_id : undefined,
-      message: this.serializeMessage(this.db.findMessageById(message.id), currentUserId)
-    });
-  }
-
   handleEditMessage(ws, msg) {
     const currentUserId = ws.userId;
     const messageId = Number(msg.messageId);
@@ -679,31 +592,7 @@ class WebSocketService {
   /**
    * Сериализация сообщения для WebSocket. Сервер отдаёт шифротекст как есть.
    */
-  /**
-   * DTO стикера для конкретного зрителя: владелец приватного пака получает
-   * signed URL, остальные — метаданные без url.
-   * @param {string} stickerId
-   * @param {number|null} viewerId
-   * @returns {object|null}
-   */
-  stickerForViewer(stickerId, viewerId) {
-    const sticker = this.db.findStickerById(stickerId);
-    if (!sticker) return null;
-    const pack = this.db.findStickerPackById(sticker.pack_id);
-    if (!pack) return null;
-    if (pack.is_public) return this.stickers.stickerDto(sticker);
-    if (Number(pack.author_id) === Number(viewerId)) return this.stickers.stickerDto(sticker, viewerId);
-    const dto = this.stickers.stickerDto(sticker);
-    dto.url = null;
-    return dto;
-  }
-
-  /**
-   * Сериализация сообщения для WS-фреймов.
-   * @param {object} m - строка messages
-   * @param {number|null} viewerId - зритель (для signed URL приватных стикеров в <img>)
-   */
-  serializeMessage(m, viewerId = null) {
+  serializeMessage(m) {
     const sender = this.db.findUserById(m.sender_id);
     if (m.deleted_for_all) {
       return {
@@ -737,13 +626,6 @@ class WebSocketService {
       iv: m.iv,
       header: m.header || '',
       type: m.type,
-      sticker_id: m.sticker_id || null,
-      // Для стикеров сервер сразу отдаёт публичные метаданные (url/размеры),
-      // клиенту не нужно ничего расшифровывать. Приватные паки: подписанный
-      // URL выдаётся только владельцу пака; остальным — без url (<img> не
-      // умеет Authorization, а раздавать чужие приватные файлы по подписи
-      // третьего лица нельзя).
-      sticker: m.type === 'sticker' && m.sticker_id ? this.stickerForViewer(m.sticker_id, viewerId) : undefined,
       reply_to: m.reply_to,
       forwarded_from: m.forwarded_from,
       edited: m.edited,
