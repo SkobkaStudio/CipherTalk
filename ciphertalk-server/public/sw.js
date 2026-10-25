@@ -1,6 +1,6 @@
 /* CipherTalk service worker: network-first для оболочки, API не кешируем.
    Плюс фон: собственный WebSocket для уведомлений при закрытой вкладке. */
-const CACHE = 'ciphertalk-v13';
+const CACHE = 'ciphertalk-v14';
 const SHELL = [
   '/',
   '/index.html',
@@ -108,7 +108,7 @@ function bgScheduleReconnect(delay = 3000) {
 }
 
 async function bgConnect() {
-  if (bgWs) return;
+  if (bgWs && bgWs.readyState !== WebSocket.CLOSED) return;
   // Сначала свежий токен от живых вкладок, иначе — последний известный
   const token = (await getTokenFromClients()) || lastKnownToken;
   if (!token) return; // выхода нет — попробуем позже, когда страница откроется
@@ -137,7 +137,8 @@ async function bgConnect() {
     let msg;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     if (msg.type === 'auth_error') {
-      // Токен недействителен — переподключение бессмысленно до нового входа
+      // Токен недействителен — переподключение бессмысленно до нового входа.
+      // Ждём свежий ct-bg-init от страницы (после логина она шлёт его снова).
       bgDisconnect();
       bgStaleToken = true;
       lastKnownToken = null;
@@ -146,9 +147,9 @@ async function bgConnect() {
     if (msg.type === 'pong' || msg.type === 'chats' || msg.type === 'folders') return;
     if (msg.type !== 'new_message' || !msg.message) return;
 
-    // Пока хоть одна вкладка видима — уведомления показывает страница (без дублей).
-    // Вкладка видимая, но НЕ в фокусе — страница тоже покажет (см. showNotification),
-    // поэтому пропускаем только по-настоящему активные вкладки.
+    // Дедупликация: уведомление показывает либо страница (когда её вкладка
+    // видима И в фокусе — тогда пользователь и так всё видит), либо фон для
+    // всех остальных случаев. Здесь пропускаем только «видимая и в фокусе».
     const active = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (active.some(c => c.visibilityState === 'visible' && c.focused)) return;
 
@@ -245,12 +246,14 @@ self.addEventListener('message', (event) => {
     currentUser = d.user ? { id: d.user.id } : null;
     if (typeof d.muted === 'boolean') notifMuted = d.muted;
     if (!d.token) { bgDisconnect(); lastKnownToken = null; return; }
+    const tokenChanged = lastKnownToken !== d.token;
     lastKnownToken = d.token;
-    // Переподключаемся, если соединения нет или оно мёртвое.
-    // ВАЖНО: живой OPEN/CLOSING-сокет не рвём — иначе при каждой перезагрузке
-    // страницы новый сокет упирался бы в «уже авторизован» и фон замолкал.
+    // Переподключаемся, если соединения нет, оно мёртвое, либо токен сменился
+    // (перелогин — старый сокет авторизован старым токеном и присылает не то).
+    // ВАЖНО: живой OPEN-сокет с тем же токеном не рвём — иначе при каждой
+    // перезагрузке страницы новый сокет упирался бы в «уже авторизован».
     const alive = bgWs && bgWs.readyState !== WebSocket.CLOSED;
-    if (!alive) {
+    if (!alive || tokenChanged) {
       bgDisconnect();
       bgConnect();
     }
