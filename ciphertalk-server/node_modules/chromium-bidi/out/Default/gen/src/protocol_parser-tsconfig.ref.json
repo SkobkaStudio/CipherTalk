@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationDir": ".",
+    "emitDeclarationOnly": true,
+    "outDir": ".",
+    "rootDir": "../../../../../../third_party/chromium-bidi/src",
+    "rootDirs": [
+      "../../../../../../third_party/devtools-frontend/src/",
+      "../../devtools-frontend/src/"
+    ],
+    "skipLibCheck": true
+  },
+  "files": [
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi-bluetooth.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi-digital-credentials.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi-nav-speculation.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi-permissions.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi-ua-client-hints.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/generated/webdriver-bidi.ts",
+    "../../../../../../third_party/chromium-bidi/src/protocol-parser/protocol-parser.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/legacy/legacy-defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/global_typings/global_defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filesystem/index.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filewriter/index.d.ts"
+  ],
+  "references": [
+    {
+      "path": "protocol-tsconfig.ref.json"
+    }
+  ]
+}

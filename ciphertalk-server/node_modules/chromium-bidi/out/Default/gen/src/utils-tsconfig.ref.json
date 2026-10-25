@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationDir": ".",
+    "emitDeclarationOnly": true,
+    "outDir": ".",
+    "rootDir": "../../../../../../third_party/chromium-bidi/src",
+    "rootDirs": [
+      "../../../../../../third_party/devtools-frontend/src/",
+      "../../devtools-frontend/src/"
+    ],
+    "skipLibCheck": true
+  },
+  "files": [
+    "../../../../../../third_party/chromium-bidi/src/utils/Buffer.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/DefaultMap.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/Deferred.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/EventEmitter.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/IdWrapper.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/Mutex.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/ProcessingQueue.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/assert.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/base64.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/cdpErrorConstants.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/graphemeTools.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/log.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/result.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/time.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/transport.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/unitConversions.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/urlHelpers.ts",
+    "../../../../../../third_party/chromium-bidi/src/utils/uuid.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/legacy/legacy-defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/front_end/global_typings/global_defs.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filesystem/index.d.ts",
+    "../../../../../../third_party/devtools-frontend/src/node_modules/@types/filewriter/index.d.ts"
+  ],
+  "references": [
+
+  ]
+}

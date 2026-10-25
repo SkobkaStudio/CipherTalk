@@ -9,7 +9,7 @@
       и фону; уведомление показывает ТОТ, кто первый: страница, если её
       вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
       через ct-notif-shown и не дублирует. */
-const CACHE = 'ciphertalk-v19';
+const CACHE = 'ciphertalk-v20';
 const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',
@@ -400,11 +400,19 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+// URL-токен чата для deep-link: группы/каналы — отрицательный id, остальные '/'
+function chatUrlToken(chatId) {
+  const n = Number(chatId);
+  if (!Number.isFinite(n)) return '/';
+  if (n < 0) return '/' + '-' + String(Math.abs(n)).padStart(14, '0');
+  return '/'; // приватные чаты в SW не резолвятся по id собеседника — открываем через postMessage
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   event.waitUntil((async () => {
-    const url = '/';
+    const url = data.chatId ? chatUrlToken(data.chatId) : '/';
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of all) {
       if ('focus' in client) {

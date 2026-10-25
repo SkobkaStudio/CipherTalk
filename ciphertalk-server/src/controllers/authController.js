@@ -311,7 +311,7 @@ class AuthController {
       this.db.users.push(user);
 
       // "Избранное"
-      const savedChatId = this.db.nextId('chats');
+      const savedChatId = this.db.nextChatId(false);
       this.db.chats.push(new Chat({
         id: savedChatId,
         type: 'saved',
