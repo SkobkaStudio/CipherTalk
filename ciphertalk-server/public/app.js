@@ -16,6 +16,8 @@ let authToken = localStorage.getItem('ciphertalk_token') || '';
 let chats = [];
 let currentChatId = null;
 let messages = {};          // chatId -> [normalized message]
+const chatCacheTimers = {}; // chatId -> таймер дебаунса записи в IndexedDB
+let chatsCacheTimer = null;
 // E2EE-состояние живёт в обще модуле /e2ee.js, здесь только кэш
 let onlineUsers = new Set();
 let typingTimeout = null;
@@ -1576,6 +1578,17 @@ function plaintextCacheKey(chatId, content) {
   return String(chatId) + '|' + (content || '');
 }
 
+// Быстрый доступ к уже расшифрованному тексту (для записи в IndexedDB-кэш)
+function getCachedPlaintext(chatId, content) {
+  const ck = plaintextCacheKey(chatId, content);
+  const mem = plaintextCache.get(ck);
+  if (typeof mem === 'string') return mem;
+  try {
+    const p = loadPersistedPlaintext()[ck];
+    return typeof p === 'string' ? p : '';
+  } catch (e) { return ''; }
+}
+
 function persistPlaintext(chatId, content, text) {
   if (typeof text !== 'string' || text.length > PLAINTEXT_CACHE_MAX_CHARS) return;
   const store = loadPersistedPlaintext();
@@ -1615,6 +1628,13 @@ async function decryptChatText(chatKey, message, chatId, isOwn = false) {
   const cached = plaintextCache.get(ck);
   if (typeof cached === 'string') return cached;
   if (cached && typeof cached.then === 'function') return cached; // уже идёт расшифровка
+
+  // Текст из IndexedDB-кэша чата (сообщения кэшируются уже расшифрованными)
+  if (typeof message.plain === 'string' && message.plain) {
+    plaintextCache.set(ck, message.plain);
+    persistPlaintext(chatId, raw, message.plain);
+    return message.plain;
+  }
 
   const persisted = loadPersistedPlaintext()[ck];
   if (typeof persisted === 'string') {
@@ -2063,9 +2083,27 @@ function updateMobileNav() {
 function initApp() {
   updateMenuProfile();
   setupMessagesScroll();
+  hydrateFromCache(); // мгновенный список чатов из IndexedDB (до ответа сервера)
   connectWebSocket();
   refreshPublicAccess();
   updateMobileNav();
+}
+
+// Оффлайн-первая загрузка: показываем кэшированный список чатов сразу,
+// не дожидаясь WebSocket/сервера. Актуальные данные придут следом и заменят его.
+async function hydrateFromCache() {
+  if (chats.length || !currentUser) return;
+  const rec = await idbGet('chats', 'list');
+  if (!rec || !Array.isArray(rec.list) || rec.list.length === 0) return;
+  if (chats.length) return; // сервер успел ответить раньше
+  chats = rec.list.map(normalizeChat).filter(c => {
+    // «Избранное» и личные чаты валидируем по участникам
+    if (!c.id) return false;
+    if (c.type === 'saved') return true;
+    return Array.isArray(c.members) && c.members.some(m => Number(m.id) === Number(currentUser.id));
+  });
+  rebuildOnlineSet();
+  renderChatList();
 }
 
 // ==================== ПРОКРУТКА СПИСКА СООБЩЕНИЙ ====================
@@ -2189,18 +2227,31 @@ async function handleWSMessage(msg) {
       handleSessionExpired();
       break;
 
-    case 'chats':
+    case 'chats': {
+      const prevIds = new Set(chats.map(c => Number(c.id)));
       chats = (msg.chats || []).map(normalizeChat);
       rebuildOnlineSet();
       renderChatList();
       if (currentChatId && !getChatById(currentChatId)) closeChat();
+      // Удалили чат на другом устройстве — вычищаем его из локального кэша
+      for (const id of Object.keys(messages)) {
+        if (!prevIds.has(Number(id))) continue;
+        if (!getChatById(Number(id))) {
+          delete messages[id];
+          idbDelete('messages', Number(id));
+        }
+      }
+      scheduleChatsCache();
       break;
+    }
 
     case 'chat_deleted':
       {
         const chatId = Number(msg.chatId);
         chats = (chats || []).filter(c => Number(c.id) !== chatId);
         if (messages && messages[chatId]) delete messages[chatId];
+        idbDelete('messages', chatId);
+        scheduleChatsCache();
         if (currentChatId === chatId) closeChat();
         delete chatKeys[chatId];
         // Очищаем все таймеры истечения для этого чата
@@ -2281,13 +2332,32 @@ async function handleWSMessage(msg) {
           list.unshift(...fresh);
           fresh.forEach(m => scheduleMessageExpiry(chatId, m));
           if (currentChatId === chatId) await refreshWindowPreservingScroll(chatId);
+          scheduleChatCache(chatId);
         }
       } else {
-        messages[chatId] = incoming;
-        incoming.forEach(m => scheduleMessageExpiry(chatId, m));
-        if (currentChatId === chatId) {
-          await renderMessages(chatId);
-          markChatRead(chatId);
+        const existing = messages[chatId] || [];
+        if (existing.length > 0) {
+          // Локальный кэш уже отрисован — объединяем с ответом сервера без дублей,
+          // чтобы не «мигать» пустотой и не терять только что пришедшие сообщения.
+          const byId = new Map(existing.map(m => [m.id, m]));
+          for (const m of incoming) if (!byId.has(m.id)) byId.set(m.id, m);
+          const merged = Array.from(byId.values())
+            .sort((a, b) => a.created_at - b.created_at || a.id - b.id);
+          messages[chatId] = merged;
+          if (currentChatId === chatId) {
+            await renderMessages(chatId);
+            markChatRead(chatId);
+            requestMissingGap(chatId);
+          }
+          scheduleChatCache(chatId);
+        } else {
+          messages[chatId] = incoming;
+          incoming.forEach(m => scheduleMessageExpiry(chatId, m));
+          if (currentChatId === chatId) {
+            await renderMessages(chatId);
+            markChatRead(chatId);
+          }
+          scheduleChatCache(chatId);
         }
       }
       break;
@@ -2300,6 +2370,7 @@ async function handleWSMessage(msg) {
       if (isNew) {
         messages[message.chat_id].push(message);
         scheduleMessageExpiry(message.chat_id, message);
+        scheduleChatCache(message.chat_id);
         if (currentChatId === message.chat_id) appendMessage(message);
       }
       updateChatPreview(message.chat_id, message);
@@ -2322,6 +2393,8 @@ async function handleWSMessage(msg) {
         m.iv = msg.iv || m.iv;
         m.header = msg.header || m.header;
         m.edited = 1;
+        delete m.plain; // новый шифротекст — старый кэшированный текст невалиден
+        scheduleChatCache(Number(msg.chatId));
         if (currentChatId === Number(msg.chatId)) renderMessages(Number(msg.chatId));
       }
       break;
@@ -2332,6 +2405,7 @@ async function handleWSMessage(msg) {
       cancelMessageExpiry(chatId, Number(msg.messageId));
       if (messages[chatId]) {
         messages[chatId] = messages[chatId].filter(m => m.id !== Number(msg.messageId));
+        scheduleChatCache(chatId);
         if (currentChatId === chatId) renderMessages(chatId);
       }
       break;
@@ -2732,6 +2806,7 @@ function updateChatPreview(chatId, msg) {
   chat.last_message_time = msg.created_at ?? msg.createdAt ?? Date.now();
   chat.last_sender_id = msg.sender_id ?? msg.senderId ?? 0;
   reorderChat(chat);
+  scheduleChatsCache();
   renderChatListThrottled();
 }
 
@@ -2806,6 +2881,12 @@ function openChat(chatId) {
   }
 
   updateChatHeader();
+  // Мгновенно показываем локальный кэш (если есть), параллельно запрашиваем сервер.
+  const hadCache = (messages[chatId] || []).length > 0;
+  if (!hadCache) {
+    renderCachedHistory(chatId);
+    messages[chatId] = messages[chatId] || [];
+  }
   sendWs({ type: 'get_messages', chatId, limit: 50 });
 }
 
@@ -2889,6 +2970,171 @@ function getMessagesContainer() {
 
 async function getChatKeySafe(chatId, chat) {
   try { return await getChatKey(chatId, chat); } catch (e) { return null; }
+}
+
+// ==================== ЛОКАЛЬНЫЙ КЭШ ЧАТОВ (IndexedDB) ====================
+// Сообщения хранятся шифротекстом + уже расшифрованный текст (он и так
+// персистируется в plaintext-кэше). При открытии чата сначала мгновенно
+// рисуем кэш, затем «догоняем» недостающие сообщения с сервера одной
+// страницей — без бесконечных последовательных выгрузок истории.
+const CT_CACHE_DB = 'ciphertalk-cache';
+const CT_CACHE_VERSION = 1;
+const MSG_CACHE_LIMIT = 500;      // сообщений на чат в кэше
+const CHAT_CACHE_LIMIT = 60;      // чатов в кэше
+let ctCacheDbPromise = null;
+
+function openCacheDb() {
+  if (!ctCacheDbPromise) {
+    ctCacheDbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('indexedDB unavailable'));
+      const req = indexedDB.open(CT_CACHE_DB, CT_CACHE_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('messages')) {
+          const st = db.createObjectStore('messages', { keyPath: 'chatId' });
+          st.createIndex('updatedAt', 'updatedAt');
+        }
+        if (!db.objectStoreNames.contains('chats')) db.createObjectStore('chats');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('indexedDB blocked'));
+    }).catch((e) => { ctCacheDbPromise = null; throw e; });
+  }
+  return ctCacheDbPromise;
+}
+
+function idbPut(storeName, value, key) {
+  return openCacheDb().then((db) => new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(storeName, 'readwrite');
+      if (key !== undefined) tx.objectStore(storeName).put(value, key);
+      else tx.objectStore(storeName).put(value);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    } catch (e) { reject(e); }
+  })).catch(() => {});
+}
+
+function idbGet(storeName, key) {
+  return openCacheDb().then((db) => new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
+  })).catch(() => null);
+}
+
+function idbDelete(storeName, key) {
+  return openCacheDb().then((db) => new Promise((resolve) => {
+    try {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+    } catch (e) { resolve(); }
+  })).catch(() => {});
+}
+
+function cacheMsgRow(m) {
+  return {
+    id: m.id,
+    chat_id: m.chat_id,
+    sender_id: m.sender_id,
+    sender_name: m.sender_name || '',
+    sender_avatar: m.sender_avatar || '',
+    encrypted_content: m.encrypted_content || '',
+    iv: m.iv || '',
+    header: m.header || '',
+    type: m.type || 'text',
+    reply_to: m.reply_to ?? null,
+    edited: m.edited || 0,
+    deleted_for_all: m.deleted_for_all || 0,
+    forwarded_from: m.forwarded_from ?? null,
+    reactions: m.reactions || {},
+    pinned: m.pinned || 0,
+    expires_at: m.expires_at ?? null,
+    created_at: m.created_at,
+    plain: getCachedPlaintext(m.chat_id, m.encrypted_content)
+  };
+}
+
+function cacheMessagesNow(chatId) {
+  chatId = Number(chatId);
+  const list = messages[chatId];
+  if (!Array.isArray(list)) return;
+  const now = Date.now();
+  const rows = [];
+  for (const m of list) {
+    if (!m || !m.id) continue;
+    if (m.expires_at && Number(m.expires_at) <= now) continue;
+    rows.push(cacheMsgRow(m));
+  }
+  while (rows.length > MSG_CACHE_LIMIT) rows.shift();
+  idbPut('messages', { chatId, updatedAt: now, msgs: rows });
+}
+
+function scheduleChatCache(chatId) {
+  clearTimeout(chatCacheTimers[chatId]);
+  chatCacheTimers[chatId] = setTimeout(() => {
+    delete chatCacheTimers[chatId];
+    cacheMessagesNow(chatId);
+  }, 700);
+}
+
+function scheduleChatsCache() {
+  clearTimeout(chatsCacheTimer);
+  chatsCacheTimer = setTimeout(() => {
+    let list = Array.isArray(chats) ? chats.slice() : [];
+    list.sort((a, b) => (Number(b.last_message_time) || 0) - (Number(a.last_message_time) || 0));
+    list = list.slice(0, CHAT_CACHE_LIMIT);
+    idbPut('chats', { updatedAt: Date.now(), list });
+  }, 800);
+}
+
+// Мгновенная отрисовка кэшированной истории до ответа сервера
+async function renderCachedHistory(chatId) {
+  chatId = Number(chatId);
+  const rec = await idbGet('messages', chatId);
+  // Пока ждали кэш: пользователь успел закрыть/переключить чат или данные уже пришли
+  if (currentChatId !== chatId) return;
+  if (!rec || !Array.isArray(rec.msgs) || rec.msgs.length === 0) return;
+  if ((messages[chatId] || []).length > 0) return;
+  const now = Date.now();
+  const list = rec.msgs
+    .filter(m => m && m.id && !(m.expires_at && Number(m.expires_at) <= now))
+    .map(normalizeMessage);
+  if (!list.length) return;
+  messages[chatId] = list;
+  for (const m of list) scheduleMessageExpiry(chatId, m);
+  await renderMessages(chatId, { scroll: true });
+}
+
+// Догонка пропусков: если в кэше есть «дырка» между первым сообщением кэша
+// и самой старой известной строкой — тянем одну страницу истории с сервера.
+function requestMissingGap(chatId) {
+  chatId = Number(chatId);
+  const list = messages[chatId] || [];
+  if (list.length < 2) return;
+  const first = list[0];
+  const prev = list[1];
+  if (Number(prev.id) + 1 === Number(first.id)) return; // дырки нет
+  sendWs({ type: 'get_messages', chatId, limit: Math.min(MSG_CACHE_LIMIT, 200), beforeId: first.id });
+}
+
+function clearAllChatCache() {
+  for (const k in chatCacheTimers) { clearTimeout(chatCacheTimers[k]); delete chatCacheTimers[k]; }
+  clearTimeout(chatsCacheTimer);
+  openCacheDb().then((db) => new Promise((resolve) => {
+    try {
+      const tx = db.transaction(['messages', 'chats'], 'readwrite');
+      tx.objectStore('messages').clear();
+      tx.objectStore('chats').clear();
+      tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+    } catch (e) { resolve(); }
+  })).catch(() => {});
 }
 
 function isScrolledToBottom(container, threshold = 140) {
