@@ -2096,6 +2096,13 @@ html[data-anim="full"] .message { animation-duration: 0.32s; }
 
         <div class="messages-container" id="messages-container"></div>
 
+        <!-- Полноэкранный оверлей загрузки истории чата: пока сообщения
+             загружаются/расшифровываются, старый контент не виден -->
+        <div class="chat-boot-overlay" id="chat-boot-overlay" hidden>
+          <div class="chat-boot-spinner" aria-hidden="true"></div>
+          <div class="chat-boot-text" id="chat-boot-text">Загрузка чатов…</div>
+        </div>
+
         <button id="scroll-down-fab" class="mq-fab" data-action="scrollToBottom" title="Вниз" data-i18n-title="chat.scrollDown" aria-label="Scroll down">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M6 9l6 6 6-6"></path>

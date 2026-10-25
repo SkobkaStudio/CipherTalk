@@ -2394,6 +2394,9 @@ async function handleWSMessage(msg) {
           }
           scheduleChatCache(chatId);
         }
+        // Ответ сервера обработан: чат может оказаться пустым (renderMessages
+        // тогда ничего не соберёт) — в любом случае убираем экран загрузки
+        if (currentChatId === chatId) hideChatLoadOverlay(0);
       }
       break;
     }
@@ -2957,6 +2960,7 @@ function updateTicksForChat(chatId) {
 
 async function backToChats() {
   currentChatId = null;
+  hideChatLoadOverlay(0);
   const area = document.getElementById('active-chat');
   if (area) area.style.display = 'none';
   const empty = document.getElementById('empty-state');
@@ -2964,6 +2968,34 @@ async function backToChats() {
   const app = document.getElementById('app-container');
   if (app) app.classList.remove('chat-open');
   renderChatList();
+}
+
+// ==================== ОВЕРЛЕЙ ЗАГРУЗКИ ИСТОРИИ ЧАТА ====================
+// Пока история чата загружается/расшифровывается, на всю область чата
+// выводится экран «ЗАГРУЗКА ЧАТОВ» со спиннером. Это исключает ситуацию,
+// когда при открытии нового чата на экране мелькают сообщения из другого.
+let chatLoadOverlayTimer = null;
+
+function setChatBootText() {
+  const el = document.getElementById('chat-boot-text');
+  if (el) el.textContent = I18N.t('chat.loadingChats');
+}
+
+function showChatLoadOverlay() {
+  clearTimeout(chatLoadOverlayTimer);
+  setChatBootText();
+  const overlay = document.getElementById('chat-boot-overlay');
+  if (overlay) overlay.hidden = false;
+}
+
+// Скрытие с микро-задержкой: если ответ сервера приходит почти мгновенно,
+// оверлей не будет «мелькать» на экране
+function hideChatLoadOverlay(delay = 120) {
+  clearTimeout(chatLoadOverlayTimer);
+  chatLoadOverlayTimer = setTimeout(() => {
+    const overlay = document.getElementById('chat-boot-overlay');
+    if (overlay) overlay.hidden = true;
+  }, delay);
 }
 
 function openChat(chatId) {
@@ -2989,10 +3021,20 @@ function openChat(chatId) {
   // Мгновенно показываем локальный кэш (если есть), параллельно запрашиваем сервер.
   const hadCache = (messages[chatId] || []).length > 0;
   if (!hadCache) {
-    renderCachedHistory(chatId);
+    // Сообщений этого чата ещё нет ни в памяти, ни в кэше — закрываем область
+    // чата экраном загрузки, чтобы не показывать остатки отрисовки другого чата.
+    // Скроет его renderCachedHistory (кэш), обработчик ответа 'messages' или
+    // renderMessages после полной сборки списка.
     messages[chatId] = messages[chatId] || [];
+    showChatLoadOverlay();
+    renderCachedHistory(chatId);
   }
   sendWs({ type: 'get_messages', chatId, limit: 50 });
+  // Защита: если сервер не ответит — не держать бесконечный экран загрузки
+  const guardChat = chatId;
+  setTimeout(() => {
+    if (currentChatId === guardChat) hideChatLoadOverlay(0);
+  }, 15000);
 }
 
 function updateChatHeader() {
@@ -3215,6 +3257,8 @@ async function renderCachedHistory(chatId) {
   messages[chatId] = list;
   for (const m of list) scheduleMessageExpiry(chatId, m);
   await renderMessages(chatId, { scroll: true });
+  // Кэш отрисован — убираем экран загрузки сразу перед показом сообщений
+  hideChatLoadOverlay(0);
 }
 
 // Догонка пропусков: если в кэше есть «дырка» между первым сообщением кэша
@@ -3384,6 +3428,8 @@ async function renderMessages(chatId, opts = {}) {
   const built = await buildMessageNodes(view, chat, key);
   applyMessageNodes(container, built);
   msgRender.chatId = chatId;
+  // Сообщения этого чата отрисованы — экран загрузки больше не нужен
+  if (chatId === currentChatId) hideChatLoadOverlay(0);
 
   if (keepPosition) {
     const delta = container.scrollHeight - prevHeight;
@@ -4556,6 +4602,7 @@ function closeChat() {
   for (const t of typewriterTimers) clearTimeout(t);
   typewriterTimers.clear();
   currentChatId = null;
+  hideChatLoadOverlay(0);
   document.getElementById('app-container').classList.remove('chat-open');
   updateMobileNav();
   document.getElementById('active-chat').style.display = 'none';
