@@ -29,8 +29,16 @@ let typewriterTimers = new Set();
 let renderChatListTimer = null;
 
 // ==================== СИСТЕМНЫЕ УВЕДОМЛЕНИЯ ====================
-let notificationsEnabled = false;
+// Правило одно и оно простое: уведомление показывает ТОТ, кто видит сообщение
+// первым — страница (через регистрацию SW) или фоновый сокет внутри SW.
+// Дедупликация: страница молчит, только когда её вкладка видимА И в фокусе;
+// SW молчит по тем же правилам + не дублирует сообщения, которые страница
+// уже показала (он знает о них через ct-notif-shown).
 let notificationPermission = 'default';
+
+function notifGranted() {
+  return 'Notification' in window && Notification.permission === 'granted';
+}
 
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return false;
@@ -38,85 +46,76 @@ async function requestNotificationPermission() {
   // в Firefox это может сбросить состояние и уведомления «включены, но не приходят».
   if (Notification.permission === 'granted') {
     notificationPermission = 'granted';
-    notificationsEnabled = true;
+    syncSWBackground();
     return true;
   }
   if (Notification.permission === 'denied') {
     notificationPermission = 'denied';
-    notificationsEnabled = false;
     return false;
   }
   try {
     const perm = await Notification.requestPermission();
-    // Some browsers may report an unexpected value; normalize it.
     notificationPermission = (perm === 'granted') ? 'granted' : (perm || 'default');
-    notificationsEnabled = notificationPermission === 'granted';
-    return notificationsEnabled;
+    syncSWBackground();
+    return notificationPermission === 'granted';
   } catch (e) {
     console.warn('Notification.requestPermission failed:', e);
     return false;
   }
 }
 
-// Синхронизируем флаг разрешений с реальным состоянием браузера
-// (пользователь мог выдать/забрать разрешение в настройках сайта).
-// Уведомления считаются включёнными, если разрешение выдано ИЛИ страница
-// управляется service worker (на мобильных desktop-разрешение может числиться
-// «default», но SW.showNotification при этом работает).
-function refreshNotificationsEnabled() {
-  const granted = ('Notification' in window) && Notification.permission === 'granted';
-  const swControlled = ('serviceWorker' in navigator) &&
-    !!(navigator.serviceWorker.controller || (window.__ctSwReady && navigator.serviceWorker.ready));
-  notificationsEnabled = granted || swControlled;
-  notificationPermission = granted ? 'granted' : (Notification?.permission || notificationPermission);
-  return notificationsEnabled;
-}
-
+// Синхронизируем состояние разрешений с браузером (могли выдать/забрать
+// в настройках сайта) — и немедленно доводим до сведения Service Worker'а.
 if ('permissions' in navigator && 'Notification' in window) {
   try {
     navigator.permissions.query({ name: 'notifications' }).then(status => {
       const sync = () => {
         notificationPermission = status.state;
-        refreshNotificationsEnabled();
+        syncSWBackground();
       };
       sync();
       status.onchange = sync;
-    }).catch(() => { refreshNotificationsEnabled(); });
+    }).catch(() => {});
   } catch (e) { /* не поддерживается — не критично */ }
 }
 
-let swRegistrationPromise = null;
-function getSWRegistration() {
-  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
-  if (!(location.protocol === 'https:' || hostnameIsLocal())) return Promise.resolve(null);
-  // navigator.serviceWorker.ready резолвится как только SW активен (в т.ч. после
-  // перезагрузки страницы, когда register() ещё не дошёл) — надёжнее, чем
-  // getRegistration(), которая на старте часто возвращает undefined.
-  if (!swRegistrationPromise) {
-    swRegistrationPromise = Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise(resolve => setTimeout(() => resolve(null), 3000))
-    ]).catch(() => null);
-  }
-  return swRegistrationPromise;
-}
+let swRegistration = null;
 
 function hostnameIsLocal() {
   return ['localhost', '127.0.0.1', '::1'].includes(location.hostname) ||
     /^192\.168\./.test(location.hostname) || /^10\./.test(location.hostname);
 }
 
+// Актуальная регистрация SW. НЕ используем navigator.serviceWorker.ready —
+// он никогда не резолвится, пока SW не станет контроллером страницы (первая
+// сессия после регистрации), из-за чего уведомления «не приходили никогда».
+// Кэшируем объект из register(); если страницы открыли без нас — ищем через
+// getRegistration()/getRegistrations() ОДИН раз, без зависаний и гонок.
+function getCachedSWRegistration() {
+  if (swRegistration) return Promise.resolve(swRegistration);
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  if (!(location.protocol === 'https:' || hostnameIsLocal())) return Promise.resolve(null);
+  return (async () => {
+    try {
+      let reg = await navigator.serviceWorker.getRegistration();
+      if (!reg && navigator.serviceWorker.getRegistrations) {
+        const all = await navigator.serviceWorker.getRegistrations();
+        reg = (all || [])[0] || null;
+      }
+      if (reg) swRegistration = reg;
+      return reg;
+    } catch (e) {
+      return null;
+    }
+  })();
+}
+
 function showNotification(title, body, chatId) {
-  // Единственный источник истины — актуальное состояние разрешения/SW.
-  // Раньше здесь был мёртвый флаг notificationsEnabled, который на части
-  // устройств так и оставался false («уведомления включены, но не приходят»).
-  refreshNotificationsEnabled();
-  if (!notificationsEnabled) return;
-  // Не показываем уведомление если вкладка видима И в фокусе.
-  // Если фокус у другой программы — пользователь ничего не видит в окне чата,
-  // уведомление нужно (раньше именно это условие глушило все уведомления
-  // при открытой вкладке).
+  // Вкладка открыта, видима и в фокусе — пользователь всё видит в интерфейсе,
+  // системное уведомление не нужно. Во всех остальных случаях — показываем.
   if (document.visibilityState === 'visible' && document.hasFocus()) return;
+  // Разрешения нет — показывать нечего (фон тоже получит отказ, см. sw.js).
+  if (!notifGranted()) return;
 
   const options = {
     body,
@@ -128,34 +127,32 @@ function showNotification(title, body, chatId) {
     vibrate: [80, 40, 80]
   };
 
-  // Показываем через service worker, когда он готов: на мобильных (Android Chrome)
-  // конструктор new Notification(...) из вкладки не работает без SW-регистрации,
-  // поэтому уведомления «не приходили», даже при включённом разрешении.
-  getSWRegistration().then(reg => {
+  getCachedSWRegistration().then(reg => {
     if (reg && reg.showNotification) {
-      reg.showNotification(title, options).catch(() => fallbackNotify(title, options));
-    } else {
-      fallbackNotify(title, options);
+      return reg.showNotification(title, options);
     }
-  });
-}
-
-function fallbackNotify(title, options) {
-  try {
-    new Notification(title, options);
-  } catch (e) {
-    console.warn('Notification failed:', e);
-  }
+    // Регистрация недоступна — last resort: прямой конструктор
+    // (работает на Firefox/Safari, на Chromium без контроллера — нет).
+    try { new Notification(title, options); } catch (e) { /* ignore */ }
+    return undefined;
+  }).then((ok) => {
+    // ok === false значит «показ отклонён» (например, Android требует
+    // канал уведомлений) — просим фон подхватить это сообщение.
+    if (ok === false) swPostMessage({ type: 'ct-bg-init', token: authToken, user: currentUser ? { id: currentUser.id } : null, granted: true });
+    else swPostMessage({ type: 'ct-notif-shown', chatId });
+  }).catch(() => {});
 }
 
 // ==================== МОСТ СО SERVICE WORKER (фон) ====================
 // SW держит собственный WebSocket и показывает уведомления, когда вкладка закрыта.
 // Страница передаёт ему токен/пользователя и принимает команды от него.
 
-// Отправляем сообщение активному SW. Если контроллера ещё нет (первая сессия
-// после регистрации — страница не «под контролем»), дожидаемся ready и только
-// потом решаем, что отправлять некому. Иначе ct-bg-init терялся, SW не знал
-// токен и фоновые уведомления не работали никогда.
+// Отправляем сообщение Service Worker'у. ВАЖНО: postMessage идёт либо активному
+// контроллеру, либо (если контроллера ещё нет — первая сессия после регистрации)
+// ставится в очередь и уходит на controllerchange. Дополнительно дублируем в
+// любую доступную регистрацию (reg.active/waiting), иначе ct-bg-init терялся,
+// SW не знал токен и фоновые уведомления не работали никогда.
+let swSendQueue = [];
 function swPostMessage(data) {
   try {
     if (!('serviceWorker' in navigator)) return;
@@ -163,22 +160,38 @@ function swPostMessage(data) {
       navigator.serviceWorker.controller.postMessage(data);
       return;
     }
-    navigator.serviceWorker.ready.then(() => {
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage(data);
+    // Контроллера нет: пробуем достучаться до SW напрямую через регистрацию
+    getCachedSWRegistration().then(reg => {
+      const target = reg && (reg.active || reg.waiting);
+      if (target) {
+        try { target.postMessage(data); return; } catch (e) { /* ignore */ }
       }
-    }).catch(() => {});
+      // Не вышло — копим до появления контроллера (dedupe по типу: важен последний)
+      swSendQueue = swSendQueue.filter(m => m.type !== data.type);
+      swSendQueue.push(data);
+    });
   } catch (e) { /* ignore */ }
 }
 
+function flushSWQueue() {
+  if (!navigator.serviceWorker.controller || !swSendQueue.length) return;
+  const queue = swSendQueue;
+  swSendQueue = [];
+  for (const d of queue) {
+    try { navigator.serviceWorker.controller.postMessage(d); } catch (e) { /* ignore */ }
+  }
+}
+
 function syncSWBackground() {
-  refreshNotificationsEnabled();
   if (authToken && currentUser) {
+    // granted берётся из реального состояния браузера — фон будет молчать,
+    // пока разрешения нет (показывать всё равно нечего), и оживёт сразу,
+    // как только пользователь выдаст разрешение (см. permissions.query выше).
     swPostMessage({
       type: 'ct-bg-init',
       token: authToken,
       user: { id: currentUser.id },
-      muted: !notificationsEnabled
+      granted: notifGranted()
     });
   } else {
     swPostMessage({ type: 'ct-bg-logout' });
@@ -186,25 +199,33 @@ function syncSWBackground() {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.ready.then(() => {
+  // Как только SW стал контроллером (первая активация или update) —
+  // передаём ему учётные данные и сливаем очередь.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
     window.__ctSwReady = true;
-    // Как только SW стал доступен — сразу передаём ему учётные данные
+    flushSWQueue();
     syncSWBackground();
-  }).catch(() => {});
+  });
+  if (navigator.serviceWorker.controller) {
+    window.__ctSwReady = true;
+    flushSWQueue();
+    syncSWBackground();
+  }
+  // Когда страница уходит в фон (свёрнута/потеряла фокус) — активируем фоновый
+  // сокет SW заранее, чтобы ни одно сообщение не потерялось в момент перехода.
+  const notifyVisibilityChange = () => {
+    if (document.visibilityState === 'visible' && document.hasFocus()) {
+      swPostMessage({ type: 'ct-bg-pause' });
+    } else {
+      syncSWBackground();
+    }
+  };
+  document.addEventListener('visibilitychange', notifyVisibilityChange);
+  window.addEventListener('blur', notifyVisibilityChange);
+  window.addEventListener('focus', notifyVisibilityChange);
+
   navigator.serviceWorker.addEventListener('message', (event) => {
     const d = event.data || {};
-    if (d.type === 'ct-bg-creds-request') {
-      const token = localStorage.getItem('ciphertalk_token') || null;
-      let user = null;
-      try { user = JSON.parse(localStorage.getItem('ciphertalk_user') || 'null'); } catch (e) { /* ignore */ }
-      if (event.source) {
-        event.source.postMessage({
-          type: 'ct-bg-creds-response',
-          token,
-          user: user ? { id: user.id } : null
-        });
-      }
-    }
     if (d.type === 'ct-open-chat' && d.chatId) {
       // Дождаться загрузки чатов, затем открыть нужный
       let tries = 0;
@@ -218,8 +239,6 @@ if ('serviceWorker' in navigator) {
       }, 300);
     }
   });
-  // При смене активного SW (после update) передаём ему данные аккаунта
-  navigator.serviceWorker.addEventListener('controllerchange', syncSWBackground);
 }
 
 function renderChatListThrottled(filter = '') {
@@ -2190,8 +2209,18 @@ function connectWebSocket() {
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
+    wsReconnectAttempts = 0; // соединение живое — сбрасываем backoff
     ws.send(JSON.stringify({ type: 'auth', token: authToken }));
     publishOwnPublicKey().catch(() => {});
+    // Фоновый сокет SW нужен ТОЛЬКО когда страница не может показывать сама:
+    // вкладка свёрнута/закрыта или фокус у другого окна. Если страница
+    // сейчас видима и в фокусе — просим фон отключиться (меньше дублей,
+    // меньше нагрузки на сервер). Иначе — пусть висит и страхует.
+    if (document.visibilityState === 'visible' && document.hasFocus()) {
+      swPostMessage({ type: 'ct-bg-pause' });
+    } else {
+      syncSWBackground();
+    }
   };
 
   ws.onmessage = (event) => {
@@ -2205,12 +2234,18 @@ function connectWebSocket() {
   ws.onclose = (e) => {
     ws = null;
     if (authToken && currentUser) {
-      wsReconnectTimer = setTimeout(connectWebSocket, 1500);
+      // Быстрый реконнект, затем плавное увеличение (до 15с): раньше при
+      // недоступном сервере страница переподключалась каждые 1.5с вечно —
+      // это и «съедало» батарею/сеть, и мешало фону получить свой сокет.
+      wsReconnectAttempts++;
+      const delay = Math.min(1500 * wsReconnectAttempts, 15000);
+      wsReconnectTimer = setTimeout(connectWebSocket, delay);
     }
   };
 
   ws.onerror = () => { /* onclose выполнит реконнект */ };
 }
+let wsReconnectAttempts = 0;
 
 function sendWs(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5419,9 +5454,15 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('load', async () => {
   I18N.applyI18n();
   updateLangChips();
-  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || hostnameIsLocal())) {
     navigator.serviceWorker.register('/sw.js')
-      .then(reg => reg.update())
+      .then(reg => {
+        // Кэшируем регистрацию сразу: ready() не резолвится, пока SW не станет
+        // контроллером страницы, а showNotification доступен на регистрации
+        // уже сейчас — иначе уведомления не работали до первой перезагрузки.
+        swRegistration = reg;
+        return reg.update();
+      })
       .catch(() => {});
   }
   loadAppearance();
