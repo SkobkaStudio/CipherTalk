@@ -9,7 +9,7 @@
       и фону; уведомление показывает ТОТ, кто первый: страница, если её
       вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
       через ct-notif-shown и не дублирует. */
-const CACHE = 'ciphertalk-v16';
+const CACHE = 'ciphertalk-v18';
 const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',
@@ -80,7 +80,46 @@ let bgReconnectTimer = null;
 let bgPingTimer = null;
 let bgCreds = null;          // { token, user: {id}, granted } — синхронизируется с Cache Storage
 let recentShown = new Map();  // chatId -> timestamp: уведомления, показанные страницей (дедуп)
+const pendingNotifBody = new Map(); // chatId -> { body, at }: превью пришло раньше нашего уведомления
+const bodyWaiters = new Map();      // chatId -> [{resolve, timer}]: ждём расшифрованное превью от страницы
 let credsLoaded = false;      // попытка восстановить креды из хранилища уже была
+
+// Ждём расшифрованный текст сообщения от страницы (ct-notif-body).
+// Страница расшифровывает почти мгновенно, если вкладка открыта; timeout
+// защищает от зависания, когда вкладки нет.
+function waitForNotifBody(chatId, timeoutMs) {
+  return new Promise(resolve => {
+    const p = pendingNotifBody.get(chatId);
+    if (p && p.body && Date.now() - p.at < 15000) {
+      pendingNotifBody.delete(chatId);
+      resolve(p.body);
+      return;
+    }
+    let list = bodyWaiters.get(chatId);
+    if (!list) { list = []; bodyWaiters.set(chatId, list); }
+    const waiter = {
+      resolve,
+      timer: setTimeout(() => {
+        const l = bodyWaiters.get(chatId) || [];
+        const i = l.indexOf(waiter);
+        if (i >= 0) l.splice(i, 1);
+        resolve(null);
+      }, timeoutMs)
+    };
+    list.push(waiter);
+  });
+}
+
+function deliverToWaiters(chatId, body) {
+  const list = bodyWaiters.get(chatId);
+  if (!list || !list.length) return false;
+  while (list.length) {
+    const w = list.pop();
+    clearTimeout(w.timer);
+    w.resolve(body);
+  }
+  return true;
+}
 
 // ----------Постоянное хранилище кредов (переживает выгрузку SW) ----------
 // Cache Storage хранит пары request->response; ключом делаем фиксированный URL.
@@ -198,8 +237,13 @@ async function bgConnect() {
     if (bgCreds && bgCreds.granted === false) return;
 
     // Контент end-to-end шифрован — в фоне доступен только тип сообщения,
-    // поэтому показываем понятную метку вместо абстрактного «Новое сообщение».
-    // Страница при возможности присылает расшифрованное превью через ct-notif-body.
+    // поэтому для медиа показываем метку (📷/🎥/🎤/…). Для ТЕКСТОВЫХ сообщений
+    // заглушек не показываем: страница при открытой вкладке почти сразу шлёт
+    // расшифрованный текст (ct-notif-body) — ждём его короткое время и
+    // показываем уведомление с настоящим текстом. Если за это время превью
+    // не пришло (вкладка закрыта и расшифровать некому) — молчим: служебные
+    // «Сообщение» / «Зашифрованное сообщение» хуже, чем одно пропущенное
+    // уведомление (непрочитанный счётчик в списке чатов всё равно виден).
     const typeLabels = {
       image: '📷 Фото',
       photo: '📷 Фото',
@@ -212,9 +256,22 @@ async function bgConnect() {
       call: '📞 Звонок'
     };
     const title = String(m.senderName || m.sender_name || 'CipherTalk');
-    const body = typeLabels[m.type] || '🔒 Зашифрованное сообщение';
+    let body = typeLabels[m.type] || null;
 
     try {
+      // Превью могло прийти раньше этого сообщения (сокет страницы быстрее
+      // фонового) — берём его сразу.
+      if (chatId != null && pendingNotifBody.has(chatId)) {
+        const p = pendingNotifBody.get(chatId);
+        pendingNotifBody.delete(chatId);
+        if (p && p.body && Date.now() - p.at < 15000) body = p.body;
+      }
+      // Текстовое сообщение без готового превью: подождём до 2 секунд —
+      // открытая страница расшифровывает текст практически мгновенно.
+      if (!body && chatId != null) {
+        body = await waitForNotifBody(chatId, 2000);
+      }
+      if (!body) return; // текста нет и показать нечего — не плодим заглушки
       await self.registration.showNotification(title, {
         body,
         icon: '/icons/icon.svg',
@@ -224,6 +281,9 @@ async function bgConnect() {
         data: { chatId, url: '/', body },
         vibrate: [80, 40, 80]
       });
+      // Ждём немного расшифрованное превью от страницы: если она открыта
+      // (но не в фокусе / видима) — она сама перезаменит уведомление через
+      // ct-notif-body. Здесь лишь подстраховка, ничего лишнего не делаем.
     } catch (e) {
       console.warn('[CT-SW] showNotification failed:', e && e.message);
     }
@@ -285,16 +345,21 @@ self.addEventListener('message', (event) => {
     }
     return;
   }
-  // Страница прислала расшифрованное превью — обновим уже показанное фоновое
-  // уведомление (была метка типа / «Зашифрованное сообщение» → текст сообщения).
+  // Страница прислала расшифрованный текст сообщения. Если фон уже показал
+  // уведомление — тихо заменяем его текст (тот же tag, silent). Если ждём
+  // превью (waitForNotifBody) — отдаём ожидающему. Иначе сохраняем на случай,
+  // что фоновое сообщение дойдёт чуть позже.
   if (d.type === 'ct-notif-body') {
     const chatId = Number(d.chatId) || null;
     const body = String(d.body || '');
     if (chatId == null || !body) return;
+    const hadWaiter = deliverToWaiters(chatId, body);
     self.registration.getNotifications().then(list => {
+      let found = false;
       for (const n of list) {
         const data = n.data || {};
         if (Number(data.chatId) !== chatId) continue;
+        found = true;
         if (data.body === body) return; // уже актуально
         try {
           n.close();
@@ -309,6 +374,15 @@ self.addEventListener('message', (event) => {
           });
         } catch (e) { /* ignore */ }
         return;
+      }
+      // Уведомления ещё нет — сохраняем превью, чтобы фон подставил его
+      // сразу при показе (или отдал ожидающему waitForNotifBody).
+      if (!found && !hadWaiter) {
+        pendingNotifBody.set(chatId, { body, at: Date.now() });
+        if (pendingNotifBody.size > 30) {
+          const cutoff = Date.now() - 20000;
+          for (const [k, v] of pendingNotifBody) if (v.at < cutoff) pendingNotifBody.delete(k);
+        }
       }
     }).catch(() => {});
     return;

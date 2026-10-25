@@ -96,7 +96,7 @@
       'notif.file': 'Файл',
       'notif.sticker': 'Стикер',
       'notif.call': 'Звонок',
-      'notif.newMessage': 'Новое сообщение',
+      'notif.newMessage': 'Сообщение',
       'chat.voiceMsg': 'Голосовое сообщение',
       'chat.videoMsg': 'Видеосообщение',
       'chat.imageMsg': 'Изображение',
