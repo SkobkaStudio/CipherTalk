@@ -2114,6 +2114,7 @@ async function handleWSMessage(msg) {
         chat.last_message_type = msg.lastMessageType || null;
         chat.last_message_time = msg.lastMessageTime || Date.now();
         chat.last_sender_id = msg.lastSenderId || 0;
+        if (typeof msg.avatar === 'string') chat.avatar = msg.avatar;
         reorderChat(chat);
       }
       renderChatListThrottled();
@@ -3798,17 +3799,31 @@ function openNewGroup() {
       <label>${I18N.t('group.name')}</label>
       <input type="text" id="group-name-input" placeholder="${I18N.t('group.namePlaceholder')}">
     </div>
+    <div class="input-group">
+      <label>${I18N.t('group.avatar')}</label>
+      <input type="file" id="group-avatar-input" accept="image/*">
+    </div>
     <button class="btn" data-action="createGroup">${I18N.t('group.create')}</button>
   `);
 }
 
-function createGroup() {
+async function createGroup() {
   const name = document.getElementById('group-name-input').value.trim();
   if (!name) {
     showToast(I18N.t('err.nameRequired2'), 'error');
     return;
   }
-  sendWs({ type: 'create_group', name, members: [] });
+  let avatar = '';
+  const fileInput = document.getElementById('group-avatar-input');
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    const file = fileInput.files[0];
+    if (file.size > 2 * 1024 * 1024) {
+      showToast(I18N.t('profile.tooBig'), 'error');
+      return;
+    }
+    avatar = await fileToDataURL(file);
+  }
+  sendWs({ type: 'create_group', name, members: [], avatar });
   closeModal();
 }
 
@@ -3825,22 +3840,45 @@ function openNewChannel() {
       <label>${I18N.t('channel.desc')}</label>
       <input type="text" id="channel-desc-input" placeholder="${I18N.t('channel.descPlaceholder')}">
     </div>
+    <div class="input-group">
+      <label>${I18N.t('channel.avatar')}</label>
+      <input type="file" id="channel-avatar-input" accept="image/*">
+    </div>
     <button class="btn" data-action="createChannel">${I18N.t('channel.create')}</button>
   `);
 }
 
-function createChannel() {
+async function createChannel() {
   const name = document.getElementById('channel-name-input').value.trim();
   const description = document.getElementById('channel-desc-input').value.trim();
   if (!name) {
     showToast(I18N.t('err.nameRequired2'), 'error');
     return;
   }
-  const sent = sendWs({ type: 'create_channel', name, description });
+  let avatar = '';
+  const fileInput = document.getElementById('channel-avatar-input');
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    const file = fileInput.files[0];
+    if (file.size > 2 * 1024 * 1024) {
+      showToast(I18N.t('profile.tooBig'), 'error');
+      return;
+    }
+    avatar = await fileToDataURL(file);
+  }
+  const sent = sendWs({ type: 'create_channel', name, description, avatar });
   if (sent) {
     closeModal();
     showToast(I18N.t('toast.channelCreated'), 'success');
   }
+}
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function openSavedMessages() {
@@ -3852,6 +3890,8 @@ function openSavedMessages() {
 function showChatInfo() {
   const chat = getChatById(currentChatId);
   if (!chat) return;
+  const isGroup = chat.type !== 'private' && chat.type !== 'saved';
+  const ownerOrAdmin = isGroup && (chat.owner_id === currentUser.id || chat.role === 'owner' || chat.role === 'admin');
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${escapeHtml(getChatName(chat))}</h2>
@@ -3862,7 +3902,57 @@ function showChatInfo() {
     <div style="font-size:13px;color:var(--text-secondary)">
       ${I18N.t('chatinfo.membersShort', { count: chat.members?.length || 0 })}
     </div>
+    ${isGroup && ownerOrAdmin ? `
+    <div style="margin-top:16px;">
+      <div class="input-group">
+        <label>${I18N.t('chat.avatarChange')}</label>
+        <input type="file" id="chat-avatar-input" accept="image/*">
+      </div>
+      <button class="btn btn-secondary" data-action="setChatAvatar">${I18N.t('chat.avatarChange')}</button>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="input-group">
+        <label>${I18N.t('chat.inviteLink')}</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="chat-invite-link" readonly style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-secondary);font-size:12px;overflow:hidden;text-overflow:ellipsis;">
+          <button class="btn btn-secondary" data-action="copyInviteLink" style="padding:8px 12px;font-size:12px">${I18N.t('chat.copyInvite')}</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
   `);
+  if (isGroup && ownerOrAdmin) {
+    const linkEl = document.getElementById('chat-invite-link');
+    if (linkEl) {
+      linkEl.value = `${location.origin}/invite/${chat.id}`;
+    }
+  }
+}
+
+async function setChatAvatar() {
+  const chat = getChatById(currentChatId);
+  if (!chat) return;
+  const fileInput = document.getElementById('chat-avatar-input');
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    showToast(I18N.t('err.nameRequired2'), 'error');
+    return;
+  }
+  const file = fileInput.files[0];
+  if (file.size > 2 * 1024 * 1024) {
+    showToast(I18N.t('profile.tooBig'), 'error');
+    return;
+  }
+  const avatar = await fileToDataURL(file);
+  sendWs({ type: 'set_chat_avatar', chatId: chat.id, avatar });
+  closeModal();
+  showToast(I18N.t('toast.saved'), 'success');
+}
+
+function copyInviteLink() {
+  const el = document.getElementById('chat-invite-link');
+  if (!el || !el.value) return;
+  copyToClipboard(el.value);
+  showToast(I18N.t('chat.inviteCopied'), 'success');
 }
 
 async function copyToClipboard(text) {
@@ -4546,7 +4636,9 @@ const CLICK_ACTIONS = {
   setPin: () => setPin(),
   removePin: () => removePin(),
   resetE2EE: () => resetE2EE(),
-  setLang: (el) => setLanguage(el.dataset.id)
+  setLang: (el) => setLanguage(el.dataset.id),
+  setChatAvatar: () => setChatAvatar(),
+  copyInviteLink: () => copyInviteLink()
 };
 
 const CHANGE_ACTIONS = {

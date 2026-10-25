@@ -106,6 +106,7 @@ class WebSocketService {
       'update_folder': () => this.handleUpdateFolder(ws, msg),
       'delete_folder': () => this.handleDeleteFolder(ws, msg),
       'set_chat_folder': () => this.handleSetChatFolder(ws, msg),
+      'set_chat_avatar': () => this.handleSetChatAvatar(ws, msg),
       'delete_chat': () => this.handleDeleteChat(ws, msg)
     };
 
@@ -1080,6 +1081,40 @@ class WebSocketService {
     this.db.markDirty();
 
     this.send(ws, { type: 'chat_folder_changed', chatId, folderId });
+  }
+
+  handleSetChatAvatar(ws, msg) {
+    const chatId = Number(msg.chatId);
+    const avatar = typeof msg.avatar === 'string' ? msg.avatar.slice(0, 2 * 1024 * 1024) : '';
+    if (!this.db.isChatMember(chatId, ws.userId)) {
+      return this.sendError(ws, 'forbidden', 'Нет доступа к чату');
+    }
+    const chat = this.db.findChatById(chatId);
+    if (!chat) return this.sendError(ws, 'not_found', 'Чат не найден');
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel';
+    if (!isGroup) {
+      return this.sendError(ws, 'forbidden', 'Аватар можно сменить только в группе или канале');
+    }
+    const myRole = this.checkRole(chatId, ws.userId);
+    if (myRole !== 'owner' && myRole !== 'admin') {
+      return this.sendError(ws, 'forbidden', 'Только владелец или админ может сменить аватар');
+    }
+    chat.avatar = avatar;
+    chat.updated_at = Date.now();
+    this.db.markDirty();
+
+    const members = this.getChatMemberIds(chatId);
+    presenceService.sendToChatMembers(members, {
+      type: 'chat_updated',
+      chatId,
+      lastMessage: chat.last_message,
+      lastMessageIv: chat.last_message_iv,
+      lastMessageHeader: chat.last_message_header,
+      lastMessageType: chat.last_message_type,
+      lastMessageTime: chat.last_message_time,
+      lastSenderId: chat.last_sender_id,
+      avatar: chat.avatar
+    });
   }
 
   handleReactMessage(ws, msg) {
