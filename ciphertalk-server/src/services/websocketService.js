@@ -289,7 +289,7 @@ class WebSocketService {
 
     let created = false;
     if (!chatId) {
-      chatId = this.db.nextChatId(false);
+      chatId = this.db.nextId('chats');
       const chat = new Chat({
         id: chatId,
         type: 'private',
@@ -327,7 +327,7 @@ class WebSocketService {
       ? msg.members.map(Number).filter(id => Number.isInteger(id) && this.db.findUserById(id) && id !== currentUserId)
       : [];
 
-    const chatId = this.db.nextChatId(true);
+    const chatId = this.db.nextId('chats');
     const chat = new Chat({
       id: chatId,
       type: msg.groupType === 'supergroup' ? 'supergroup' : 'group',
@@ -362,7 +362,7 @@ class WebSocketService {
 
   handleCreateChannel(ws, msg) {
     const currentUserId = ws.userId;
-    const chatId = this.db.nextChatId(true);
+    const chatId = this.db.nextId('chats');
     const chat = new Chat({
       id: chatId,
       type: 'channel',

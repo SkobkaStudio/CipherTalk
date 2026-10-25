@@ -101,141 +101,8 @@ class Database {
     this.db.pragma('busy_timeout = 5000');
     this.ensureSchema();
     this.migrateSchema();
-    this.assignPublicIds();
     console.log('✅ База данных SQLite загружена (WAL)');
     return true;
-  }
-
-  // ==================== ПУБЛИЧНЫЕ ID ====================
-  // Пользователи: положительные id, счётчик "users" (1 → "00000001", ..., 999999999).
-  // Приватные чаты/saved: положительные id, счётчик "chats_pos".
-  // Группы/каналы: отрицательные id (-1 → "-00000000000001", ...), счётчик "chats_neg".
-  static MAX_USER_ID = 999999999;
-  static MAX_CHAT_ID = 999999999;
-  static MAX_GROUP_ID = 99999999999999;
-
-  nextChatId(isNegative) {
-    const name = isNegative ? 'chats_neg' : 'chats_pos';
-    const row = this.db.prepare('SELECT value FROM counters WHERE name = ?').get(name);
-    const cur = row && typeof row.value === 'number' ? row.value : 0;
-    const val = isNegative ? cur - 1 : cur + 1;
-    const limit = isNegative ? Database.MAX_GROUP_ID : Database.MAX_CHAT_ID;
-    if (Math.abs(val) > limit) {
-      throw new Error('Пул идентификаторов чатов исчерпан');
-    }
-    this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run(name, val);
-    return val;
-  }
-
-  // Одноразовая миграция: присваиваем всем пользователям и чатам id из новых
-  // диапазонов. Старые пользователи получают id по дате регистрации (самый
-  // старый → 1 → "00000001"). Повторный запуск безопасен (проверяется флаг).
-  assignPublicIds() {
-    const flag = this.db.prepare("SELECT value FROM counters WHERE name = 'public_ids_migrated'").get();
-    if (flag && flag.value === 1) return;
-
-    const backupPath = this.sqlitePath + '.pre-publicids.bak';
-    try {
-      if (!fs.existsSync(backupPath)) {
-        this.db.backup(backupPath);
-        console.log('[DB] Резервная копия перед миграцией публичных id:', backupPath);
-      }
-    } catch (e) {
-      console.error('[DB] Не удалось сделать бэкап перед миграцией id:', e.message);
-    }
-
-    this.db.pragma('foreign_keys = OFF');
-
-    // ---------- пользователи: id по дате регистрации ----------
-    const users = this.db.prepare('SELECT id FROM users ORDER BY created_at ASC, id ASC').all();
-    const userMap = new Map();
-    let uid = 0;
-    for (const r of users) {
-      uid++;
-      if (Number(r.id) !== uid) userMap.set(Number(r.id), uid);
-    }
-    if (userMap.size) {
-      const txU = this.db.transaction(() => {
-        const tables = [
-          ['users', 'id'],
-          ['chat_members', 'user_id'],
-          ['messages', 'sender_id'],
-          ['sessions', 'user_id'],
-          ['folders', 'user_id'],
-          ['files', 'uploader_id'],
-          ['user_stickers', 'user_id'],
-          ['group_keys', 'created_by'],
-        ];
-        // Временный сдвиг id, чтобы избежать коллизий PRIMARY KEY при перестановке
-        let shift = 1000000000;
-        for (const [table, col] of tables) {
-          try {
-            this.db.prepare(`UPDATE ${table} SET ${col} = ${col} + ?`).run(shift);
-            for (const [oldId, newId] of userMap) {
-              this.db.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${col} = ?`).run(newId + shift, oldId + shift);
-            }
-            this.db.prepare(`UPDATE ${table} SET ${col} = ${col} - ?`).run(shift);
-            shift = 0;
-          } catch (e) {
-            console.error(`[DB] migrate user ids in ${table}.${col}:`, e.message);
-          }
-        }
-      });
-      txU();
-    }
-    const maxUser = this.db.prepare('SELECT COALESCE(MAX(id),0) m FROM users').get().m;
-    const userCounterVal = Math.max(uid, Number(maxUser) || 0);
-    this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run('users', userCounterVal);
-
-    // ---------- чаты: приватные → положительные, группы/каналы → отрицательные ----------
-    const gkSet = new Set(this.db.prepare('SELECT chat_id FROM group_keys').all().map(r => Number(r.chat_id)));
-    const chats = this.db.prepare('SELECT * FROM chats ORDER BY created_at ASC, id ASC').all();
-    const chatMap = new Map();
-    let pos = 0, neg = 0;
-    for (const c of chats) {
-      const isNeg = c.type === 'group' || c.type === 'supergroup' || c.type === 'channel' || c.is_channel || gkSet.has(Number(c.id));
-      let newId;
-      try {
-        newId = isNeg ? --neg : ++pos;
-      } catch (e) { newId = isNeg ? --neg : ++pos; }
-      if (Number(c.id) !== newId) chatMap.set(Number(c.id), newId);
-    }
-    // применяем в два прохода через временный сдвиг (защита от PK-коллизий)
-    if (chatMap.size) {
-      const txC = this.db.transaction(() => {
-        const SHIFT = 1000000000000;
-        const bump = (v) => (v < 0 ? v - SHIFT : v + SHIFT);
-        const unshift = () => {
-          for (const t of [['chats', 'id'], ['chat_members', 'chat_id'], ['messages', 'chat_id'], ['group_keys', 'chat_id']]) {
-            this.db.prepare(`UPDATE ${t[0]} SET ${t[1]} = CASE WHEN ${t[1]} < 0 THEN ${t[1]} + ${SHIFT} ELSE ${t[1]} - ${SHIFT} END`).run();
-          }
-        };
-        for (const t of [['chats', 'id'], ['chat_members', 'chat_id'], ['messages', 'chat_id'], ['group_keys', 'chat_id']]) {
-          this.db.prepare(`UPDATE ${t[0]} SET ${t[1]} = CASE WHEN ${t[1]} < 0 THEN ${t[1]} - ${SHIFT} ELSE ${t[1]} + ${SHIFT} END`).run();
-          for (const [oldId, newId] of chatMap) {
-            this.db.prepare(`UPDATE ${t[0]} SET ${t[1]} = ? WHERE ${t[1]} = ?`).run(bump(newId), bump(oldId));
-          }
-        }
-        unshift();
-      });
-      txC();
-      // папки: remap chat_ids (JSON-массив)
-      for (const f of this.db.prepare('SELECT id, chat_ids FROM folders').all()) {
-        let arr = [];
-        try { arr = JSON.parse(f.chat_ids || '[]'); } catch (_) { arr = []; }
-        const mapped = arr.map(x => chatMap.has(Number(x)) ? chatMap.get(Number(x)) : Number(x));
-        this.db.prepare('UPDATE folders SET chat_ids = ? WHERE id = ?').run(JSON.stringify(mapped), f.id);
-      }
-    }
-    // счётчики continue с текущего максимума, если старые id уже больше
-    const maxPos = this.db.prepare("SELECT COALESCE(MAX(id),0) m FROM chats WHERE id > 0").get().m;
-    const minNeg = this.db.prepare("SELECT COALESCE(MIN(id),0) m FROM chats WHERE id < 0").get().m;
-    this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run('chats_pos', Math.max(pos, Number(maxPos) || 0));
-    this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run('chats_neg', Math.min(neg, Number(minNeg) || 0));
-
-    this.db.pragma('foreign_keys = ON');
-    this.db.prepare('INSERT OR REPLACE INTO counters(name,value) VALUES(?,?)').run('public_ids_migrated', 1);
-    console.log(`[DB] Миграция публичных id завершена: пользователей=${uid}, чатов+=${pos}, чатов-=${neg}`);
   }
 
   ensureSchema() {
@@ -666,14 +533,7 @@ CREATE INDEX IF NOT EXISTS idx_user_stickers_user ON user_stickers(user_id);
   }
 
   addChat(c) {
-    let id = c.id;
-    if (id === undefined || id === null || id === '') {
-      const type = String(c.type || '');
-      const isNeg = type === 'group' || type === 'supergroup' || type === 'channel' || !!c.is_channel;
-      id = this.nextChatId(isNeg);
-    } else {
-      id = Number(id);
-    }
+    const id = c.id || this.nextId('chats');
     this.db.prepare(`INSERT OR REPLACE INTO chats(id,type,name,avatar,description,owner_id,is_pinned,is_channel,folder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
       id, c.type || 'private', c.name || '', c.avatar || '', c.description || '', c.owner_id || null,
       c.is_pinned ? 1 : 0, c.is_channel ? 1 : 0, c.folder_id || null, c.created_at || Date.now(), c.updated_at || Date.now()

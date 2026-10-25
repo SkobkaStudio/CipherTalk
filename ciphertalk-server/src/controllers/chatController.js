@@ -129,7 +129,7 @@ class ChatController {
       const { name, avatar, members, groupType, description } = req.body;
       const userId = req.userId;
 
-      const chatId = this.db.nextChatId(true);
+      const chatId = this.db.nextId('chats');
       const chat = new Chat({
         id: chatId,
         type: groupType === 'supergroup' ? 'supergroup' : 'group',
