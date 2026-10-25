@@ -1004,6 +1004,8 @@ function normalizeUser(user) {
 function normalizeChat(chat) {
   return {
     id: Number(chat.id),
+    // Публичный id для ссылки в браузере (https://…/00000001, https://…/-00000000000001)
+    public_id: String(chat.public_id || ''),
     type: chat.type || 'private',
     name: chat.name || '',
     avatar: chat.avatar || '',
