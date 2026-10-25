@@ -2414,8 +2414,18 @@ async function handleWSMessage(msg) {
       if (isNew && currentChatId !== message.chat_id) {
         const chat = getChatById(message.chat_id);
         const senderName = message.sender_name || (chat ? getChatName(chat) : I18N.t('chat.user'));
-        const preview = message.encrypted_content ? I18N.t('chat.encryptedMessage') : String(message.sender_name || '');
-        showNotification(senderName, preview, message.chat_id);
+        // Заголовок: в группах — «отправитель: название чата», в личке — имя собеседника
+        const notifTitle = (chat && (chat.type === 'group' || chat.type === 'supergroup'))
+          ? `${senderName}: ${getChatName(chat)}`
+          : senderName;
+        // Уведомление показываем асинхронно: сначала пробуем расшифровать текст
+        // и показать превью сообщения; для медиа — понятную метку типа.
+        buildNotificationBody(message, chat).then(preview => {
+          // Если фон уже показал уведомление с этой же вкладкой — обновим его
+          // текст на нормальное превью (было «Новое сообщение» / метка типа).
+          swPostMessage({ type: 'ct-notif-body', chatId: message.chat_id, body: preview });
+          showNotification(notifTitle, preview, message.chat_id);
+        });
       }
       break;
     }
@@ -2831,6 +2841,47 @@ function reorderChat(chat) {
     chats.splice(idx, 1);
     chats.unshift(chat);
   }
+}
+
+// Превью для системного уведомления: вместо абстрактного «Новое сообщение»
+// показываем расшифрованный текст (для текста) или понятную метку типа
+// (📷 фото, 🎥 видео, 🎤 голосовое, 📄 файл, 🎨 стикер и т.д.).
+async function buildNotificationBody(message, chat) {
+  const typeLabels = {
+    image: '📷 ' + I18N.t('notif.photo'),
+    photo: '📷 ' + I18N.t('notif.photo'),
+    video: '🎥 ' + I18N.t('notif.video'),
+    round: '🎥 ' + I18N.t('notif.video'),
+    voice: '🎤 ' + I18N.t('notif.voice'),
+    file: '📄 ' + I18N.t('notif.file'),
+    sticker: '🎨 ' + I18N.t('notif.sticker'),
+    custom_sticker: '🎨 ' + I18N.t('notif.sticker'),
+    call: '📞 ' + I18N.t('notif.call')
+  };
+  const t = message.type || 'text';
+  // Медиа: не пытаемся расшифровывать JSON-полезную нагрузку — сразу метка типа
+  if (typeLabels[t]) return typeLabels[t];
+  // Текст: пробуем расшифровать локально (ключи чата есть только на устройстве)
+  try {
+    const key = await getChatKeySafe(message.chat_id, chat);
+    if (!key) throw new Error('no key');
+    const text = await decryptChatText(key, message, message.chat_id,
+      currentUser && message.sender_id === currentUser.id);
+    // На всякий случай: если тип не пометился как медиа, но внутри JSON с url —
+    // это файл/фото и т.п., показываем метку типа из payload
+    if (text && text.startsWith('{')) {
+      try {
+        const p = JSON.parse(text);
+        if (p && p.url) {
+          const name = String(p.name || '').trim();
+          return name ? '📎 ' + name : '📎 ' + I18N.t('notif.file');
+        }
+      } catch (e) { /* обычный текст */ }
+    }
+    const clean = String(text).replace(/\s+/g, ' ').trim();
+    if (clean) return clean.length > 120 ? clean.slice(0, 120) + '…' : clean;
+  } catch (e) { /* не удалось — fallback ниже */ }
+  return I18N.t('chat.encryptedMessage');
 }
 
 function updateChatPreview(chatId, msg) {
