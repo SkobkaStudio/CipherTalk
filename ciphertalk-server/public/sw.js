@@ -1,6 +1,16 @@
 /* CipherTalk service worker: network-first для оболочки, API не кешируем.
-   Плюс фон: собственный WebSocket для уведомлений при закрытой вкладке. */
-const CACHE = 'ciphertalk-v14';
+   Плюс фон: собственный WebSocket для уведомлений при закрытой вкладке.
+
+   Как это работает (простая схема без гонок):
+   1. Страница при логине шлёт ct-bg-init { token, user, granted }.
+   2. SW хранит эти данные в Cache Storage ('ct-bg-creds') — они переживают
+      выгрузку и перезапуск SW (в отличие от переменных).
+   3. SW держит свой WebSocket. new_message приходит одновременно странице
+      и фону; уведомление показывает ТОТ, кто первый: страница, если её
+      вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
+      через ct-notif-shown и не дублирует. */
+const CACHE = 'ciphertalk-v15';
+const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',
   '/index.html',
@@ -29,7 +39,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== CREDS_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -61,17 +71,49 @@ self.addEventListener('fetch', (event) => {
 
 // ==================== ФОНОВЫЕ УВЕДОМЛЕНИЯ (закрытая вкладка) ====================
 // Service worker держит собственный WebSocket к серверу. Если ни одна вкладка
-// приложения не активна (закрыта/усыплена), сообщения приходят сюда и показываются
-// как системные уведомления прямо из ОС.
+// приложения не активна (закрыта/свёрнута), сообщения приходят сюда и
+// показываются как системные уведомления прямо из ОС.
 
-const BG_PING_MS = 30000;
+const BG_PING_MS = 25000;
 let bgWs = null;
 let bgReconnectTimer = null;
 let bgPingTimer = null;
-let currentUser = null; // {id} — приходит из страницы через ct-bg-init
-let bgStaleToken = false; // сервер отклонил токен — ждём свежий от страницы
-let lastKnownToken = null; // последний валидный токен (переживает перезагрузку SW)
-let notifMuted = false;    // страница явно сообщила, что уведомления выключены
+let bgCreds = null;          // { token, user: {id}, granted } — синхронизируется с Cache Storage
+let recentShown = new Map();  // chatId -> timestamp: уведомления, показанные страницей (дедуп)
+let credsLoaded = false;      // попытка восстановить креды из хранилища уже была
+
+// ----------Постоянное хранилище кредов (переживает выгрузку SW) ----------
+// Cache Storage хранит пары request->response; ключом делаем фиксированный URL.
+async function persistCreds(creds) {
+  bgCreds = creds;
+  try {
+    const cache = await caches.open(CREDS_CACHE);
+    const key = new Request('https://ciphertalk.internal/bg-creds');
+    await cache.put(key, new Response(JSON.stringify(creds || null)));
+  } catch (e) { /* ignore */ }
+}
+
+async function loadCreds() {
+  if (credsLoaded) return bgCreds;
+  credsLoaded = true;
+  try {
+    const cache = await caches.open(CREDS_CACHE);
+    const hit = await cache.match('https://ciphertalk.internal/bg-creds');
+    if (hit) {
+      const data = await hit.json();
+      if (data && data.token) bgCreds = data;
+    }
+  } catch (e) { /* ignore */ }
+  return bgCreds;
+}
+
+async function clearCreds() {
+  bgCreds = null;
+  try {
+    const cache = await caches.open(CREDS_CACHE);
+    await cache.delete(new Request('https://ciphertalk.internal/bg-creds'));
+  } catch (e) { /* ignore */ }
+}
 
 // Как только какая-то вкладка выходит в фокус — закрываем наши уведомления:
 // пользователь уже видит чат.
@@ -80,11 +122,6 @@ self.addEventListener('focus', () => {
     list.forEach(n => n.close());
   }).catch(() => {});
 });
-
-function hasVisibleAppClient() {
-  return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    .then(list => list.some(c => c.visibilityState === 'visible'));
-}
 
 function bgDisconnect() {
   clearTimeout(bgReconnectTimer);
@@ -109,11 +146,9 @@ function bgScheduleReconnect(delay = 3000) {
 
 async function bgConnect() {
   if (bgWs && bgWs.readyState !== WebSocket.CLOSED) return;
-  // Сначала свежий токен от живых вкладок, иначе — последний известный
-  const token = (await getTokenFromClients()) || lastKnownToken;
-  if (!token) return; // выхода нет — попробуем позже, когда страница откроется
-  lastKnownToken = token;
-  bgStaleToken = false;
+  const creds = bgCreds || await loadCreds();
+  if (!creds || !creds.token) return; // кредов нет — дождёмся ct-bg-init от страницы
+  if (creds.granted === false) return; // разрешения нет — показывать нечего
 
   const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
   let ws;
@@ -126,7 +161,7 @@ async function bgConnect() {
   bgWs = ws;
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'auth', token }));
+    ws.send(JSON.stringify({ type: 'auth', token: creds.token }));
     clearInterval(bgPingTimer);
     bgPingTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
@@ -138,32 +173,30 @@ async function bgConnect() {
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     if (msg.type === 'auth_error') {
       // Токен недействителен — переподключение бессмысленно до нового входа.
-      // Ждём свежий ct-bg-init от страницы (после логина она шлёт его снова).
       bgDisconnect();
-      bgStaleToken = true;
-      lastKnownToken = null;
+      clearCreds();
       return;
     }
     if (msg.type === 'pong' || msg.type === 'chats' || msg.type === 'folders') return;
     if (msg.type !== 'new_message' || !msg.message) return;
 
-    // Дедупликация: уведомление показывает либо страница (когда её вкладка
-    // видима И в фокусе — тогда пользователь и так всё видит), либо фон для
-    // всех остальных случаев. Здесь пропускаем только «видимая и в фокусе».
-    const active = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (active.some(c => c.visibilityState === 'visible' && c.focused)) return;
-
-    // Не показываем уведомления, если пользователь явно отключил их на странице
-    if (notifMuted) return;
-
-    // Поля приходят в camelCase (см. websocketService.js), поддержим оба варианта
     const m = msg.message;
     const senderId = Number(m.senderId ?? m.sender_id) || 0;
-    const isOwn = currentUser && senderId && senderId === Number(currentUser.id);
+    const isOwn = bgCreds && bgCreds.user && senderId && senderId === Number(bgCreds.user.id);
     if (isOwn) return;
 
-    const title = String(m.senderName || m.sender_name || 'CipherTalk');
     const chatId = Number(m.chatId ?? m.chat_id) || null;
+
+    // Дедупликация: страница показывает сама, когда её вкладка видима И в
+    // фокусе, и сообщает о показе через ct-notif-shown. Проверяем оба условия.
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (clients.some(c => c.visibilityState === 'visible' && c.focused)) return;
+    const shownAt = recentShown.get(chatId);
+    if (shownAt && Date.now() - shownAt < 5000) return; // страница уже показала
+
+    // Разрешение могло появиться позже — фон живёт по последнему сообщению страницы
+    if (bgCreds && bgCreds.granted === false) return;
+
     // Контент end-to-end шифрован — в фоне доступен только тип сообщения
     const typeLabels = {
       photo: '📷 Фото',
@@ -173,6 +206,7 @@ async function bgConnect() {
       sticker: '💬 Стикер',
       call: '📞 Звонок'
     };
+    const title = String(m.senderName || m.sender_name || 'CipherTalk');
     const body = typeLabels[m.type] || 'Новое сообщение';
 
     try {
@@ -180,95 +214,83 @@ async function bgConnect() {
         body,
         icon: '/icons/icon.svg',
         badge: '/icons/icon.svg',
-        tag: chatId ? `chat-${chatId}` : undefined,
-        renotify: !!chatId,
+        tag: chatId != null ? `chat-${chatId}` : undefined,
+        renotify: chatId != null,
         data: { chatId, url: '/' },
         vibrate: [80, 40, 80]
       });
     } catch (e) {
-      // Android требует предварительного разрешения — при отказе просим страницу
-      // показать системный промпт и переслать нам результат через ct-bg-init
-      getTokenFromClients().catch(() => null);
+      console.warn('[CT-SW] showNotification failed:', e && e.message);
     }
   };
 
   ws.onclose = () => {
     if (bgWs === ws) bgWs = null;
     clearInterval(bgPingTimer);
-    // Если вкладок приложения больше нет, переподключение из SW невозможно
-    // (негде взять токен) — ждём ct-bg-init от страницы. Иначе реконнект.
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      if (list.length) bgScheduleReconnect(5000);
-    });
+    // Реконнект только если ещё есть креды (страница залогинена)
+    if (bgCreds && bgCreds.token) bgScheduleReconnect(5000);
   };
 
   ws.onerror = () => { /* onclose выполнит реконнект */ };
 }
 
-// Токен и пользователь лежат в localStorage страницы — читаем через postMessage
-// (в самом SW доступа к localStorage нет).
-async function getTokenFromClients() {
-  // Ответственный за токен клиент должен быть «живой» вкладкой приложения:
-  // hidden-вкладка Chrome может быть заморожена (frozen) и не ответить.
-  const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const candidates = list.filter(c => c.visibilityState === 'visible')
-    .concat(list.filter(c => c.visibilityState !== 'visible'));
-  return new Promise(resolve => {
-    if (!candidates.length) return resolve(null);
-    let settled = false;
-    const finish = (v) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      navigator.serviceWorker.removeEventListener('message', handler);
-      resolve(v);
-    };
-    const timer = setTimeout(() => finish(null), 3000);
-    const handler = (e) => {
-      if (e.data && e.data.type === 'ct-bg-creds-response') {
-        finish(e.data.token || null);
-        if (e.data.user) currentUser = e.data.user;
-      }
-    };
-    navigator.serviceWorker.addEventListener('message', handler);
-    candidates.forEach(c => { try { c.postMessage({ type: 'ct-bg-creds-request' }); } catch (err) { /* ignore */ } });
-  });
-}
-
-// Страница сообщает нам данные аккаунта (для фильтра собственных сообщений)
+// Страница сообщает нам данные аккаунта; SW может быть выгружен в любой
+// момент — поэтому всё дублируем в Cache Storage и восстанавливаем на activate.
 self.addEventListener('message', (event) => {
   const d = event.data || {};
-  if (d.type === 'ct-bg-mute') {
-    notifMuted = !!d.muted;
-    return;
-  }
   if (d.type === 'ct-bg-init') {
-    currentUser = d.user ? { id: d.user.id } : null;
-    if (typeof d.muted === 'boolean') notifMuted = d.muted;
-    if (!d.token) { bgDisconnect(); lastKnownToken = null; return; }
-    const tokenChanged = lastKnownToken !== d.token;
-    lastKnownToken = d.token;
-    // Переподключаемся, если соединения нет, оно мёртвое, либо токен сменился
-    // (перелогин — старый сокет авторизован старым токеном и присылает не то).
-    // ВАЖНО: живой OPEN-сокет с тем же токеном не рвём — иначе при каждой
-    // перезагрузке страницы новый сокет упирался бы в «уже авторизован».
+    const creds = {
+      token: d.token || null,
+      user: d.user ? { id: d.user.id } : null,
+      granted: d.granted !== false
+    };
+    if (!creds.token) {
+      bgDisconnect();
+      clearCreds();
+      return;
+    }
+    const tokenChanged = !bgCreds || bgCreds.token !== creds.token;
+    const grantChanged = bgCreds && bgCreds.granted === false && creds.granted === true;
+    persistCreds(creds);
+    // Переподключаемся, если соединения нет, оно мёртвое, токен сменился или
+    // разрешение только что выдали. Живой OPEN-сокет не рвём.
     const alive = bgWs && bgWs.readyState !== WebSocket.CLOSED;
-    if (!alive || tokenChanged) {
+    if (!alive || tokenChanged || grantChanged) {
       bgDisconnect();
       bgConnect();
     }
+    return;
   }
   if (d.type === 'ct-bg-logout') {
-    currentUser = null;
-    lastKnownToken = null;
     bgDisconnect();
+    clearCreds();
+    return;
+  }
+  if (d.type === 'ct-bg-pause') {
+    // Страница видима и в фокусе — она сама показывает уведомления.
+    // закрываем фоновый сокет, чтобы не плодить соединения и дубли.
+    bgDisconnect();
+    return;
+  }
+  if (d.type === 'ct-notif-shown') {
+    recentShown.set(d.chatId, Date.now());
+    if (recentShown.size > 50) {
+      const cutoff = Date.now() - 10000;
+      for (const [k, t] of recentShown) if (t < cutoff) recentShown.delete(k);
+    }
+    return;
   }
 });
 
-// SW может быть выгружен браузером и перезапущен — восстанавливаемся из
-// последнего известного токена, чтобы фон не молчал до следующего сообщения от страницы.
-self.addEventListener('activate', () => {
-  if (lastKnownToken && !bgWs) bgConnect().catch(() => {});
+// SW перезапущен после выгрузки — восстанавливаем фон из хранилища.
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    await self.clients.claim();
+    const creds = await loadCreds();
+    if (creds && creds.token && creds.granted !== false && !bgWs) {
+      bgConnect().catch(() => {});
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
