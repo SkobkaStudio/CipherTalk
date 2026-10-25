@@ -9,7 +9,7 @@
       и фону; уведомление показывает ТОТ, кто первый: страница, если её
       вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
       через ct-notif-shown и не дублирует. */
-const CACHE = 'ciphertalk-v15';
+const CACHE = 'ciphertalk-v16';
 const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',
@@ -197,17 +197,22 @@ async function bgConnect() {
     // Разрешение могло появиться позже — фон живёт по последнему сообщению страницы
     if (bgCreds && bgCreds.granted === false) return;
 
-    // Контент end-to-end шифрован — в фоне доступен только тип сообщения
+    // Контент end-to-end шифрован — в фоне доступен только тип сообщения,
+    // поэтому показываем понятную метку вместо абстрактного «Новое сообщение».
+    // Страница при возможности присылает расшифрованное превью через ct-notif-body.
     const typeLabels = {
+      image: '📷 Фото',
       photo: '📷 Фото',
       video: '🎥 Видео',
+      round: '🎥 Видеосообщение',
       voice: '🎤 Голосовое сообщение',
-      file: '📎 Файл',
-      sticker: '💬 Стикер',
+      file: '📄 Файл',
+      sticker: '🎨 Стикер',
+      custom_sticker: '🎨 Стикер',
       call: '📞 Звонок'
     };
     const title = String(m.senderName || m.sender_name || 'CipherTalk');
-    const body = typeLabels[m.type] || 'Новое сообщение';
+    const body = typeLabels[m.type] || '🔒 Зашифрованное сообщение';
 
     try {
       await self.registration.showNotification(title, {
@@ -216,7 +221,7 @@ async function bgConnect() {
         badge: '/icons/icon.svg',
         tag: chatId != null ? `chat-${chatId}` : undefined,
         renotify: chatId != null,
-        data: { chatId, url: '/' },
+        data: { chatId, url: '/', body },
         vibrate: [80, 40, 80]
       });
     } catch (e) {
@@ -278,6 +283,34 @@ self.addEventListener('message', (event) => {
       const cutoff = Date.now() - 10000;
       for (const [k, t] of recentShown) if (t < cutoff) recentShown.delete(k);
     }
+    return;
+  }
+  // Страница прислала расшифрованное превью — обновим уже показанное фоновое
+  // уведомление (была метка типа / «Зашифрованное сообщение» → текст сообщения).
+  if (d.type === 'ct-notif-body') {
+    const chatId = Number(d.chatId) || null;
+    const body = String(d.body || '');
+    if (chatId == null || !body) return;
+    self.registration.getNotifications().then(list => {
+      for (const n of list) {
+        const data = n.data || {};
+        if (Number(data.chatId) !== chatId) continue;
+        if (data.body === body) return; // уже актуально
+        try {
+          n.close();
+          self.registration.showNotification(n.title, {
+            body,
+            icon: '/icons/icon.svg',
+            badge: '/icons/icon.svg',
+            tag: `chat-${chatId}`,
+            renotify: true,
+            silent: true,
+            data: { chatId, url: '/', body }
+          });
+        } catch (e) { /* ignore */ }
+        return;
+      }
+    }).catch(() => {});
     return;
   }
 });
