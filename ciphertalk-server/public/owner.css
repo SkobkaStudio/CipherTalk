@@ -238,3 +238,32 @@ html.mq-screenshot-guard.mq-privacy-blur #app {
   pointer-events: none;
   user-select: none;
 }
+
+/* ===== Короны разработчиков: серебряная и медная (creators.js) ===== */
+.creator-crown--silver {
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, .95), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(145deg, #f5f7fa 0%, #b0bec5 46%, #78909c 100%);
+  box-shadow:
+    0 0 0 1px rgba(207, 216, 222, .55),
+    0 2px 7px rgba(144, 164, 174, .38),
+    inset 0 -1px 2px rgba(84, 110, 122, .35);
+}
+
+.creator-crown--silver .owner-badge__crown {
+  fill: rgba(55, 71, 79, .88);
+}
+
+.creator-crown--bronze {
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, .9), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(145deg, #ffcc9c 0%, #d2853f 46%, #8d4a12 100%);
+  box-shadow:
+    0 0 0 1px rgba(210, 143, 82, .55),
+    0 2px 7px rgba(166, 99, 38, .38),
+    inset 0 -1px 2px rgba(97, 52, 6, .35);
+}
+
+.creator-crown--bronze .owner-badge__crown {
+  fill: rgba(74, 38, 5, .88);
+}
