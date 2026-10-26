@@ -41,8 +41,12 @@ module.exports = {
   onlinePingInterval: parseInt(process.env.ONLINE_PING_INTERVAL, 10) || 30000,
   heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL, 10) || 30000,
 
-  // Телефон создателя проекта: такой аккаунт получает золотую галочку владельца.
-  ownerPhone: process.env.OWNER_PHONE || '+79039952506',
+  // Телефон создателя проекта: такой аккаунт получает золотую корону.
+  // По умолчанию пуст — короны выдаются только через файл crowns.json.
+  ownerPhone: process.env.OWNER_PHONE || '',
+
+  // Файл со списком коронок: номер телефона -> уровень (gold|silver|bronze).
+  crownsFile: resolveFromRoot(process.env.CROWNS_FILE || './src/config/crowns.json'),
 
   codeExpiryMinutes: parseInt(process.env.CODE_EXPIRY_MINUTES, 10) || 5,
   codeMaxAttempts: 5,

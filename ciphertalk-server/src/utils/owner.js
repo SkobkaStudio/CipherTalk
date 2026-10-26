@@ -1,26 +1,23 @@
 /**
- * Признак аккаунта создателя CipherTalk.
+ * Признак владельца / короны CipherTalk.
  *
- * Телефон владельца задаётся через OWNER_PHONE (см. .env), по умолчанию —
- * номер создателя проекта. Сравниваем только цифры, чтобы +7 / 8 и пробелы
- * не влияли на результат.
+ * Старый модуль с зашитым номером разработчика удалён. Теперь всё
+ * настраивается ТОЛЬКО по номеру телефона в файле:
+ *   src/config/crowns.json   { "+7XXXXXXXXXX": "gold" | "silver" | "bronze" }
+ * и опционально OWNER_PHONE в .env (всегда gold).
+ *
+ * Логика живёт в ./crowns.js; здесь — совместимые реэкспорты, чтобы
+ * существующие импорты (`require('../utils/owner')`) не ломались.
  */
-const config = require('../config');
+const crowns = require('./crowns');
 
-function phoneDigits(value) {
-  const digits = String(value || '').replace(/\D/g, '');
-  return digits.length === 11 && digits[0] === '8' ? '7' + digits.slice(1) : digits;
-}
-
-function isOwnerPhone(phone) {
-  const owner = phoneDigits(config.ownerPhone);
-  const candidate = phoneDigits(phone);
-  return !!owner && !!candidate && owner === candidate;
-}
-
-function isOwnerUser(user) {
-  if (!user) return false;
-  return user.is_owner === 1 || user.is_owner === true || isOwnerPhone(user.phone);
-}
-
-module.exports = { phoneDigits, isOwnerPhone, isOwnerUser };
+module.exports = {
+  phoneDigits: crowns.phoneDigits,
+  // Совместимость: раньше «владелец» = один номер из config.ownerPhone.
+  isOwnerPhone: (phone) => crowns.getCrownLevelByPhone(phone) === 'gold',
+  getCrownLevelByPhone: crowns.getCrownLevelByPhone,
+  getCrownLevel: crowns.getCrownLevel,
+  isCrowned: crowns.isCrowned,
+  withCrown: crowns.withCrown,
+  isOwnerUser: crowns.isOwnerUser,
+};

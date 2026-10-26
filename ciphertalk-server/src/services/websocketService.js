@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const config = require('../config');
 const presenceService = require('./presenceService');
 const { maskPhone } = require('../utils/mask');
-const { isOwnerPhone } = require('../utils/owner');
+const { getCrownLevelByPhone } = require('../utils/crowns');
 const { normalizeTtlSeconds, expiresAtFor, isExpired } = require('../utils/messageExpiry');
 const sessionService = require('./sessionService');
 const { getDatabase } = require('../db/database');
@@ -1490,6 +1490,7 @@ class WebSocketService {
         const u = this.db.findUserById(m.user_id);
         if (!u) return null;
         const isSelf = requesterId === null || u.id === requesterId;
+        const crownLevel = getCrownLevelByPhone(u.phone);
         return {
           id: u.id,
           public_id: this.db.getPublicUserId(u.id),
@@ -1503,7 +1504,8 @@ class WebSocketService {
           public_key: u.public_key,
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
-          is_owner: isOwnerPhone(u.phone) ? 1 : 0,
+          crown_level: crownLevel,
+          is_owner: crownLevel === 'gold' ? 1 : 0,
           role: m.role
         };
       })

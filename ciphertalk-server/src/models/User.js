@@ -1,5 +1,5 @@
 const encryptionService = require('../services/encryptionService');
-const { isOwnerPhone } = require('../utils/owner');
+const { getCrownLevelByPhone } = require('../utils/crowns');
 const { formatUserId } = require('../utils/ids');
 
 class User {
@@ -21,13 +21,15 @@ class User {
     this.online = data.online || 0;
     this.last_seen = data.last_seen || 0;
     this.hide_online = data.hide_online || 0;
-    this.is_owner = isOwnerPhone(this.phone) ? 1 : 0;
+    // Короны — только по номеру телефона (src/config/crowns.json).
+    this.crown_level = getCrownLevelByPhone(this.phone);
+    this.is_owner = this.crown_level === 'gold' ? 1 : 0;
     this.created_at = data.created_at || Date.now();
   }
 
-  /** Аккаунт создателя CipherTalk (телефон из OWNER_PHONE). */
+  /** Аккаунт создателя CipherTalk (золотая корона по номеру телефона). */
   isOwner() {
-    return isOwnerPhone(this.phone);
+    return getCrownLevelByPhone(this.phone) === 'gold';
   }
 
   // Единый источник хеширования паролей (AES-независимо, PBKDF2-SHA512)
@@ -64,7 +66,8 @@ class User {
       online: this.online,
       last_seen: this.last_seen,
       hide_online: this.hide_online || 0,
-      is_owner: isOwnerPhone(this.phone) ? 1 : 0,
+      crown_level: getCrownLevelByPhone(this.phone),
+      is_owner: getCrownLevelByPhone(this.phone) === 'gold' ? 1 : 0,
       created_at: this.created_at
     };
   }

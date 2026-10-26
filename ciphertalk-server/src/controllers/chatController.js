@@ -1,7 +1,7 @@
 const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const { maskPhone } = require('../utils/mask');
-const { isOwnerPhone } = require('../utils/owner');
+const { getCrownLevelByPhone } = require('../utils/crowns');
 const { isExpired } = require('../utils/messageExpiry');
 
 class ChatController {
@@ -267,6 +267,7 @@ class ChatController {
         const u = this.db.findUserById(m.user_id);
         if (!u) return null;
         const isSelf = requesterId === null || u.id === requesterId;
+        const crownLevel = getCrownLevelByPhone(u.phone);
         return {
           id: u.id,
           name: u.name,
@@ -279,7 +280,8 @@ class ChatController {
           public_key: u.public_key,
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
-          is_owner: isOwnerPhone(u.phone) ? 1 : 0,
+          crown_level: crownLevel,
+          is_owner: crownLevel === 'gold' ? 1 : 0,
           role: m.role
         };
       })
