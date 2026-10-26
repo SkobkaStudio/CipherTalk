@@ -1277,10 +1277,72 @@ function getChatAvatarIcon(chat) {
   return chat && chat.type === 'saved' ? 'star' : null;
 }
 
+// Ссылки на загруженные файлы отдаются сервером как зашифрованный поток
+// и требуют Authorization-заголовка, поэтому обычный <img src> их не грузит.
+// Читаем их fetch'ем с токеном и подставляем blob-URL.
+const avatarBlobCache = new Map(); // url -> Promise<blobUrl|null>
+
+async function resolveAvatarSrc(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (!url.startsWith('/uploads/')) return url; // data: и внешние http(s): грузятся напрямую
+  if (avatarBlobCache.has(url)) return avatarBlobCache.get(url);
+  const p = (async () => {
+    try {
+      const headers = {};
+      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+      const res = await fetch(SERVER_URL + url, { headers });
+      if (!res.ok) return '';
+      const buf = await res.arrayBuffer();
+      // Файлы хранились как изображение, несмотря на octet-stream в ответах
+      const type = sniffImageMime(buf) || 'image/jpeg';
+      return URL.createObjectURL(new Blob([buf], { type }));
+    } catch (e) {
+      return '';
+    }
+  })();
+  avatarBlobCache.set(url, p);
+  return p;
+}
+
+function sniffImageMime(buf) {
+  const b = new Uint8Array(buf.slice ? buf.slice(0, 4) : buf);
+  if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b[0] === 0x47 && b[1] === 0x49) return 'image/gif';
+  if (b[0] === 0x52 && b[1] === 0x49 && b[3] === 0x46) return 'image/webp';
+  return '';
+}
+
+// Единая точка чтения аватара чата: раньше здесь не читались other_user /
+// members[].avatar для приватных чатов, из-за чего всегда срабатывал
+// fallback на первую букву имени («U»).
+function getChatAvatarUrl(chat) {
+  if (!chat) return '';
+  if (chat.type === 'private') {
+    if (chat.other_user && chat.other_user.avatar) return chat.other_user.avatar;
+    if (Array.isArray(chat.members)) {
+      const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
+      if (other && other.avatar) return other.avatar;
+    }
+    return '';
+  }
+  return chat.avatar || '';
+}
+
+// Аватар в разметке, генерируемой строкой (модалки, поиск).
+// src подставляется напрямую для data:/http(s):; для защищённых /uploads/
+// картинка догружается fetch'ем с токеном (resolveAvatarSrc).
 function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
   if (icon) return Icons.svg(icon, { className: 'mq-icon--lg' });
-  return escapeHtml(getChatAvatar(chat));
+  const url = getChatAvatarUrl(chat);
+  if (!url) return escapeHtml(getChatAvatar(chat));
+  const safe = escapeHtml(url).replace(/"/g, '&quot;');
+  const needsFetch = url.startsWith('/uploads/');
+  const fix = needsFetch
+    ? `onload="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}" onerror="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}"`
+    : '';
+  return `<img src="${needsFetch ? '' : safe}" ${fix} alt="">`;
 }
 
 function setChatAvatar(el, chat) {
@@ -1290,19 +1352,21 @@ function setChatAvatar(el, chat) {
     el.innerHTML = Icons.svg(icon, { className: 'mq-icon--lg' });
     return;
   }
-  // Приоритет: аватарка собеседника для приватного чата
-  let avatarUrl = null;
-  if (chat && chat.type === 'private') {
-    if (chat.other_user && chat.other_user.avatar) avatarUrl = chat.other_user.avatar;
-    else if (Array.isArray(chat.members)) {
-      const other = chat.members.find(m => m.id !== (currentUser && currentUser.id));
-      if (other && other.avatar) avatarUrl = other.avatar;
-    }
-  } else if (chat && chat.avatar) {
-    avatarUrl = chat.avatar;
-  }
+  const avatarUrl = getChatAvatarUrl(chat);
   if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.length > 0) {
-    el.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+    // Сначала буква, затем картинка поверх — так аватар не «прыгает»
+    el.textContent = getChatAvatar(chat);
+    resolveAvatarSrc(avatarUrl).then((src) => {
+      if (!src) return;
+      // Чат мог смениться, пока тянулся fetch — перечитываем актуальный
+      const current = getChatAvatarUrl(chat);
+      if (current !== avatarUrl || !el.isConnected) return;
+      el.textContent = '';
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      el.appendChild(img);
+    });
     return;
   }
   el.textContent = getChatAvatar(chat);
