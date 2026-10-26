@@ -27,3 +27,4 @@ ciphertalk-server/test-*.sqlite
 ciphertalk-server/test-*.sqlite-*
 ciphertalk-server/test-*.sqlite.*.bak.*
 CipherTalk-WorkIcons/
+build/
