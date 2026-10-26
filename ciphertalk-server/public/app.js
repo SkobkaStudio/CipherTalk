@@ -993,13 +993,39 @@ function typewriter(el, text) {
 
 function normalizeUser(user) {
   if (!user) return user;
-  return {
+  const out = {
     ...user,
     name: user.name || user.firstName || user.first_name || '',
     firstName: user.firstName || user.first_name || '',
     lastName: user.lastName || user.last_name || ''
   };
+  // Корона разработчика — СТРОГО по номеру телефона из creators.js.
+  // Если у пользователя номер из списка (или сервер прислал creator_level),
+  // проставляем уровень и карточку сразу — дальше UI их только рисует.
+  try {
+    const c = (typeof creatorOf === 'function') ? creatorOf(out) : null;
+    if (c) {
+      out.creator_level = c.level;
+      out.creator_name = c.name;
+      out.creator_role = c.role || '';
+      out.creator_description = c.description || '';
+    }
+  } catch (e) { /* noop */ }
+  return out;
 }
+
+// Принудительно пересчитать короны во всех кэшированных чатах и шапке —
+// вызывается когда creators.js догружается ПОСЛЕ app.js (кривой кэш SW).
+function refreshAllCrowns() {
+  try {
+    chats = (chats || []).map(c => ({ ...c, members: (c.members || []).map(normalizeUser) }));
+    if (currentUser) currentUser = normalizeUser(currentUser);
+    renderChatListThrottled();
+    updateChatHeader();
+    updateMenuProfile();
+  } catch (e) { /* noop */ }
+}
+window.__creatorsReady = function () { refreshAllCrowns(); };
 
 function normalizeChat(chat) {
   return {
@@ -1120,40 +1146,66 @@ function appendOwnerBadge(parent, target) {
 
 // ==================== КОРОНЫ РАЗРАБОТЧИКОВ (creators.js) ====================
 // Золотая / серебряная / медная корона для разработчиков из списка
-// window.CREATORS (public/creators.js). Идентификация ПО НОМЕРУ ТЕЛЕФОНА.
+// window.CREATORS (public/creators.js). Идентификация СТРОГО ПО НОМЕРУ
+// ТЕЛЕФОНА разработчика (не по id).
 const CREATOR_LEVELS = ['gold', 'silver', 'bronze'];
+
+function creatorDigits(value) {
+  const d = String(value == null ? '' : value).replace(/\D/g, '');
+  return d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d;
+}
+
+/** Список разработчиков: свежий window.CREATORS или резервная копия app.js. */
+function creatorsList() {
+  if (Array.isArray(window.CREATORS) && window.CREATORS.length) return window.CREATORS;
+  return FALLBACK_CREATORS;
+}
+
+// Резервная копия списка на случай, если creators.js не загрузился
+// (старый кэш service worker, блокировка и т.п.). Синхронизирована с
+// public/creators.js и src/utils/creators.js.
+const FALLBACK_CREATORS = [
+  { phone: '+79609611353', name: 'Skobka', level: 'gold', role: 'Основатель · Lead Developer',
+    description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.' },
+  { phone: '+79039952506', name: 'Максим', level: 'gold', role: 'Основатель · Lead Developer',
+    description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.' }
+];
 
 function creatorOf(user) {
   if (!user) return null;
-  // Основной источник — список creators.js: совпадение ПО НОМЕРУ ТЕЛЕФОНА.
-  // Номер может быть замаскирован сервером ('+796****53') — тогда сверяем
-  // по полям creator_phone (полные цифры от сервера) или по маске:
-  // первые 4 и последние 2 цифры номера.
-  const c = (window.Creators && window.Creators.ofUser) ? window.Creators.ofUser(user) : null;
-  if (c) return c;
-  const raw = String(user.creator_phone || user.phone || '');
-  if (raw && window.Creators && window.Creators.list) {
-    const digitsOnly = raw.replace(/\D/g, '');
-    const canon = (d) => (d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d);
-    const target = canon(digitsOnly);
-    const masked = !/^\d+$/.test(raw.replace(/[+\s]/g, '')) || (user.phone && user.phone !== user.creator_phone);
-    for (const cr of window.Creators.list) {
-      const cd = canon(String(cr.phone).replace(/\D/g, ''));
-      if (!cd) continue;
-      if (target === cd) return cr;
-      // Маска вида '+796****53': совпадают первые 4 и последние 2 цифры.
-      if (masked && target.length >= 8 && target.slice(0, 4) === cd.slice(0, 4) && target.slice(-2) === cd.slice(-2)) {
+  // 1) Официальный модуль window.Creators (public/creators.js):
+  //    совпадение по полному номеру телефона пользователя.
+  if (window.Creators && typeof window.Creators.ofUser === 'function') {
+    const c = window.Creators.ofUser(user);
+    if (c) return c;
+  }
+  // 2) Прямой поиск по списку: сравниваем ВСЕ варианты номеров, которые
+  //    есть у объекта (phone, creator_phone), с номерами разработчиков.
+  const targets = [user.phone, user.creator_phone]
+    .map(creatorDigits)
+    .filter(Boolean);
+  for (const cr of creatorsList()) {
+    const cd = creatorDigits(cr.phone);
+    if (!cd) continue;
+    for (const t of targets) {
+      if (t === cd) return cr;
+      // Маска вида '+79••••53' / '+796****53': сверяем префикс и суффикс.
+      const tMasked = !/^\d{10,11}$/.test(t);
+      if (tMasked && t.length >= 6 && t.slice(0, 4) === cd.slice(0, 4) && t.slice(-2) === cd.slice(-2)) {
         return cr;
       }
     }
   }
-  // Сервер прислал готовый уровень (creator_level) — доверяем ему,
-  // карточку (роль/описание) берём из синхронизированного списка по номеру.
-  const lvl = user.creator_level;
-  if (CREATOR_LEVELS.includes(lvl)) {
-    const byPhone = (window.Creators && window.Creators.byPhone) ? window.Creators.byPhone(user.phone) : null;
-    if (byPhone) return byPhone;
-    return { phone: String(user.phone || ''), name: user.creator_name || user.name || '', level: lvl, role: '', description: '' };
+  // 3) Резерв: сервер уже вычислил creator_level по полному номеру
+  //    (до маскирования) — доверяем и рисуем корону этого уровня.
+  if (CREATOR_LEVELS.includes(user.creator_level)) {
+    return {
+      phone: String(user.creator_phone || user.phone || ''),
+      name: user.creator_name || user.name || 'Разработчик',
+      level: user.creator_level,
+      role: user.creator_role || '',
+      description: user.creator_description || ''
+    };
   }
   return null;
 }
