@@ -1,6 +1,0 @@
-build/
-*.log
-server.log
-messenger.db
-messenger.db-shm
-messenger.db-wal
