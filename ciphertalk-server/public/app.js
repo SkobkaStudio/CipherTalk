@@ -1585,8 +1585,21 @@ function buildChatAvatarNodes(chat) {
     img.setAttribute('data-avatar-path', url);
     img.style.display = 'none'; // скрыто пока не загрузится через fetch
     letterWrap.style.display = 'flex'; // буква видна пока картинки нет
+    resolveAvatarSrc(url).then((src) => {
+      if (!frag.isConnected) return;
+      if (src && src !== '') {
+        img.src = src;
+        img.style.display = 'block';
+        letterWrap.style.display = 'none';
+      } else {
+        img.style.display = 'none';
+        letterWrap.style.display = 'flex';
+      }
+    });
   } else {
     img.src = url; // data:/внешние URL грузятся напрямую
+    img.style.display = 'block';
+    letterWrap.style.display = 'none';
   }
   frag.appendChild(img);
   return frag;
@@ -1634,20 +1647,9 @@ function setChatAvatar(el, chat) {
   el.textContent = '';
   el.appendChild(buildChatAvatarNodes(chat));
 
-  const img = el.querySelector ? el.querySelector('img[data-avatar-path]') : null;
-  if (!img) return;
-  const path = normalizeAvatarValue(img.getAttribute('data-avatar-path'));
-  if (!path) return;
-  resolveAvatarSrc(path).then((src) => {
-    // Чат/аватар могли смениться, пока тянулся fetch — сверяемся с подписью
-    if (!el.isConnected || el.dataset.avatarKey !== key) return;
-    if (!src) {
-      // Картинку получить не удалось — оставляем динамическую букву имени
-      el.textContent = getChatAvatar(chat);
-      return;
-    }
-    if (img.isConnected) img.setAttribute('src', src);
-  });
+  // buildChatAvatarNodes уже сам вызывает resolveAvatarSrc и переключает display,
+  // поэтому здесь второй вызов не нужен — он только ломает DOM (заменяет всё на букву).
+  return el;
 }
 
 function isChatOnline(chat) {
