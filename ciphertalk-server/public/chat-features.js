@@ -383,6 +383,9 @@ function openForwardModal(msg) {
         </div>`).join('')}
     </div>
   `);
+  // chatAvatarMarkup() кладёт защищённые /uploads/ пути в data-avatar-path —
+  // догружаем их blob-URL'ами (fetch + Authorization: Bearer) сразу после рендера.
+  hydrateAvatars(document.getElementById('modal-content'));
 }
 
 async function forwardToChat(msgId, toChatId) {
