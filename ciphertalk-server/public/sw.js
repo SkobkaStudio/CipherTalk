@@ -9,7 +9,9 @@
       и фону; уведомление показывает ТОТ, кто первый: страница, если её
       вкладка видима и в фокусе, иначе фон. Фон узнаёт о показе страницы
       через ct-notif-shown и не дублирует. */
-const CACHE = 'ciphertalk-v18';
+// Версия кэша поднята (v19): старый Service Worker отдавал index.html с
+// хардкодом «U» и старый app.js — из-за этого аватары «не чинились».
+const CACHE = 'ciphertalk-v19';
 const CREDS_CACHE = 'ct-bg-creds';
 const SHELL = [
   '/',

@@ -1,8 +1,16 @@
 const { getDatabase } = require('../db/database');
+const path = require('path');
+const fs = require('fs');
 const Chat = require('../models/Chat');
 const { maskPhone } = require('../utils/mask');
 const { getCrownLevelByPhone } = require('../utils/crowns');
 const { isExpired } = require('../utils/messageExpiry');
+const config = require('../config');
+const presenceService = require('../services/presenceService');
+
+// data:URL аватара ограничиваем так же, как это делает WebSocket-обработчик
+// set_chat_avatar (2 МБ), чтобы JSON- и multipart-пути были симметричны.
+const MAX_AVATAR_DATA_URL_BYTES = 2 * 1024 * 1024;
 
 class ChatController {
   constructor() {
@@ -257,6 +265,81 @@ class ChatController {
       console.error('Delete folder error:', error);
       res.status(500).json({ error: 'Ошибка удаления папки' });
     }
+  }
+
+  // Обновить аватар группы/канала.
+  // Принимает:
+  //  - multipart/form-data с файлом в поле 'avatar' (обрабатывается multer:
+  //    uploadMiddleware.single('avatar'), файл сохраняется в uploads/,
+  //    в БД пишется путь /uploads/<filename>);
+  //  - JSON { avatar } со data:URL или внешним URL (совместимость).
+  // Пустой запрос очищает аватар. Право — только owner/admin чата.
+  updateChatAvatar(req, res) {
+    try {
+      const chatId = parseInt(req.params.chatId, 10);
+      if (!Number.isInteger(chatId)) {
+        return res.status(400).json({ error: 'Некорректный идентификатор чата' });
+      }
+
+      const chat = this.db.findChatById(chatId);
+      if (!chat) return res.status(404).json({ error: 'Чат не найден' });
+
+      if (!this.db.isChatMember(chatId, req.userId)) {
+        return res.status(403).json({ error: 'Нет доступа к чату' });
+      }
+      const isGroup = chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel';
+      if (!isGroup) {
+        return res.status(403).json({ error: 'Аватар можно сменить только в группе или канале' });
+      }
+      const myRole = this.db.chatMembers.find(m => m.chat_id === chatId && m.user_id === req.userId)?.role;
+      if (myRole !== 'owner' && myRole !== 'admin') {
+        return res.status(403).json({ error: 'Только владелец или админ может сменить аватар' });
+      }
+
+      let avatar;
+      if (req.file) {
+        // multer сохранил загруженный файл — пишем в БД путь для раздачи
+        avatar = '/uploads/' + req.file.filename;
+      } else if (typeof req.body.avatar === 'string') {
+        avatar = req.body.avatar.trim();
+        if (avatar && !this.isValidChatAvatar(avatar)) {
+          return res.status(400).json({ error: 'Некорректный формат аватара' });
+        }
+      } else {
+        avatar = ''; // явная очистка аватара
+      }
+
+      // UPDATE chats SET avatar = ? WHERE id = ? — выполняется через db.updateChat
+      // (белый список колонок включает 'avatar', см. src/db/database.js).
+      this.db.updateChat(chatId, { avatar, updated_at: Date.now() });
+      chat.avatar = avatar;
+      this.db.markDirty();
+
+      // Уведомляем участников, чтобы списки чатов и шапка обновились на живых клиентах
+      const memberIds = this.db.chatMembers
+        .filter(m => m.chat_id === chatId)
+        .map(m => m.user_id);
+      presenceService.sendToChatMembers(memberIds, {
+        type: 'chat_updated',
+        chatId,
+        avatar
+      });
+
+      // Отдаём свежие детали чата, но members пересчитываем от уже
+      // обновлённого объекта: иначе в ответе остался бы старый аватар.
+      res.json(this.getChatWithDetails(this.db.findChatById(chatId) || chat, req.userId));
+    } catch (error) {
+      console.error('Update chat avatar error:', error);
+      res.status(500).json({ error: 'Ошибка обновления аватара' });
+    }
+  }
+
+  isValidChatAvatar(avatar) {
+    if (typeof avatar !== 'string' || avatar.length > MAX_AVATAR_DATA_URL_BYTES) return false;
+    if (avatar.startsWith('data:image/')) {
+      return /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar);
+    }
+    return /^https?:\/\//.test(avatar) || avatar.startsWith('/uploads/');
   }
 
   // ==================== Вспомогательные методы ====================
