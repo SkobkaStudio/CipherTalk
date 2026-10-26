@@ -1332,13 +1332,19 @@ function sniffImageMime(buf) {
 // не читались, из-за чего всегда срабатывал fallback на первую букву.
 function getChatAvatarUrl(chat) {
   if (!chat) return '';
-  if (chat.avatar) return chat.avatar;
+  // saved («Избранное») — всегда иконка, картинки нет
+  if (chat.type === 'saved') return '';
+  const own = normalizeAvatarValue(chat.avatar);
+  if (own) return own;
   if (chat.type === 'private') {
-    if (chat.other_user && chat.other_user.avatar) return chat.other_user.avatar;
+    const me = Number(currentUser && currentUser.id);
     if (Array.isArray(chat.members)) {
-      const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
-      if (other && other.avatar) return other.avatar;
+      const other = chat.members.find(m => m && Number(m.id) !== me);
+      const memberAvatar = normalizeAvatarValue(other && other.avatar);
+      if (memberAvatar) return memberAvatar;
     }
+    const ou = normalizeAvatarValue(chat.other_user && chat.other_user.avatar);
+    if (ou) return ou;
   }
   return '';
 }
@@ -1387,9 +1393,14 @@ function chatAvatarMarkup(chat) {
 
 // Аватар произвольного пользователя (результаты поиска, списки участников):
 // <img>, если аватар есть в базе; иначе — ДИНАМИЧЕСКАЯ первая буква имени.
+// Поддерживает и объект пользователя, и просто строку-имя (для совместимости
+// со старыми вызовами).
 function userAvatarMarkup(user) {
-  const name = (user && (user.name || user.firstName)) || '';
-  const letter = escapeHtml(name[0]?.toUpperCase() || '?');
+  if (typeof user === 'string') {
+    return escapeHtml((user.trim()[0] || '?').toUpperCase());
+  }
+  const name = (user && (user.name || user.firstName || user.username)) || '';
+  const letter = escapeHtml((name.trim()[0] || '?').toUpperCase());
   const url = normalizeAvatarValue(user && user.avatar);
   if (!url) return letter;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
@@ -1413,6 +1424,33 @@ function avatarStateKey(el, chat) {
   const icon = getChatAvatarIcon(chat);
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
   return `${icon ? 'i:' + icon : ''}|l:${getChatAvatar(chat)}|u:${url}`;
+}
+
+// Аватар пользователя в шапке бокового меню / панели профиля.
+// Картинка из БД (<img>), иначе — ДИНАМИЧЕСКАЯ первая буква имени.
+// Файлы из /uploads/ требуют Authorization-заголовок — дотягиваем их fetch'ем.
+function setUserAvatar(el, user) {
+  if (!el || !user) return;
+  const name = String(user.name || user.firstName || user.username || '').trim();
+  const letter = (name[0] || '?').toUpperCase();
+  const url = normalizeAvatarValue(user.avatar);
+  el.dataset.avatarKey = `l:${letter}|u:${url}`;
+  // Сначала буква — она видима сразу и остаётся, если картинки нет/ошибка
+  el.textContent = letter;
+  if (!url) return;
+  const apply = (src) => {
+    if (!el.isConnected || el.dataset.avatarKey !== `l:${letter}|u:${url}`) return;
+    if (!src) return;
+    el.textContent = '';
+    const img = document.createElement('img');
+    img.className = 'chat-avatar__img';
+    img.src = src;
+    img.alt = letter;
+    img.style.cssText = AVATAR_IMG_STYLE;
+    el.appendChild(img);
+  };
+  if (url.startsWith('/uploads/')) resolveAvatarSrc(url).then(apply);
+  else apply(url);
 }
 
 function setChatAvatar(el, chat) {
@@ -2399,21 +2437,9 @@ function updateMenuProfile() {
   const avatarEl = document.getElementById('menu-avatar');
   if (avatarEl) {
     // Аватар пользователя: картинка из БД, иначе — динамическая первая буква
-    // имени (хардкод «U» убран; он оставался виден, пока JS не отработает).
-    const url = currentUser.avatar || '';
-    if (url) {
-      resolveAvatarSrc(url).then((src) => {
-        if (!src || !avatarEl.isConnected) return;
-        avatarEl.innerHTML = `<img src="${escapeHtml(src)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
-      });
-      if (url.startsWith('data:') || /^https?:\/\//.test(url)) {
-        avatarEl.innerHTML = `<img src="${escapeHtml(url)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
-      } else {
-        avatarEl.textContent = (currentUser.firstName || currentUser.name || '')[0]?.toUpperCase() || '?';
-      }
-    } else {
-      avatarEl.textContent = (currentUser.firstName || currentUser.name || '')[0]?.toUpperCase() || '?';
-    }
+    // имени (хардкод «U» из index.html убран; setUserAvatar всегда перерисовывает
+    // элемент целиком, поэтому старый контент не остаётся на экране).
+    setUserAvatar(avatarEl, currentUser);
   }
 }
 
@@ -2969,7 +2995,13 @@ function updateChatItem(el, chat) {
     if (timeEl.textContent !== time) timeEl.textContent = time;
   }
   const avatarEl = el.querySelector ? el.querySelector('.chat-avatar') : null;
-  if (avatarEl) avatarEl.classList.toggle('online', isChatOnline(chat));
+  if (avatarEl) {
+    avatarEl.classList.toggle('online', isChatOnline(chat));
+    // Обязательно перечитываем содержимое аватара: без этого смена картинки
+    // (или подгрузка other_user из обновлённого списка чатов) не попадали
+    // в уже отрисованный элемент — на экране оставалась старая буква.
+    setChatAvatar(avatarEl, chat);
+  }
   const previewEl = el.querySelector ? el.querySelector('.chat-preview') : null;
   if (previewEl) {
     const cached = previewCache.get(chat.id);
@@ -4870,6 +4902,9 @@ async function searchUsers(query) {
           </div>
         </div>
       `).join('');
+      // Аватары из /uploads/ грузятся только с Authorization-заголовком —
+      // дотягиваем их blob-URL'ами после вставки разметки.
+      hydrateAvatarImages(container);
     } catch (e) {
       container.innerHTML = `<p style="color:var(--danger);padding:14px;text-align:center">${I18N.t('search.error')}</p>`;
     }

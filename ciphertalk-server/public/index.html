@@ -315,6 +315,25 @@ body {
   border: 2px solid var(--bg-secondary);
 }
 
+/* Картинки аватаров (app.js: chatAvatarMarkup / userAvatarMarkup / setChatAvatar)
+   строго вписываются в круг контейнера и не должны «расползаться» по панели. */
+.chat-avatar__img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+.member-avatar .chat-avatar__img,
+.forward-item .fi-avatar .chat-avatar__img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .chat-info { flex: 1; min-width: 0; }
 
 .chat-top {
@@ -2012,7 +2031,9 @@ html[data-anim="full"] .message { animation-duration: 0.32s; }
     <div class="menu-backdrop" id="menu-backdrop" data-action="toggleMenu"></div>
     <div class="side-menu" id="side-menu">
       <div class="side-menu-header">
-        <div class="side-menu-avatar" id="menu-avatar">U</div>
+        <!-- Аватар заполняет JS (см. updateMenuProfile в app.js): картинка из БД
+             или динамическая первая буква имени. Хардкод «U» убран. -->
+        <div class="side-menu-avatar" id="menu-avatar"></div>
         <div class="side-menu-name" id="menu-name" data-i18n="chat.you"></div>
         <div class="side-menu-username" id="menu-username">@username</div>
         <div class="side-menu-phone" id="menu-phone">+7...</div>
@@ -2076,7 +2097,9 @@ html[data-anim="full"] .message { animation-duration: 0.32s; }
       <div id="active-chat" style="display:none; flex-direction:column; height:100%">
         <div class="chat-header">
           <button class="menu-btn back-btn" data-action="closeChat"><svg class="mq-icon " aria-hidden="true" focusable="false"><use href="#mq-i-arrow-left"></use></svg></button>
-          <div class="chat-avatar" id="chat-header-avatar">U</div>
+          <!-- Аватар шапки заполняет setChatAvatar (app.js): буква имени чата
+               или <img>. Хардкод «U» убран. -->
+          <div class="chat-avatar" id="chat-header-avatar"></div>
           <div class="chat-header-info">
             <div class="chat-header-name-row">
               <span class="chat-header-name" id="chat-header-name" data-i18n="chat.generic">Чат</span>
