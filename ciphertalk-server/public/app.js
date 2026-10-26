@@ -2704,6 +2704,7 @@ async function handleWSMessage(msg) {
         idbDelete('messages', chatId);
         scheduleChatsCache();
         if (currentChatId === chatId) closeChat();
+        try { localStorage.removeItem('ciphertalk_draft_' + chatId); } catch (e) {}
         delete chatKeys[chatId];
         // Очищаем все таймеры истечения для этого чата
         for (const k of Array.from(expiryTimers.keys())) {
