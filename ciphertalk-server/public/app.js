@@ -1011,6 +1011,9 @@ function normalizeChat(chat) {
     avatar: chat.avatar || '',
     owner_id: chat.owner_id || null,
     role: chat.role || 'member',
+    // other_user { id, avatar } приходит с сервера для приватных чатов —
+    // без этого поля список чатов терял аватары собеседников (показывалась буква).
+    other_user: chat.other_user || null,
     members: Array.isArray(chat.members) ? chat.members.map(normalizeUser) : [],
     last_message: chat.last_message || '',
     last_message_iv: chat.last_message_iv || '',
