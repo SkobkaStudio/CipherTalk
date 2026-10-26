@@ -588,12 +588,14 @@ async function memberSearch(query) {
     const users = (Array.isArray(res.data) ? res.data : []).filter(u => u.id !== currentUser.id);
     box.innerHTML = users.length ? users.map(u => `
       <div class="forward-item" data-action="addMemberToChat" data-id="${u.id}">
-        <div class="fi-avatar">${escapeHtml((u.name || '?')[0].toUpperCase())}</div>
+        <div class="fi-avatar">${userAvatarMarkup(u)}</div>
         <div>
           <div class="fi-name">${escapeHtml(u.name || '')}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
           <div class="fi-sub">@${escapeHtml(u.username || '')}</div>
         </div>
       </div>`).join('') : `<div class="empty-note">${I18N.t('member.notFound')}</div>`;
+    // Догружаем картинки из /uploads/ (нужен Authorization-заголовок)
+    hydrateAvatarImages(box);
   } catch (e) {
     box.innerHTML = `<div class="empty-note">${I18N.t('member.searchError')}</div>`;
   }
@@ -661,7 +663,7 @@ async function showChatInfoFull() {
     const canManage = isGroup && (chat.owner_id === currentUser.id || chat.role === 'owner' || chat.role === 'admin');
     return `
       <div class="member-row">
-        <div class="member-avatar">${escapeHtml((m.name || '?')[0].toUpperCase())}${online ? '<span class="dot"></span>' : ''}</div>
+        <div class="member-avatar">${userAvatarMarkup(m)}${online ? '<span class="dot"></span>' : ''}</div>
         <div class="member-info">
           <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}${isOwnerUser(m) ? ownerBadgeHtml() : ''}</div>
           <div class="member-sub">@${escapeHtml(m.username || '')} ${m.public_key ? '· ' + I18N.t('chatinfo.hasKey') : '· ' + I18N.t('chatinfo.noKey')}</div>
