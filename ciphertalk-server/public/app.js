@@ -1001,6 +1001,14 @@ function normalizeUser(user) {
   };
 }
 
+// Участник чата внутри объекта чата: дополнительно нормализуем avatar,
+// чтобы список чатов и шапка видели ссылку на картинку собеседника.
+function normalizeUserMember(user) {
+  const u = normalizeUser(user);
+  if (u) u.avatar = normalizeAvatarValue(u.avatar);
+  return u;
+}
+
 function normalizeChat(chat) {
   return {
     id: Number(chat.id),
@@ -1008,13 +1016,17 @@ function normalizeChat(chat) {
     public_id: String(chat.public_id || ''),
     type: chat.type || 'private',
     name: chat.name || '',
-    avatar: chat.avatar || '',
+    // avatar может прийти строкой ('/uploads/..' или data-URL) или объектом —
+    // нормализуем, иначе проверка «есть ли аватар» не срабатывала и рисовалась буква
+    avatar: normalizeAvatarValue(chat.avatar),
     owner_id: chat.owner_id || null,
     role: chat.role || 'member',
     // other_user { id, avatar } приходит с сервера для приватных чатов —
     // без этого поля список чатов терял аватары собеседников (показывалась буква).
-    other_user: chat.other_user || null,
-    members: Array.isArray(chat.members) ? chat.members.map(normalizeUser) : [],
+    other_user: chat.other_user
+      ? { ...chat.other_user, avatar: normalizeAvatarValue(chat.other_user.avatar) }
+      : null,
+    members: Array.isArray(chat.members) ? chat.members.map(normalizeUserMember) : [],
     last_message: chat.last_message || '',
     last_message_iv: chat.last_message_iv || '',
     last_message_header: chat.last_message_header || '',
@@ -1282,8 +1294,9 @@ function getChatAvatarIcon(chat) {
 // Читаем их fetch'ем с токеном и подставляем blob-URL.
 const avatarBlobCache = new Map(); // url -> Promise<blobUrl|null>
 
-async function resolveAvatarSrc(url) {
-  if (!url || typeof url !== 'string') return '';
+async function resolveAvatarSrc(rawUrl) {
+  const url = normalizeAvatarValue(rawUrl);
+  if (!url) return '';
   if (!url.startsWith('/uploads/')) return url; // data: и внешние http(s): грузятся напрямую
   if (avatarBlobCache.has(url)) return avatarBlobCache.get(url);
   const p = (async () => {
@@ -1313,22 +1326,31 @@ function sniffImageMime(buf) {
   return '';
 }
 
-// Единая точка чтения аватара чата: раньше здесь не читались other_user /
-// members[].avatar для приватных чатов, из-за чего всегда срабатывал
-// fallback на первую букву имени («U»).
+// Единая точка чтения аватара чата. Порядок поиска: собственное поле чата
+// (аватар группы/канала или заполненное сервером поле приватного чата),
+// затем other_user / members[].avatar для приватных чатов. Раньше эти поля
+// не читались, из-за чего всегда срабатывал fallback на первую букву.
 function getChatAvatarUrl(chat) {
   if (!chat) return '';
+  if (chat.avatar) return chat.avatar;
   if (chat.type === 'private') {
     if (chat.other_user && chat.other_user.avatar) return chat.other_user.avatar;
     if (Array.isArray(chat.members)) {
       const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
       if (other && other.avatar) return other.avatar;
     }
-    // у приватного чата собственное поле avatar сервер заполняет аватаром
-    // собеседника — читаем и его, иначе реальная картинка терялась
-    return chat.avatar || '';
   }
-  return chat.avatar || '';
+  return '';
+}
+
+// Приводим любое «сырое» значение аватара к строке-ссылке: бэкенд отдаёт
+// '/uploads/<файл>' или data-URL, но в отдельных местах (кэш IndexedDB,
+// ответы сервера) поле могло приходить объектом { url/path/avatar }.
+function normalizeAvatarValue(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'object') return String(v.url || v.path || v.avatar || '').trim();
+  return '';
 }
 
 // Картинка аватара никогда не должна «расползаться» за круг контейнера
@@ -1357,7 +1379,7 @@ function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
   if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
   const letter = escapeHtml(getChatAvatar(chat));
-  const url = getChatAvatarUrl(chat);
+  const url = normalizeAvatarValue(getChatAvatarUrl(chat));
   if (!url) return letter;
   // alt = динамическая первая буква имени — заглушка, пока картинка грузится
   return `<img class="chat-avatar__img" src="${escapeHtml(url).replace(/"/g, '&quot;')}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
@@ -1368,7 +1390,7 @@ function chatAvatarMarkup(chat) {
 function userAvatarMarkup(user) {
   const name = (user && (user.name || user.firstName)) || '';
   const letter = escapeHtml(name[0]?.toUpperCase() || '?');
-  const url = (user && user.avatar) || '';
+  const url = normalizeAvatarValue(user && user.avatar);
   if (!url) return letter;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   return `<img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
@@ -1385,37 +1407,46 @@ function hydrateAvatarImages(root) {
   });
 }
 
+// Инкрементальная перерисовка аватара: сравниваем «подпись» состояния
+// (иконка/буква/URL картинки) и не трогаем DOM, если ничего не изменилось.
+function avatarStateKey(el, chat) {
+  const icon = getChatAvatarIcon(chat);
+  const url = normalizeAvatarValue(getChatAvatarUrl(chat));
+  return `${icon ? 'i:' + icon : ''}|l:${getChatAvatar(chat)}|u:${url}`;
+}
+
 function setChatAvatar(el, chat) {
-  if (!el) return;
+  if (!el || !chat) return;
+  const key = avatarStateKey(el, chat);
+  if (el.dataset.avatarKey === key && el.querySelector('img.chat-avatar__img')) return;
+  el.dataset.avatarKey = key;
+
   const icon = getChatAvatarIcon(chat);
   if (icon) {
     el.innerHTML = `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
     return;
   }
-  const avatarUrl = getChatAvatarUrl(chat);
-  if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.length > 0) {
-    // Сначала буква, затем картинка поверх — так аватар не «прыгает»
-    el.textContent = getChatAvatar(chat);
-    resolveAvatarSrc(avatarUrl).then((src) => {
-      // Чат мог смениться, пока тянулся fetch — перечитываем актуальный
-      const current = getChatAvatarUrl(chat);
-      if (!el.isConnected || current !== avatarUrl) return;
-      if (!src) {
-        // Картинку не удалось загрузить — остаётся динамическая буква имени
-        el.textContent = getChatAvatar(chat);
-        return;
-      }
-      el.textContent = '';
-      const img = document.createElement('img');
-      img.className = 'chat-avatar__img';
-      img.src = src;
-      img.alt = getChatAvatar(chat);
-      img.style.cssText = AVATAR_IMG_STYLE;
-      el.appendChild(img);
-    });
-    return;
-  }
+  const avatarUrl = normalizeAvatarValue(getChatAvatarUrl(chat));
+  // ВЕЗДЕ сначала показываем ДИНАМИЧЕСКУЮ первую букву имени никнейма/чата —
+  // она остаётся видимой, пока картинка грузится, если её нет, и при ошибке
+  // загрузки (раньше здесь мог оставаться хардкод «U» из index.html).
   el.textContent = getChatAvatar(chat);
+  if (!avatarUrl) return;
+  resolveAvatarSrc(avatarUrl).then((src) => {
+    // Чат/аватар могли смениться, пока тянулся fetch — сверяемся с подписью
+    if (!el.isConnected || el.dataset.avatarKey !== key) return;
+    if (!src) {
+      el.textContent = getChatAvatar(chat);
+      return;
+    }
+    el.textContent = '';
+    const img = document.createElement('img');
+    img.className = 'chat-avatar__img';
+    img.src = src;
+    img.alt = getChatAvatar(chat);
+    img.style.cssText = AVATAR_IMG_STYLE;
+    el.appendChild(img);
+  });
 }
 
 function isChatOnline(chat) {
@@ -2701,7 +2732,11 @@ async function handleWSMessage(msg) {
         chat.last_message_type = msg.lastMessageType || null;
         chat.last_message_time = msg.lastMessageTime || Date.now();
         chat.last_sender_id = msg.lastSenderId || 0;
-        if (typeof msg.avatar === 'string') chat.avatar = msg.avatar;
+        // Сервер присылает avatar только при реальной смене аватара; пустая
+        // строка означает явную очистку картинки (тогда остаётся буква имени).
+        if ('avatar' in msg && typeof msg.avatar === 'string') {
+          applyChatAvatarUpdate(chat, msg.avatar);
+        }
         reorderChat(chat);
       }
       renderChatListThrottled();
@@ -5041,25 +5076,32 @@ async function uploadChatAvatar(chatId, file) {
   return data || {};
 }
 
-// Применям новый аватар локально: список чатов, шапка открытого чата, кэш.
+// Применяем новый аватар локально: список чатов, шапка открытого чата, кэш.
 // avatar может прийти как строкой (data:/URL), так и в составе объекта
 // обновлённого чата с сервера ({ avatar: '/uploads/...' }).
 function applyChatAvatarUpdate(chat, payload) {
   if (!chat) return;
-  const newAvatar = typeof payload === 'string' ? payload : (payload && payload.avatar);
-  if (typeof newAvatar !== 'string') return;
-  // Новый файл имеет уникальное имя — старый blob-URL больше не актуален.
+  const newAvatar = normalizeAvatarValue(typeof payload === 'string' ? payload : (payload && payload.avatar));
+  // Старый файл больше не актуален — убираем его blob-кэш, иначе на экране
+  // останется предыдущая картинка.
   const oldUrl = getChatAvatarUrl(chat);
   if (oldUrl && oldUrl.startsWith('/uploads/') && oldUrl !== newAvatar) {
     avatarBlobCache.delete(oldUrl);
   }
   chat.avatar = newAvatar;
   // для приватных чатов источник аватара — other_user/members: синхронизируем
-  if (chat.type === 'private' && chat.other_user) chat.other_user.avatar = newAvatar;
+  if (chat.type === 'private') {
+    if (newAvatar && chat.other_user) chat.other_user.avatar = newAvatar;
+    if (newAvatar && Array.isArray(chat.members)) {
+      const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
+      if (other) other.avatar = newAvatar;
+    }
+  }
   renderChatListThrottled();
   if (currentChatId === chat.id) {
     setChatAvatar(document.getElementById('chat-header-avatar'), chat);
   }
+  scheduleChatsCache();
 }
 
 // После смены аватара перечитываем панель информации о чате, если она
