@@ -316,7 +316,9 @@ class AuthController {
         id: savedChatId,
         type: 'saved',
         name: 'Избранное',
-        owner_id: user.id
+        owner_id: user.id,
+        // Публичный id «Избранного» = публичный id владельца (/00000001)
+        public_id: user.public_id || ''
       }));
       this.db.chatMembers.push({
         chat_id: savedChatId,
