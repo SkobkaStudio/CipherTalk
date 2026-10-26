@@ -1279,7 +1279,7 @@ function getChatName(chat) {
 }
 
 function getChatAvatar(chat) {
-  if (chat.type === 'saved') return '*';
+  if (chat.type === 'saved') return '⭐';
   const name = getChatName(chat);
   return name[0]?.toUpperCase() || '?';
 }
@@ -1420,7 +1420,7 @@ function chatAvatarMarkup(chat) {
   if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
   const letter = escapeHtml(getChatAvatar(chat));
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
-  if (!url) return `<span class="chat-avatar__letter">${letter}</span>`;
+  if (!url) return letter; // динамическая первая буква — видна через flex-центрировку контейнера
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   // alt = динамическая первая буква имени — заглушка, пока картинка грузится.
   // Защищённые /uploads/ ссылки сервер не отдаёт по прямому <img src>, поэтому
@@ -1438,12 +1438,12 @@ function chatAvatarMarkup(chat) {
 // со старыми вызовами).
 function userAvatarMarkup(user) {
   if (typeof user === 'string') {
-    return `<span class="chat-avatar__letter">${escapeHtml((user.trim()[0] || '?').toUpperCase())}</span>`;
+    return escapeHtml((user.trim()[0] || '?').toUpperCase());
   }
   const name = (user && (user.name || user.firstName || user.username)) || '';
   const letter = escapeHtml((name.trim()[0] || '?').toUpperCase());
   const url = normalizeAvatarValue(user && user.avatar);
-  if (!url) return `<span class="chat-avatar__letter">${letter}</span>`;
+  if (!url) return letter; // первая буква имени — видна через flex-центрировку контейнера
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   // /uploads/ — защищённые ссылки: пустой src + data-avatar-path, картинку
   // догружает hydrateAvatars()/hydrateAvatarImages() через fetch с токеном.
