@@ -1331,21 +1331,36 @@ function getChatAvatarUrl(chat) {
   return chat.avatar || '';
 }
 
-// Аватар в разметке, генерируемой строкой (модалки, поиск).
-// src подставляется напрямую для data:/http(s):; для защищённых /uploads/
-// картинка догружается fetch'ем с токеном (resolveAvatarSrc).
+// Картинка аватара никогда не должна «расползаться» за круг контейнера
+// (в т.ч. в панели информации о чате, где размер задаётся инлайн-стилем).
+const AVATAR_IMG_STYLE = 'width:100%;height:100%;max-width:100%;max-height:100%;' +
+  'border-radius:50%;object-fit:cover;display:block';
+
+// Встроенные SVG-иконки могут быть больше контейнера — ограничиваем их.
+const AVATAR_ICON_STYLE = 'max-width:60%;max-height:60%';
+
+// Подставляем blob-URL для защищённых /uploads/-ссылок (нужен Authorization-
+// заголовок, обычный <img src> такие ссылки не грузит). При неудаче —
+// возвращаем исходный url, чтобы вызывающий код показал буквенную заглушку.
+function attachResolvedAvatar(imgEl, url) {
+  if (!imgEl || !url) return;
+  if (!url.startsWith('/uploads/')) { imgEl.src = url; return; }
+  resolveAvatarSrc(url).then((src) => {
+    if (src && src !== '') imgEl.src = src;
+    else if (typeof imgEl.remove === 'function') imgEl.remove();
+  });
+}
+
+// Аватар в разметке, генерируемой строкой (модалки, панель информации, поиск).
+// Если аватарки нет — ДИНАМИЧЕСКАЯ первая буква имени конкретного чата.
 function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
-  if (icon) return Icons.svg(icon, { className: 'mq-icon--lg' });
+  if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
+  const letter = escapeHtml(getChatAvatar(chat));
   const url = getChatAvatarUrl(chat);
-  if (!url) return escapeHtml(getChatAvatar(chat));
-  const safe = escapeHtml(url).replace(/"/g, '&quot;');
-  const needsFetch = url.startsWith('/uploads/');
-  const fix = needsFetch
-    ? `onload="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}" onerror="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}"`
-    : '';
+  if (!url) return letter;
   // alt = динамическая первая буква имени — заглушка, пока картинка грузится
-  return `<img src="${needsFetch ? '' : safe}" ${fix} alt="${escapeHtml(getChatAvatar(chat))}">`;
+  return `<img class="chat-avatar__img" src="${escapeHtml(url).replace(/"/g, '&quot;')}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
 }
 
 // Аватар произвольного пользователя (результаты поиска, списки участников):
@@ -1356,14 +1371,25 @@ function userAvatarMarkup(user) {
   const url = (user && user.avatar) || '';
   if (!url) return letter;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
-  return `<img src="${safe}" alt="${letter}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.replaceWith(document.createTextNode('${letter}'))">`;
+  return `<img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
+}
+
+// Заменяет содержимое контейнера-аватара на буквенную заглушку или <img>.
+// Используется после загрузки string-разметки (chatAvatarMarkup), чтобы
+// дорисовать картинки из /uploads/, требующие Authorization-заголовка.
+function hydrateAvatarImages(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  root.querySelectorAll('img.chat-avatar__img').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    if (src.startsWith('/uploads/')) attachResolvedAvatar(img, src);
+  });
 }
 
 function setChatAvatar(el, chat) {
   if (!el) return;
   const icon = getChatAvatarIcon(chat);
   if (icon) {
-    el.innerHTML = Icons.svg(icon, { className: 'mq-icon--lg' });
+    el.innerHTML = `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
     return;
   }
   const avatarUrl = getChatAvatarUrl(chat);
@@ -1371,14 +1397,20 @@ function setChatAvatar(el, chat) {
     // Сначала буква, затем картинка поверх — так аватар не «прыгает»
     el.textContent = getChatAvatar(chat);
     resolveAvatarSrc(avatarUrl).then((src) => {
-      if (!src) return;
       // Чат мог смениться, пока тянулся fetch — перечитываем актуальный
       const current = getChatAvatarUrl(chat);
-      if (current !== avatarUrl || !el.isConnected) return;
+      if (!el.isConnected || current !== avatarUrl) return;
+      if (!src) {
+        // Картинку не удалось загрузить — остаётся динамическая буква имени
+        el.textContent = getChatAvatar(chat);
+        return;
+      }
       el.textContent = '';
       const img = document.createElement('img');
+      img.className = 'chat-avatar__img';
       img.src = src;
-      img.alt = '';
+      img.alt = getChatAvatar(chat);
+      img.style.cssText = AVATAR_IMG_STYLE;
       el.appendChild(img);
     });
     return;
@@ -4717,8 +4749,12 @@ async function sendMediaBlob(blob, kind, opts) {
 
 // ==================== UI ====================
 function showModal(html) {
-  document.getElementById('modal-content').innerHTML = html;
+  const content = document.getElementById('modal-content');
+  content.innerHTML = html;
   document.getElementById('modal-overlay').classList.add('show');
+  // Аватары из /uploads/ требуют Authorization-заголовок — догружаем их
+  // blob-URL'ами после вставки строковой разметки (модалки, инфо о чате).
+  hydrateAvatarImages(content);
 }
 
 function closeModal() {
@@ -4968,7 +5004,8 @@ async function setChatAvatar(el) {
   try {
     const updated = await uploadChatAvatar(chat.id, file);
     if (updated) {
-      applyChatAvatarUpdate(chat, updated.avatar ?? `/uploads/${''}`);
+      applyChatAvatarUpdate(chat, updated);
+      refreshChatInfoModal(chat);
       closeModal();
       showToast(I18N.t('toast.saved'), 'success');
       return;
@@ -5004,16 +5041,35 @@ async function uploadChatAvatar(chatId, file) {
   return data || {};
 }
 
-// Применям новый аватар локально: список чатов, шапка открытого чата, кэш
-function applyChatAvatarUpdate(chat, avatar) {
+// Применям новый аватар локально: список чатов, шапка открытого чата, кэш.
+// avatar может прийти как строкой (data:/URL), так и в составе объекта
+// обновлённого чата с сервера ({ avatar: '/uploads/...' }).
+function applyChatAvatarUpdate(chat, payload) {
   if (!chat) return;
-  if (typeof avatar === 'string') chat.avatar = avatar;
-  // сбрасываем кэш blob-URL для старых ссылок, чтобы картинка обновилась
+  const newAvatar = typeof payload === 'string' ? payload : (payload && payload.avatar);
+  if (typeof newAvatar !== 'string') return;
+  // Новый файл имеет уникальное имя — старый blob-URL больше не актуален.
+  const oldUrl = getChatAvatarUrl(chat);
+  if (oldUrl && oldUrl.startsWith('/uploads/') && oldUrl !== newAvatar) {
+    avatarBlobCache.delete(oldUrl);
+  }
+  chat.avatar = newAvatar;
+  // для приватных чатов источник аватара — other_user/members: синхронизируем
+  if (chat.type === 'private' && chat.other_user) chat.other_user.avatar = newAvatar;
   renderChatListThrottled();
   if (currentChatId === chat.id) {
     setChatAvatar(document.getElementById('chat-header-avatar'), chat);
   }
-  saveChatsCache && saveChatsCache();
+}
+
+// После смены аватара перечитываем панель информации о чате, если она
+// открыта — иначе там остаётся старая картинка до повторного открытия.
+function refreshChatInfoModal(chat) {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || !overlay.classList.contains('show')) return;
+  const content = document.getElementById('modal-content');
+  if (!content || !content.querySelector('#chat-avatar-input')) return;
+  try { showChatInfo(); } catch (e) { /* не критично */ }
 }
 
 function copyInviteLink() {
