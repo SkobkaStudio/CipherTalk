@@ -1396,6 +1396,17 @@ function normalizeAvatarValue(v) {
 const AVATAR_IMG_STYLE = 'width:100%;height:100%;max-width:100%;max-height:100%;' +
   'border-radius:50%;object-fit:cover;display:block';
 
+// Цветной фон аватара (по первой букве имени) — как в Telegram, буква всегда заметна
+const AVATAR_COLORS = [
+  '#4caf50', '#ff9800', '#f44336', '#9c27b0',
+  '#2196f3', '#00bcd4', '#795548', '#e91e63',
+];
+function avatarColorClass(letter) {
+  if (!letter) return 'color-1';
+  const code = String(letter).toUpperCase().charCodeAt(0) || 0;
+  return `color-${(code % AVATAR_COLORS.length) + 1}`;
+}
+
 // Встроенные SVG-иконки могут быть больше контейнера — ограничиваем их.
 const AVATAR_ICON_STYLE = 'max-width:60%;max-height:60%';
 
@@ -1427,8 +1438,9 @@ function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
   if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
   const letter = escapeHtml(getChatAvatar(chat));
+  const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
-  if (!url) return letter; // динамическая первая буква — видна через flex-центрировку контейнера
+  if (!url) return `<span class="chat-avatar__letter ${colorCls}">${letter}</span>`;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   // alt = динамическая первая буква имени — заглушка, пока картинка грузится.
   // Защищённые /uploads/ ссылки сервер не отдаёт по прямому <img src>, поэтому
@@ -1437,9 +1449,9 @@ function chatAvatarMarkup(chat) {
   const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
     `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
 }
 
 // Аватар произвольного пользователя (результаты поиска, списки участников):
@@ -1448,21 +1460,23 @@ function chatAvatarMarkup(chat) {
 // со старыми вызовами).
 function userAvatarMarkup(user) {
   if (typeof user === 'string') {
-    return escapeHtml((user.trim()[0] || '?').toUpperCase());
+    const letter = escapeHtml((user.trim()[0] || '?').toUpperCase());
+    return `<span class="chat-avatar__letter ${avatarColorClass(letter)}">${letter}</span>`;
   }
   const name = (user && (user.name || user.firstName || user.username)) || '';
   const letter = escapeHtml((name.trim()[0] || '?').toUpperCase());
+  const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(user && user.avatar);
-  if (!url) return letter; // первая буква имени — видна через flex-центрировку контейнера
+  if (!url) return `<span class="chat-avatar__letter ${colorCls}">${letter}</span>`;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   // /uploads/ — защищённые ссылки: пустой src + data-avatar-path, картинку
   // догружает hydrateAvatars()/hydrateAvatarImages() через fetch с токеном.
   const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
     `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
 }
 
 // Единая точка рендера строковой аватар-разметки в DOM-контейнер с
@@ -1565,15 +1579,20 @@ function buildChatAvatarNodes(chat) {
   // Динамическая первая буква названия чата/группы (никакого хардкода «U»):
   // она остаётся видимой, пока картинка грузится, и если аватара нет вовсе.
   const letter = getChatAvatar(chat);
+  const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
   if (!url) {
-    frag.textContent = letter;
+    const span = document.createElement('span');
+    span.className = `chat-avatar__letter ${colorCls}`;
+    span.textContent = letter;
+    span.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
+    frag.appendChild(span);
     return frag;
   }
   // Буква всегда добавляется как текстовый фолбэк — видна сразу, остаётся если
   // картинка не загрузится.  imágenes накладываются поверх буквы.
   const letterWrap = document.createElement('span');
-  letterWrap.className = 'chat-avatar__letter';
+  letterWrap.className = `chat-avatar__letter ${colorCls}`;
   letterWrap.textContent = letter;
   letterWrap.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
   frag.appendChild(letterWrap);
@@ -1624,10 +1643,16 @@ function setUserAvatar(el, user) {
   if (!el || !user) return;
   const name = String(user.name || user.firstName || user.username || '').trim();
   const letter = (name[0] || '?').toUpperCase();
+  const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(user.avatar);
   el.dataset.avatarKey = `l:${letter}|u:${url}`;
   // Сначала буква — она видима сразу и остаётся, если картинки нет/ошибка
-  el.textContent = letter;
+  el.textContent = '';
+  const span = document.createElement('span');
+  span.className = `chat-avatar__letter ${colorCls}`;
+  span.textContent = letter;
+  span.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
+  el.appendChild(span);
   if (!url) return;
   const apply = (src) => {
     if (!el.isConnected || el.dataset.avatarKey !== `l:${letter}|u:${url}`) return;
