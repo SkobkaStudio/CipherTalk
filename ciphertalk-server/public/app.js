@@ -1406,8 +1406,16 @@ function attachResolvedAvatar(imgEl, url) {
   if (!imgEl || !url) return;
   if (!url.startsWith('/uploads/')) { imgEl.src = url; return; }
   resolveAvatarSrc(url).then((src) => {
-    if (src && src !== '') imgEl.src = src;
-    else if (typeof imgEl.remove === 'function') imgEl.remove();
+    if (src && src !== '') {
+      imgEl.src = src;
+      imgEl.style.display = 'block';
+      const letter = imgEl.previousElementSibling;
+      if (letter && letter.classList.contains('chat-avatar__letter')) letter.style.display = 'none';
+    } else {
+      imgEl.style.display = 'none';
+      const letter = imgEl.previousElementSibling;
+      if (letter && letter.classList.contains('chat-avatar__letter')) letter.style.display = 'flex';
+    }
   });
 }
 
@@ -1426,10 +1434,12 @@ function chatAvatarMarkup(chat) {
   // Защищённые /uploads/ ссылки сервер не отдаёт по прямому <img src>, поэтому
   // src оставляем пустым, кладём путь в data-avatar-path и подгружаем blob-URL
   // через hydrateAvatars()/hydrateAvatarImages() (fetch + Bearer-токен).
+  const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
+    `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy"></span>`;
+    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy"></span>`;
+  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
 }
 
 // Аватар произвольного пользователя (результаты поиска, списки участников):
@@ -1447,10 +1457,12 @@ function userAvatarMarkup(user) {
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   // /uploads/ — защищённые ссылки: пустой src + data-avatar-path, картинку
   // догружает hydrateAvatars()/hydrateAvatarImages() через fetch с токеном.
+  const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
+    `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy"></span>`;
+    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy"></span>`;
+  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
 }
 
 // Единая точка рендера строковой аватар-разметки в DOM-контейнер с
