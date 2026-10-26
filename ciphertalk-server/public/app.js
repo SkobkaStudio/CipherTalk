@@ -1431,9 +1431,9 @@ function attachResolvedAvatar(imgEl, url) {
 }
 
 // Аватар в разметке, генерируемой строкой (модалки, панель информации, поиск).
-// Если аватарки нет — ДИНАМИЧЕСКАЯ первая буква имени конкретного чата.
-// Контейнер (.chat-avatar/.fi-avatar/.member-avatar) красит синий круг сам,
-// поэтому сюда возвращаем только содержимое.
+// Есть картинка —  либо прямая  если не защищённый путь,
+// либо  с data-avatar-path (защищённый /uploads/ грузится через blob).
+// Нет картинки — буква с цветным фоном.
 function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
   if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
@@ -1442,16 +1442,11 @@ function chatAvatarMarkup(chat) {
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
   if (!url) return `<span class="chat-avatar__letter ${colorCls}">${letter}</span>`;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
-  // alt = динамическая первая буква имени — заглушка, пока картинка грузится.
-  // Защищённые /uploads/ ссылки сервер не отдаёт по прямому <img src>, поэтому
-  // src оставляем пустым, кладём путь в data-avatar-path и подгружаем blob-URL
-  // через hydrateAvatars()/hydrateAvatarImages() (fetch + Bearer-токен).
-  const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
-    `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+    // Защищённый путь: пустой src + data-avatar-path, картинку подгружает hydrateAvatars()
+    return `<span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+  return `<span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
 }
 
 // Аватар произвольного пользователя (результаты поиска, списки участников):
@@ -1469,14 +1464,10 @@ function userAvatarMarkup(user) {
   const url = normalizeAvatarValue(user && user.avatar);
   if (!url) return `<span class="chat-avatar__letter ${colorCls}">${letter}</span>`;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
-  // /uploads/ — защищённые ссылки: пустой src + data-avatar-path, картинку
-  // догружает hydrateAvatars()/hydrateAvatarImages() через fetch с токеном.
-  const imgEvents = `onload="this.style.display='block';this.previousElementSibling.style.display='none'" ` +
-    `onerror="this.style.display='none';this.previousElementSibling.style.display='flex'"`;
   if (url.startsWith('/uploads/')) {
-    return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+    return `<span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="" data-avatar-path="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
   }
-  return `<span class="chat-avatar__wrap"><span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy" ${imgEvents}></span>`;
+  return `<span class="chat-avatar__letter ${colorCls}">${letter}</span><img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
 }
 
 // Единая точка рендера строковой аватар-разметки в DOM-контейнер с
@@ -1489,29 +1480,9 @@ function paintAvatar(el, markup) {
   el.innerHTML = markup;
   const img = el.querySelector ? el.querySelector('img.chat-avatar__img') : null;
   if (!img) return;
-  const letter = el.querySelector('.chat-avatar__letter');
-  // hydrateAvatars(): подгружает blob и для data-avatar-path, и для прямых
-  // /uploads/ ссылок в src (старый формат разметки).
-  hydrateAvatars(el);
-  // Если после гидратации src всё ещё пустой (защищённый путь), держим в
-  // резерве буквенную деградацию: при неудаче — первая буква вместо круга.
-  const path = normalizeAvatarValue(img.getAttribute('data-avatar-path')) || (img.getAttribute('src') || '');
+  const path = img.getAttribute('data-avatar-path') || img.getAttribute('src') || '';
   if (!path.startsWith('/uploads/')) return; // data:/внешние URL грузятся напрямую
-  resolveAvatarSrc(path).then((resolved) => {
-    if (!resolved) {
-      // Картинку получить не удалось — показываем первую букву вместо круга
-      if (el.isConnected) {
-        img.style.display = 'none';
-        if (letter) letter.style.display = 'flex';
-      }
-      return;
-    }
-    if (el.isConnected && img.isConnected) {
-      img.src = resolved;
-      img.style.display = 'block';
-      if (letter) letter.style.display = 'none';
-    }
-  });
+  hydrateAvatars(el);
 }
 
 // Заменяет содержимое контейнера-аватара на буквенную заглушку или <img>.
@@ -1577,62 +1548,46 @@ function buildChatAvatarNodes(chat) {
     return frag;
   }
   // Динамическая первая буква названия чата/группы (никакого хардкода «U»):
-  // она остаётся видимой, пока картинка грузится, и если аватара нет вовсе.
   const letter = getChatAvatar(chat);
   const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(getChatAvatarUrl(chat));
-  if (!url) {
-    const span = document.createElement('span');
-    span.className = `chat-avatar__letter ${colorCls}`;
-    span.textContent = letter;
-    span.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
-    frag.appendChild(span);
-    return frag;
-  }
-  // Буква всегда добавляется как текстовый фолбэк — видна сразу, остаётся если
-  // картинка не загрузится.  imágenes накладываются поверх буквы.
-  const letterWrap = document.createElement('span');
-  letterWrap.className = `chat-avatar__letter ${colorCls}`;
-  letterWrap.textContent = letter;
-  letterWrap.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
-  frag.appendChild(letterWrap);
+
+  const span = document.createElement('span');
+  span.className = `chat-avatar__letter ${colorCls}`;
+  span.textContent = letter;
+  span.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+  frag.appendChild(span);
+
+  if (!url) return frag;
 
   const img = document.createElement('img');
   img.className = 'chat-avatar__img';
   img.alt = letter;
-  img.style.cssText = AVATAR_IMG_STYLE + ';position:absolute;inset:0;z-index:2;';
+  img.style.cssText = AVATAR_IMG_STYLE;
   img.loading = 'lazy';
-  img.onerror = () => {
-    img.style.display = 'none';
-    letterWrap.style.display = 'flex';
-  };
-  img.onload = () => {
-    img.style.display = 'block';
-    letterWrap.style.display = 'none';
-  };
+  frag.appendChild(img);
+
   if (url.startsWith('/uploads/')) {
-    // Пустой src + data-avatar-path: blob-URL пропишет hydrateAvatars().
     img.setAttribute('src', '');
     img.setAttribute('data-avatar-path', url);
-    img.style.display = 'none'; // скрыто пока не загрузится через fetch
-    letterWrap.style.display = 'flex'; // буква видна пока картинки нет
+    span.style.display = 'flex'; // буква видна пока картинки нет
+    img.style.display = 'none';  // скрыто пока не загрузится через fetch
     resolveAvatarSrc(url).then((src) => {
       if (!frag.isConnected) return;
       if (src && src !== '') {
         img.src = src;
         img.style.display = 'block';
-        letterWrap.style.display = 'none';
+        span.style.display = 'none';
       } else {
         img.style.display = 'none';
-        letterWrap.style.display = 'flex';
+        span.style.display = 'flex';
       }
     });
   } else {
     img.src = url; // data:/внешние URL грузятся напрямую
     img.style.display = 'block';
-    letterWrap.style.display = 'none';
+    span.style.display = 'none';
   }
-  frag.appendChild(img);
   return frag;
 }
 
@@ -1646,27 +1601,24 @@ function setUserAvatar(el, user) {
   const colorCls = avatarColorClass(letter);
   const url = normalizeAvatarValue(user.avatar);
   el.dataset.avatarKey = `l:${letter}|u:${url}`;
-  // Сначала буква — она видима сразу и остаётся, если картинки нет/ошибка
-  el.textContent = '';
+
   const span = document.createElement('span');
   span.className = `chat-avatar__letter ${colorCls}`;
   span.textContent = letter;
-  span.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+  span.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
   el.appendChild(span);
+
   if (!url) return;
   const apply = (src) => {
     if (!el.isConnected || el.dataset.avatarKey !== `l:${letter}|u:${url}`) return;
     if (!src) return;
-    el.textContent = '';
     const img = document.createElement('img');
     img.className = 'chat-avatar__img';
     img.src = src;
     img.alt = letter;
-    img.style.cssText = AVATAR_IMG_STYLE + ';position:absolute;inset:0;z-index:2;';
+    img.style.cssText = AVATAR_IMG_STYLE;
     el.appendChild(img);
-    // Скрываем букву, картинка поверх
-    const letterSpan = el.querySelector('.chat-avatar__letter');
-    if (letterSpan) letterSpan.style.display = 'none';
+    span.style.display = 'none';
   };
   if (url.startsWith('/uploads/')) resolveAvatarSrc(url).then(apply);
   else apply(url);
