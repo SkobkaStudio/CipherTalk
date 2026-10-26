@@ -1146,24 +1146,10 @@ function appendOwnerBadge(parent, target) {
 
 // ==================== КОРОНЫ РАЗРАБОТЧИКОВ (creators.js) ====================
 // Золотая / серебряная / медная корона для разработчиков из списка
-// window.CREATORS (public/creators.js). Идентификация СТРОГО ПО НОМЕРУ
-// ТЕЛЕФОНА разработчика (не по id).
+// window.CREATORS (public/creators.js). Идентификация ПО НОМЕРУ ТЕЛЕФОНА.
 const CREATOR_LEVELS = ['gold', 'silver', 'bronze'];
 
-function creatorDigits(value) {
-  const d = String(value == null ? '' : value).replace(/\D/g, '');
-  return d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d;
-}
-
-/** Список разработчиков: свежий window.CREATORS или резервная копия app.js. */
-function creatorsList() {
-  if (Array.isArray(window.CREATORS) && window.CREATORS.length) return window.CREATORS;
-  return FALLBACK_CREATORS;
-}
-
-// Резервная копия списка на случай, если creators.js не загрузился
-// (старый кэш service worker, блокировка и т.п.). Синхронизирована с
-// public/creators.js и src/utils/creators.js.
+// Резервная копия списка на случай, если creators.js не загрузился (кэш, блокировка и т.п.)
 const FALLBACK_CREATORS = [
   { phone: '+79609611353', name: 'Skobka', level: 'gold', role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.' },
@@ -1173,39 +1159,35 @@ const FALLBACK_CREATORS = [
 
 function creatorOf(user) {
   if (!user) return null;
-  // 1) Официальный модуль window.Creators (public/creators.js):
-  //    совпадение по полному номеру телефона пользователя.
+
+  // 1. Основной источник — модуль window.Creators (public/creators.js)
   if (window.Creators && typeof window.Creators.ofUser === 'function') {
     const c = window.Creators.ofUser(user);
     if (c) return c;
   }
-  // 2) Прямой поиск по списку: сравниваем ВСЕ варианты номеров, которые
-  //    есть у объекта (phone, creator_phone), с номерами разработчиков.
-  const targets = [user.phone, user.creator_phone]
-    .map(creatorDigits)
-    .filter(Boolean);
-  for (const cr of creatorsList()) {
-    const cd = creatorDigits(cr.phone);
-    if (!cd) continue;
-    for (const t of targets) {
-      if (t === cd) return cr;
-      // Маска вида '+79••••53' / '+796****53': сверяем префикс и суффикс.
-      const tMasked = !/^\d{10,11}$/.test(t);
-      if (tMasked && t.length >= 6 && t.slice(0, 4) === cd.slice(0, 4) && t.slice(-2) === cd.slice(-2)) {
-        return cr;
-      }
-    }
-  }
-  // 3) Резерв: сервер уже вычислил creator_level по полному номеру
-  //    (до маскирования) — доверяем и рисуем корону этого уровня.
-  if (CREATOR_LEVELS.includes(user.creator_level)) {
+
+  // 2. Если сервер прислал готовый уровень (creator_level), доверяем ему.
+  // Карточку (роль/описание) пытаемся взять из синхронизированного списка или fallback.
+  const lvl = user.creator_level;
+  if (CREATOR_LEVELS.includes(lvl)) {
+    const byPhone = (window.Creators && window.Creators.byPhone) ? window.Creators.byPhone(user.phone) : null;
+    if (byPhone) return byPhone;
+
+    // Fallback на случай, если модуль не загрузился
+    const fallback = FALLBACK_CREATORS.find(cr => cr.phone === user.phone);
+    if (fallback) return fallback;
+
     return {
-      phone: String(user.creator_phone || user.phone || ''),
-      name: user.creator_name || user.name || 'Разработчик',
-      level: user.creator_level,
-      role: user.creator_role || '',
-      description: user.creator_description || ''
+      phone: String(user.phone || ''),
+      name: user.name || 'Разработчик',
+      level: lvl,
+      role: '',
+      description: ''
     };
+  }
+
+  return null;
+}
   }
   return null;
 }
