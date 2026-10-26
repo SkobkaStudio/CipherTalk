@@ -590,7 +590,7 @@ async function memberSearch(query) {
       <div class="forward-item" data-action="addMemberToChat" data-id="${u.id}">
         <div class="fi-avatar">${escapeHtml((u.name || '?')[0].toUpperCase())}</div>
         <div>
-          <div class="fi-name">${escapeHtml(u.name || '')}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
+          <div class="fi-name">${escapeHtml(u.name || '')}${creatorCrownHtml(u)}</div>
           <div class="fi-sub">@${escapeHtml(u.username || '')}</div>
         </div>
       </div>`).join('') : `<div class="empty-note">${I18N.t('member.notFound')}</div>`;
@@ -663,7 +663,7 @@ async function showChatInfoFull() {
       <div class="member-row">
         <div class="member-avatar">${escapeHtml((m.name || '?')[0].toUpperCase())}${online ? '<span class="dot"></span>' : ''}</div>
         <div class="member-info">
-          <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}${isOwnerUser(m) ? ownerBadgeHtml() : ''}</div>
+          <div class="member-name">${escapeHtml(m.name || I18N.t('chat.user'))}${creatorCrownHtml(m)}</div>
           <div class="member-sub">@${escapeHtml(m.username || '')} ${m.public_key ? '· ' + I18N.t('chatinfo.hasKey') : '· ' + I18N.t('chatinfo.noKey')}</div>
         </div>
         ${isGroup ? `<span class="member-role ${m.role || 'member'}">${escapeHtml(roleLabel(m.role))}</span>` : ''}
@@ -680,13 +680,13 @@ async function showChatInfoFull() {
   const pinned = (messages[currentChatId] || []).filter(m => m.pinned).length;
   const folder = folders.find(f => (f.chat_ids || []).includes(currentChatId));
   const chatTtl = getChatTtl(chat.id);
-  const owner = chatOwner(chat);
+  const crowned = chatOwner(chat) || (chat.members || []).find(m => m.id !== currentUser?.id && creatorLevel(m));
 
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <div style="text-align:center;margin-bottom:14px;">
       <div class="chat-avatar" style="width:72px;height:72px;font-size:28px;margin:0 auto 10px;">${chatAvatarMarkup(chat)}</div>
-      ${owner ? `<div class="chatinfo-owner">${ownerBadgeHtml()}<span>${escapeHtml(owner.name || I18N.t('owner.badge'))}</span></div>` : ''}
+      ${crowned ? `<div class="chatinfo-owner">${creatorCrownHtml(crowned)}<span>${escapeHtml((crowned.name || '') + (creatorOf(crowned) && creatorOf(crowned).role ? ' · ' + creatorOf(crowned).role : ''))}</span></div>` : ''}
       <div class="encryption-badge">${Icons.svg('lock', { className: 'mq-icon--xs' })}<span>E2EE · AES-256-GCM</span></div>
     </div>
 
@@ -713,7 +713,7 @@ async function showChatInfoFull() {
 function openProfileEditor() {
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
-    <h2>${I18N.t('profile.title')}${isOwnerUser(currentUser) ? ownerBadgeHtml() : ''}</h2>
+    <h2>${I18N.t('profile.title')}${creatorCrownHtml(currentUser)}</h2>
     <div style="text-align:center;margin-bottom:14px;">
       <img id="profile-avatar-preview" src="${escapeHtml(currentUser.avatar || '')}"
            style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--bg-message-in)" alt="avatar">
