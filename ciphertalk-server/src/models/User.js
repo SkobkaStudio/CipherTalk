@@ -1,5 +1,5 @@
 const encryptionService = require('../services/encryptionService');
-const { isOwnerPhone, creatorLevelFor } = require('../utils/owner');
+const { isOwnerPhone } = require('../utils/owner');
 const { formatUserId } = require('../utils/ids');
 
 class User {
@@ -72,8 +72,6 @@ class User {
   toSafeJSON() {
     const data = this.toJSON();
     delete data.password_hash;
-    // Уровень короны разработчика ('gold' | 'silver' | 'bronze') по номеру телефона.
-    data.creator_level = creatorLevelFor({ phone: this.phone });
     return data;
   }
 }

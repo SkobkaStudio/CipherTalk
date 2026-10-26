@@ -5,25 +5,25 @@
  * Синхронизирован с сервером: src/utils/creators.js
  *
  * Уровни корон: 'gold' | 'silver' | 'bronze'.
- * Идентификация — ПО НОМЕРУ ТЕЛЕФОНА разработчика (phone), а не по id.
+ * publicId — публичный 8-значный id (как в адресной строке /00000001).
  */
 window.CREATORS = [
   {
-    phone: '+79990000001', // золотая корона
+    publicId: '00000001',
     name: 'Skobka',
     level: 'gold',
     role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
   },
   {
-    phone: '+79990000002', // серебряная корона
+    publicId: '35742553',
     name: 'Cipher',
     level: 'silver',
     role: 'Backend Developer',
     description: 'База данных SQLCipher, WebSocket-сервис, presence и автоудаление сообщений.'
   },
   {
-    phone: '+79990000003', // медная корона
+    publicId: '00000002',
     name: 'Nova',
     level: 'bronze',
     role: 'UI/UX Designer',
@@ -32,35 +32,30 @@ window.CREATORS = [
 ];
 
 window.Creators = (function () {
-  // Канонический вид номера: только цифры, 8... -> 7...
-  function digits(value) {
-    const d = String(value == null ? '' : value).replace(/\D/g, '');
-    return d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d;
-  }
-
-  const byPhone = new Map();
+  const byToken = new Map();
   for (const c of window.CREATORS) {
-    byPhone.set(digits(c.phone), c);
+    const key = String(c.publicId || '').replace(/^0+/, '') || String(c.publicId);
+    byToken.set(key, c);
   }
 
-  /** Карточка разработчика по номеру телефона (любой записи) или null. */
-  function get(phone) {
-    const key = digits(phone);
-    if (!key) return null;
-    return byPhone.get(key) || null;
+  function get(publicId) {
+    const raw = String(publicId == null ? '' : publicId).trim();
+    if (!raw) return null;
+    const key = raw.replace(/^0+/, '') || raw;
+    return byToken.get(key) || null;
   }
 
-  /** Уровень короны ('gold' | 'silver' | 'bronze') по номеру телефона или null. */
-  function levelOf(phone) {
-    const c = get(phone);
+  /** Уровень короны по public_id пользователя или токену из URL. */
+  function levelOf(publicId) {
+    const c = get(publicId);
     return c ? c.level : null;
   }
 
-  /** Корона для объекта-пользователя (member/user): берём его номер телефона. */
+  /** Корона для объекта-пользователя (member/user): берём public_id. */
   function ofUser(user) {
     if (!user) return null;
-    return get(user.phone);
+    return get(user.public_id || user.publicId);
   }
 
-  return { list: window.CREATORS, get, levelOf, ofUser, byPhone: get };
+  return { list: window.CREATORS, get, levelOf, ofUser };
 })();

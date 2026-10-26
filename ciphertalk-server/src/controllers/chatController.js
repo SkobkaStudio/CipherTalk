@@ -1,7 +1,7 @@
 const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const { maskPhone } = require('../utils/mask');
-const { isOwnerPhone, creatorLevelFor } = require('../utils/owner');
+const { isOwnerPhone } = require('../utils/owner');
 const { isExpired } = require('../utils/messageExpiry');
 
 class ChatController {
@@ -269,7 +269,6 @@ class ChatController {
         const isSelf = requesterId === null || u.id === requesterId;
         return {
           id: u.id,
-          public_id: this.db.getPublicUserId ? this.db.getPublicUserId(u.id) : (u.public_id || ''),
           name: u.name,
           firstName: u.first_name,
           lastName: u.last_name,
@@ -281,7 +280,6 @@ class ChatController {
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
           is_owner: isOwnerPhone(u.phone) ? 1 : 0,
-          creator_level: creatorLevelFor({ phone: u.phone }),
           role: m.role
         };
       })

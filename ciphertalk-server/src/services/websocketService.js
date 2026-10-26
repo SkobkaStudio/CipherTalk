@@ -2,8 +2,7 @@ const WebSocket = require('ws');
 const config = require('../config');
 const presenceService = require('./presenceService');
 const { maskPhone } = require('../utils/mask');
-const { isOwnerPhone, creatorLevelFor } = require('../utils/owner');
-const { getCreator } = require('../utils/creators');
+const { isOwnerPhone } = require('../utils/owner');
 const { normalizeTtlSeconds, expiresAtFor, isExpired } = require('../utils/messageExpiry');
 const sessionService = require('./sessionService');
 const { getDatabase } = require('../db/database');
@@ -1505,7 +1504,6 @@ class WebSocketService {
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
           is_owner: isOwnerPhone(u.phone) ? 1 : 0,
-          creator_level: creatorLevelFor({ phone: u.phone }),
           role: m.role
         };
       })

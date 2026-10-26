@@ -1117,75 +1117,6 @@ function appendOwnerBadge(parent, target) {
   parent.appendChild(slot);
   return true;
 }
-
-// ==================== КОРОНЫ РАЗРАБОТЧИКОВ (creators.js) ====================
-// Золотая / серебряная / медная корона для разработчиков из списка
-// window.CREATORS (public/creators.js). Идентификация ПО НОМЕРУ ТЕЛЕФОНА.
-const CREATOR_LEVELS = ['gold', 'silver', 'bronze'];
-
-function creatorOf(user) {
-  if (!user) return null;
-  // Основной источник — список creators.js: совпадение по номеру телефона.
-  const c = (window.Creators && window.Creators.ofUser) ? window.Creators.ofUser(user) : null;
-  if (c) return c;
-  // Сервер прислал готовый уровень (creator_level) — доверяем ему,
-  // карточку (роль/описание) берём из синхронизированного списка по номеру.
-  const lvl = user.creator_level;
-  if (CREATOR_LEVELS.includes(lvl)) {
-    const byPhone = (window.Creators && window.Creators.byPhone) ? window.Creators.byPhone(user.phone) : null;
-    if (byPhone) return byPhone;
-    return { phone: String(user.phone || ''), name: user.name || '', level: lvl, role: '', description: '' };
-  }
-  return null;
-}
-
-function creatorLevel(user) {
-  if (!user) return null;
-  // Строго по номеру телефона из creators.js...
-  const c = creatorOf(user);
-  if (c) return c.level;
-  // ...плюс телефон владельца всегда как минимум с золотой короной.
-  return isOwnerUser(user) ? 'gold' : null;
-}
-
-function creatorTooltip(c) {
-  if (!c) return '';
-  const lvlLabel = { gold: 'Золотая корона', silver: 'Серебряная корона', bronze: 'Медная корона' }[c.level] || 'Корона разработчика';
-  const parts = [`${c.name || 'Разработчик'} — ${lvlLabel}`];
-  if (c.role) parts.push(c.role);
-  if (c.description) parts.push(c.description);
-  return parts.join(' · ');
-}
-
-/** HTML короны заданного уровня ('gold' | 'silver' | 'bronze'). */
-function crownByLevel(level, tooltip) {
-  if (!CREATOR_LEVELS.includes(level)) return '';
-  const label = escapeHtml(tooltip || I18N.t('owner.badge'));
-  return '<span class="owner-badge creator-crown creator-crown--' + level + '" role="img" aria-label="' + label + '" data-tooltip="' + label + '">' +
-    '<svg class="owner-badge__crown" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-    '<path d="M3 8.2l4.4 3.2L12 4l4.6 7.4L21 8.2 19.4 19H4.6L3 8.2z"/>' +
-    '<path d="M8 22h8"/></svg></span>';
-}
-
-/** HTML короны разработчика для пользователя (или '' если его нет в списке). */
-function creatorCrownHtml(user) {
-  const level = creatorLevel(user);
-  if (!level) return '';
-  const c = creatorOf(user);
-  return crownByLevel(level, c ? creatorTooltip(c) : '');
-}
-
-/** Корона рядом с именем, если пользователь — разработчик. */
-function appendCreatorCrown(parent, user) {
-  if (!parent) return false;
-  const html = creatorCrownHtml(user);
-  if (!html) return false;
-  const slot = document.createElement('span');
-  slot.className = 'owner-badge-slot';
-  slot.innerHTML = html;
-  parent.appendChild(slot);
-  return true;
-}
 function customBadgeHtml() {
   const badge = BADGE_CHOICES.find(b => b.id === privacy.badge);
   if (!badge || !badge.icon) return '';
@@ -2318,7 +2249,7 @@ function scrollToBottom() {
 function updateMenuProfile() {
   const menuName = document.getElementById('menu-name');
   menuName.innerHTML = escapeHtml(currentUser.name || I18N.t('chat.user')) +
-    customBadgeHtml() + creatorCrownHtml(currentUser);
+    customBadgeHtml() + (isOwnerUser(currentUser) ? ownerBadgeHtml() : '');
   document.getElementById('menu-username').textContent = '@' + (currentUser.username || 'username');
   document.getElementById('menu-phone').textContent = currentUser.phone || '';
   const avatarEl = document.getElementById('menu-avatar');
@@ -2836,7 +2767,7 @@ function buildChatItem(chat) {
   name.className = 'chat-name';
   name.textContent = getChatName(chat);
   nameWrap.appendChild(name);
-  appendCreatorCrown(nameWrap, chatOwner(chat) || (chat.members || []).find(m => m.id !== currentUser?.id && creatorLevel(m)));
+  appendOwnerBadge(nameWrap, chatOwner(chat));
   const time = document.createElement('span');
   time.className = 'chat-time';
   time.textContent = chat.last_message_time ? formatTime(chat.last_message_time) : '';
@@ -3163,10 +3094,7 @@ function updateChatHeader() {
 
   document.getElementById('chat-header-name').textContent = getChatName(chat);
   const ownerSlot = document.getElementById('chat-header-owner');
-  if (ownerSlot) {
-    const crowned = chatOwner(chat) || (chat.members || []).find(m => m.id !== currentUser?.id && creatorLevel(m));
-    ownerSlot.innerHTML = crowned ? creatorCrownHtml(crowned) : '';
-  }
+  if (ownerSlot) ownerSlot.innerHTML = chatOwner(chat) ? ownerBadgeHtml() : '';
   const ttlEl = document.getElementById('chat-header-ttl');
   const ttl = getChatTtl(chat.id);
   if (ttlEl) {
@@ -3657,7 +3585,7 @@ async function buildMessageElement(msg, chat, key, animate = false) {
     const senderEl = document.createElement('div');
     senderEl.className = 'message-sender';
     senderEl.textContent = msg.sender_name || senderMember?.name || '';
-    appendCreatorCrown(senderEl, senderMember);
+    appendOwnerBadge(senderEl, senderMember);
     wrapper.appendChild(senderEl);
   }
 
@@ -4772,7 +4700,7 @@ async function searchUsers(query) {
         <div class="search-result-item" data-action="startChat" data-id="${u.id}">
           <div class="chat-avatar">${escapeHtml((u.name || 'U')[0].toUpperCase())}</div>
           <div>
-            <div class="search-result-name">${escapeHtml(u.name || I18N.t('chat.user'))}${creatorCrownHtml(u)}</div>
+            <div class="search-result-name">${escapeHtml(u.name || I18N.t('chat.user'))}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
             <div style="font-size:12px;color:var(--text-secondary)">@${escapeHtml(u.username || '')} • ${escapeHtml(u.phone || '')}</div>
           </div>
         </div>

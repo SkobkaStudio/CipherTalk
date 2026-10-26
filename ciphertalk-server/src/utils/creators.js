@@ -8,37 +8,30 @@
  *   silver  — серебряная корона
  *   bronze  — медная корона
  *
- * Идентификация — ПО НОМЕРУ ТЕЛЕФОНА разработчика (phone), а не по id.
+ * Идентификация — по публичному 8-значному id пользователя (public_id),
+ * который виден в адресной строке: https://ciphertalk.cloudpub.ru/00000001
  * Дублирует список на клиенте: /creators.js (window.CREATORS).
  *
  * Чтобы добавить разработчика — допишите объект в массив CREATORS ниже.
  */
 
-const { normalizePhone } = require('./phone');
-
-// Канонический вид номера для сравнения: '+79990000001' -> '79990000001'
-function phoneDigits(value) {
-  const p = normalizePhone(value);
-  return p ? p.replace(/\D/g, '') : '';
-}
-
 const CREATORS = [
   {
-    phone: '+79990000001', // золотая корона
+    publicId: '00000001',
     name: 'Skobka',
     level: 'gold',
     role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
   },
   {
-    phone: '+79990000002', // серебряная корона
+    publicId: '35742553',
     name: 'Cipher',
     level: 'silver',
     role: 'Backend Developer',
     description: 'База данных SQLCipher, WebSocket-сервис, presence и автоудаление сообщений.'
   },
   {
-    phone: '+79990000003', // медная корона
+    publicId: '00000002',
     name: 'Nova',
     level: 'bronze',
     role: 'UI/UX Designer',
@@ -46,32 +39,34 @@ const CREATORS = [
   }
 ];
 
-// Быстрый поиск по нормализованным цифрам телефона ('79990000001')
-const BY_PHONE = new Map();
+// Быстрый поиск по нормализованному токену ('1' === '00000001')
+const BY_TOKEN = new Map();
 for (const c of CREATORS) {
-  BY_PHONE.set(phoneDigits(c.phone), c);
+  const key = String(c.publicId || '').replace(/^0+/, '') || String(c.publicId);
+  BY_TOKEN.set(key, c);
 }
 
-/** Уровень короны разработчика по его номеру телефона. */
-function getCreatorLevel(phone) {
-  const c = getCreator(phone);
+/** Уровень короны разработчика по его публичному id. */
+function getCreatorLevel(publicId) {
+  const c = getCreator(publicId);
   return c ? c.level : null;
 }
 
-/** Полная карточка разработчика по номеру телефона или null. */
-function getCreator(phone) {
-  const key = phoneDigits(phone);
-  if (!key) return null;
-  return BY_PHONE.get(key) || null;
+/** Полная карточка разработчика или null. */
+function getCreator(publicId) {
+  const raw = String(publicId == null ? '' : publicId).trim();
+  if (!raw) return null;
+  const key = raw.replace(/^0+/, '') || raw;
+  return BY_TOKEN.get(key) || null;
 }
 
 /**
- * Добавить уровень короны пользователю (объекту member/user) по его номеру.
+ * Добавить уровень короны пользователю (объекту member/user) по его public_id.
  * Мутирует и возвращает тот же объект.
  */
 function withCrown(user) {
   if (!user || typeof user !== 'object') return user;
-  const creator = getCreator(user.phone);
+  const creator = getCreator(user.public_id || user.publicId);
   if (creator) {
     user.creator_level = creator.level;
     user.creator_name = creator.name;
