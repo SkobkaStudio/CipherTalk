@@ -1,7 +1,0 @@
-/media/disk_d/CipherTalk/build/CMakeFiles/ciphertalk.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/edit_cache.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/rebuild_cache.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/list_install_components.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/install.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/install/local.dir
-/media/disk_d/CipherTalk/build/CMakeFiles/install/strip.dir
