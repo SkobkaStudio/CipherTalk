@@ -1364,10 +1364,14 @@ function getChatAvatarUrl(chat) {
   if (chat.type === 'saved') return '';
   const own = normalizeAvatarValue(chat.avatar);
   if (own) return own;
-  if (chat.type === 'private') {
+  if (chat.type === 'private' || chat.type === 'group' || chat.type === 'supergroup') {
     const me = Number(currentUser && currentUser.id);
     if (Array.isArray(chat.members)) {
-      const other = chat.members.find(m => m && Number(m.id) !== me);
+      // Приватный чат: аватар собеседника. Группа: имя может быть не
+      // заполнено — тогда показываем аватар одного из участников.
+      const other = chat.type === 'private'
+        ? chat.members.find(m => m && Number(m.id) !== me)
+        : chat.members.find(m => m && normalizeAvatarValue(m.avatar));
       const memberAvatar = normalizeAvatarValue(other && other.avatar);
       if (memberAvatar) return memberAvatar;
     }
@@ -5197,6 +5201,14 @@ function applyChatAvatarUpdate(chat, payload) {
       const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
       if (other) other.avatar = newAvatar;
     }
+  }
+  // Сервер мог прислать обновлённый объект чата целиком — подтягиваем members
+  // (источник аватаров для приватных чатов и групп без своей картинки).
+  if (payload && typeof payload === 'object' && Array.isArray(payload.members) && Array.isArray(chat.members)) {
+    payload.members.forEach((pm) => {
+      const local = chat.members.find((m) => m && Number(m.id) === Number(pm && pm.id));
+      if (local && pm && normalizeAvatarValue(pm.avatar)) local.avatar = pm.avatar;
+    });
   }
   renderChatListThrottled();
   if (currentChatId === chat.id) {
