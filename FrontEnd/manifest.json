@@ -1,0 +1,26 @@
+{
+  "name": "CipherTalk — защищённый мессенджер",
+  "short_name": "CipherTalk",
+  "description": "Мессенджер со сквозным шифрованием AES-256-GCM",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e1621",
+  "theme_color": "#17212b",
+  "categories": ["social", "communication"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

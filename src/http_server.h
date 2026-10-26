@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <cstdint>
+#include <csignal>
 
 namespace cipher {
 
@@ -45,18 +46,22 @@ public:
     void run();
 
     // Обработать одно событие (для интеграции с внешним poll)
-    void pollOnce(int timeoutMs = 1000);
+    void pollOnce(int timeoutMs = 100);
 
     void stop() { running_ = false; }
 
     /// Установить обработчик WebSocket апгрейда. Сокет передаётся уже принятым
-    /// и не закрывается HttpServer — вебсокет-сервер забирает управление.
+    /// и не закрывается HttpServer — вебсокет-сервис забирает управление.
     using WsUpgradeHandler = std::function<void(int clientFd, const HttpRequest& req)>;
     void setWebSocketUpgradeHandler(WsUpgradeHandler h) { wsUpgrade_ = h; }
 
 private:
+    static HttpServer* instance_;
+    static void signalHandler(int sig);
+
     uint16_t port_;
     int listenFd_ = -1;
+    int signalPipe_[2] = {-1, -1};
     bool running_ = true;
     WsUpgradeHandler wsUpgrade_;
 
