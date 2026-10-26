@@ -1324,7 +1324,9 @@ function getChatAvatarUrl(chat) {
       const other = chat.members.find(m => m && Number(m.id) !== Number(currentUser && currentUser.id));
       if (other && other.avatar) return other.avatar;
     }
-    return '';
+    // у приватного чата собственное поле avatar сервер заполняет аватаром
+    // собеседника — читаем и его, иначе реальная картинка терялась
+    return chat.avatar || '';
   }
   return chat.avatar || '';
 }
@@ -1342,7 +1344,19 @@ function chatAvatarMarkup(chat) {
   const fix = needsFetch
     ? `onload="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}" onerror="if(!this.dataset.fixed){this.dataset.fixed='1';CipherTalk.resolveAvatarSrc('${encodeURIComponent(url)}').then(function(s){if(s)this.src=s}.bind(this))}"`
     : '';
-  return `<img src="${needsFetch ? '' : safe}" ${fix} alt="">`;
+  // alt = динамическая первая буква имени — заглушка, пока картинка грузится
+  return `<img src="${needsFetch ? '' : safe}" ${fix} alt="${escapeHtml(getChatAvatar(chat))}">`;
+}
+
+// Аватар произвольного пользователя (результаты поиска, списки участников):
+// <img>, если аватар есть в базе; иначе — ДИНАМИЧЕСКАЯ первая буква имени.
+function userAvatarMarkup(user) {
+  const name = (user && (user.name || user.firstName)) || '';
+  const letter = escapeHtml(name[0]?.toUpperCase() || '?');
+  const url = (user && user.avatar) || '';
+  if (!url) return letter;
+  const safe = escapeHtml(url).replace(/"/g, '&quot;');
+  return `<img src="${safe}" alt="${letter}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.replaceWith(document.createTextNode('${letter}'))">`;
 }
 
 function setChatAvatar(el, chat) {
@@ -2320,10 +2334,23 @@ function updateMenuProfile() {
   document.getElementById('menu-username').textContent = '@' + (currentUser.username || 'username');
   document.getElementById('menu-phone').textContent = currentUser.phone || '';
   const avatarEl = document.getElementById('menu-avatar');
-  if (currentUser.avatar) {
-    avatarEl.innerHTML = `<img src="${escapeHtml(currentUser.avatar)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
-  } else {
-    avatarEl.textContent = (currentUser.firstName || currentUser.name || 'U')[0].toUpperCase();
+  if (avatarEl) {
+    // Аватар пользователя: картинка из БД, иначе — динамическая первая буква
+    // имени (хардкод «U» убран; он оставался виден, пока JS не отработает).
+    const url = currentUser.avatar || '';
+    if (url) {
+      resolveAvatarSrc(url).then((src) => {
+        if (!src || !avatarEl.isConnected) return;
+        avatarEl.innerHTML = `<img src="${escapeHtml(src)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+      });
+      if (url.startsWith('data:') || /^https?:\/\//.test(url)) {
+        avatarEl.innerHTML = `<img src="${escapeHtml(url)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+      } else {
+        avatarEl.textContent = (currentUser.firstName || currentUser.name || '')[0]?.toUpperCase() || '?';
+      }
+    } else {
+      avatarEl.textContent = (currentUser.firstName || currentUser.name || '')[0]?.toUpperCase() || '?';
+    }
   }
 }
 
@@ -4765,7 +4792,7 @@ async function searchUsers(query) {
       }
       container.innerHTML = data.map(u => `
         <div class="search-result-item" data-action="startChat" data-id="${u.id}">
-          <div class="chat-avatar">${escapeHtml((u.name || 'U')[0].toUpperCase())}</div>
+          <div class="chat-avatar">${userAvatarMarkup(u)}</div>
           <div>
             <div class="search-result-name">${escapeHtml(u.name || I18N.t('chat.user'))}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
             <div style="font-size:12px;color:var(--text-secondary)">@${escapeHtml(u.username || '')} • ${escapeHtml(u.phone || '')}</div>
@@ -4936,10 +4963,57 @@ async function setChatAvatar(el) {
     showToast(I18N.t('profile.tooBig'), 'error');
     return;
   }
+  // Сначала пробуем загрузить файл на сервер через REST (multipart/form-data,
+  // multer сохраняет его в uploads/ и пишет путь в chats.avatar).
+  try {
+    const updated = await uploadChatAvatar(chat.id, file);
+    if (updated) {
+      applyChatAvatarUpdate(chat, updated.avatar ?? `/uploads/${''}`);
+      closeModal();
+      showToast(I18N.t('toast.saved'), 'success');
+      return;
+    }
+  } catch (e) {
+    console.warn('uploadChatAvatar failed, falling back to WS:', e);
+  }
+  // Fallback: data-URL через WebSocket (работает на старых серверах).
   const avatar = await fileToDataURL(file);
   sendWs({ type: 'set_chat_avatar', chatId: chat.id, avatar });
+  applyChatAvatarUpdate(chat, avatar);
   closeModal();
   showToast(I18N.t('toast.saved'), 'success');
+}
+
+// Отправка файла аватара группы/канала на бэкенд: FormData с полем 'avatar'
+// на POST /api/chats/:chatId/avatar (на сервере к нему подключён
+// multer upload.single('avatar')). Возвращает обновлённый объект чата или null.
+async function uploadChatAvatar(chatId, file) {
+  const fd = new FormData();
+  fd.append('avatar', file, file.name || 'avatar.jpg');
+  const res = await fetch(SERVER_URL + `/api/chats/${encodeURIComponent(chatId)}/avatar`, {
+    method: 'POST',
+    headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+    body: fd
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    return null;
+  }
+  return data || {};
+}
+
+// Применям новый аватар локально: список чатов, шапка открытого чата, кэш
+function applyChatAvatarUpdate(chat, avatar) {
+  if (!chat) return;
+  if (typeof avatar === 'string') chat.avatar = avatar;
+  // сбрасываем кэш blob-URL для старых ссылок, чтобы картинка обновилась
+  renderChatListThrottled();
+  if (currentChatId === chat.id) {
+    setChatAvatar(document.getElementById('chat-header-avatar'), chat);
+  }
+  saveChatsCache && saveChatsCache();
 }
 
 function copyInviteLink() {
