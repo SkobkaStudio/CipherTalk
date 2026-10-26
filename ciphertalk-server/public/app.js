@@ -1292,7 +1292,37 @@ function getChatAvatarIcon(chat) {
 // Ссылки на загруженные файлы отдаются сервером как зашифрованный поток
 // и требуют Authorization-заголовка, поэтому обычный <img src> их не грузит.
 // Читаем их fetch'ем с токеном и подставляем blob-URL.
-const avatarBlobCache = new Map(); // url -> Promise<blobUrl|null>
+const avatarBlobCache = new Map(); // url -> Promise<blobUrl|''>
+const avatarFailCache = new Map(); // url -> время ошибки (кратковременно, чтобы не долбить сервер)
+const AVATAR_FAIL_TTL = 30000;
+
+// Отдельный ретраимый fetch аватара: НЕ использует общий api(), который
+// при 401 разлогинивает пользователя. Если токен ещё не готов или файл
+// временно недоступен — возвращаем null (это «не ответ, а сбой») и
+// вызывающий код повторит попытку позже; пустая строка '' — картинку
+// точно нет смысла тянуть дальше.
+async function fetchAvatarBlobUrl(url) {
+  if (!authToken) return null; // подождём завершения логина
+  const failAt = avatarFailCache.get(url);
+  if (failAt && Date.now() - failAt < AVATAR_FAIL_TTL) return '';
+  try {
+    const res = await fetch(SERVER_URL + url, {
+      method: 'GET',
+      cache: 'default',
+      headers: { 'Authorization': 'Bearer ' + authToken }
+    });
+    if (res.status === 401 || res.status === 403) { avatarFailCache.set(url, Date.now()); return null; }
+    if (!res.ok) { avatarFailCache.set(url, Date.now()); return ''; }
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength === 0) { avatarFailCache.set(url, Date.now()); return ''; }
+    // Сервер отдаёт файлы как application/octet-stream + nosniff, поэтому
+    // MIME определяем по сигнатуре байтов (PNG/JPEG/GIF/WebP).
+    const type = sniffImageMime(buf) || 'image/jpeg';
+    return URL.createObjectURL(new Blob([buf], { type }));
+  } catch (e) {
+    return null; // сетевая ошибка — попробуем позже
+  }
+}
 
 async function resolveAvatarSrc(rawUrl) {
   const url = normalizeAvatarValue(rawUrl);
@@ -1300,19 +1330,17 @@ async function resolveAvatarSrc(rawUrl) {
   if (!url.startsWith('/uploads/')) return url; // data: и внешние http(s): грузятся напрямую
   if (avatarBlobCache.has(url)) return avatarBlobCache.get(url);
   const p = (async () => {
-    try {
-      const headers = {};
-      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-      const res = await fetch(SERVER_URL + url, { headers });
-      if (!res.ok) return '';
-      const buf = await res.arrayBuffer();
-      // Файлы хранились как изображение, несмотря на octet-stream в ответах
-      const type = sniffImageMime(buf) || 'image/jpeg';
-      return URL.createObjectURL(new Blob([buf], { type }));
-    } catch (e) {
-      return '';
+    const first = await fetchAvatarBlobUrl(url);
+    if (first !== null) return first;
+    // Временный сбой (нет токена / сеть / 401): повтор с backoff,
+    // чтобы аватары появились сразу после инициализации.
+    for (let i = 0; i < 3; i++) {
+      await new Promise(r => setTimeout(r, 800 * (i + 1)));
+      const again = await fetchAvatarBlobUrl(url);
+      if (again !== null) return again;
     }
-  })();
+    return '';
+  })().then(v => { if (v === '') avatarBlobCache.delete(url); return v; });
   avatarBlobCache.set(url, p);
   return p;
 }
@@ -1381,6 +1409,8 @@ function attachResolvedAvatar(imgEl, url) {
 
 // Аватар в разметке, генерируемой строкой (модалки, панель информации, поиск).
 // Если аватарки нет — ДИНАМИЧЕСКАЯ первая буква имени конкретного чата.
+// Контейнер (.chat-avatar/.fi-avatar/.member-avatar) красит синий круг сам,
+// поэтому сюда возвращаем только содержимое.
 function chatAvatarMarkup(chat) {
   const icon = getChatAvatarIcon(chat);
   if (icon) return `<span class="chat-avatar__icon" style="${AVATAR_ICON_STYLE}">${Icons.svg(icon, { className: 'mq-icon--lg' })}</span>`;
@@ -1405,6 +1435,28 @@ function userAvatarMarkup(user) {
   if (!url) return letter;
   const safe = escapeHtml(url).replace(/"/g, '&quot;');
   return `<img class="chat-avatar__img" src="${safe}" alt="${letter}" style="${AVATAR_IMG_STYLE}" loading="lazy">`;
+}
+
+// Единая точка рендера строковой аватар-разметки в DOM-контейнер с
+// гарантированной деградацией: если ссылка ведёт в защищённый /uploads/
+// (нужен Authorization-заголовок, обычный <img src> её не грузит) —
+// подтягиваем blob; при любой неудаче остаётся ДИНАМИЧЕСКАЯ первая буква
+// имени (раньше битая <img> оставляла пустой синий круг).
+function paintAvatar(el, markup) {
+  if (!el) return;
+  el.innerHTML = markup;
+  const img = el.querySelector ? el.querySelector('img.chat-avatar__img') : null;
+  if (!img) return;
+  const src = img.getAttribute('src') || '';
+  if (!src.startsWith('/uploads/')) return; // data:/внешние URL грузятся напрямую
+  resolveAvatarSrc(src).then((resolved) => {
+    if (!resolved) {
+      // Картинку получить не удалось — показываем первую букву вместо круга
+      if (el.isConnected) el.textContent = img.alt || '?';
+      return;
+    }
+    if (el.isConnected && img.isConnected) img.src = resolved;
+  });
 }
 
 // Заменяет содержимое контейнера-аватара на буквенную заглушку или <img>.
@@ -4824,6 +4876,20 @@ function showModal(html) {
   hydrateAvatarImages(content);
 }
 
+// Рендер «отложенных» аватаров: контейнеры с data-avatar-markup (строковая
+// разметка chatAvatarMarkup/userAvatarMarkup, сохранённая через
+// encodeURIComponent) заполняются через paintAvatar — с подгрузкой blob для
+// /uploads/ и гарантированной первой буквой имени при любой неудаче.
+function renderDeferredAvatars(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  root.querySelectorAll('[data-avatar-markup]').forEach((el) => {
+    let markup = '';
+    try { markup = decodeURIComponent(el.getAttribute('data-avatar-markup') || ''); } catch (e) { /* ignore */ }
+    el.removeAttribute('data-avatar-markup');
+    paintAvatar(el, markup);
+  });
+}
+
 function closeModal() {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
@@ -4895,7 +4961,7 @@ async function searchUsers(query) {
       }
       container.innerHTML = data.map(u => `
         <div class="search-result-item" data-action="startChat" data-id="${u.id}">
-          <div class="chat-avatar">${userAvatarMarkup(u)}</div>
+          <div class="chat-avatar" data-avatar-markup="${encodeURIComponent(userAvatarMarkup(u))}"></div>
           <div>
             <div class="search-result-name">${escapeHtml(u.name || I18N.t('chat.user'))}${isOwnerUser(u) ? ownerBadgeHtml() : ''}</div>
             <div style="font-size:12px;color:var(--text-secondary)">@${escapeHtml(u.username || '')} • ${escapeHtml(u.phone || '')}</div>
@@ -4903,8 +4969,8 @@ async function searchUsers(query) {
         </div>
       `).join('');
       // Аватары из /uploads/ грузятся только с Authorization-заголовком —
-      // дотягиваем их blob-URL'ами после вставки разметки.
-      hydrateAvatarImages(container);
+      // рендерим их через paintAvatar (blob + деградация на первую букву).
+      renderDeferredAvatars(container);
     } catch (e) {
       container.innerHTML = `<p style="color:var(--danger);padding:14px;text-align:center">${I18N.t('search.error')}</p>`;
     }
