@@ -683,6 +683,9 @@ async function showChatInfoFull() {
   const folder = folders.find(f => (f.chat_ids || []).includes(currentChatId));
   const chatTtl = getChatTtl(chat.id);
   const owner = chatOwner(chat);
+  // Менять аватар группы/канала может только владелец или админ — как на
+  // бэкенде (chatController.updateChatAvatar), так и здесь в UI.
+  const canEditAvatar = isGroup && (chat.owner_id === currentUser.id || chat.role === 'owner' || chat.role === 'admin');
 
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
@@ -704,21 +707,56 @@ async function showChatInfoFull() {
 
     <div class="section-title">${I18N.t('chatinfo.actions')}</div>
     <div class="row" style="flex-wrap:wrap;gap:8px">
+      ${canEditAvatar ? `<button class="mini-btn" data-action="pickChatAvatar">${I18N.t('chat.avatarChange')}</button>` : ''}
       <button class="mini-btn" data-action="openPinnedModal">${I18N.t('chatinfo.pinned', { count: pinned })}</button>
       <button class="mini-btn" data-action="openFolderAssign" data-id="${currentChatId}">${I18N.t('chatinfo.folder', { name: escapeHtml(folder ? folder.name : I18N.t('chatinfo.folderNone')) })}</button>
       ${isGroup ? `<button class="mini-btn danger" data-action="leaveChat">${I18N.t('chatinfo.leave')}</button>` : ''}
     </div>
+    ${canEditAvatar ? `
+    <!-- Скрытый input для загрузки аватара группы: change -> setChatAvatarFile
+         (app.js) -> POST /api/chats/:id/avatar с FormData (multer upload.single('avatar')) -->
+    <input type="file" id="chat-avatar-input" accept="image/*" style="display:none" data-action="setChatAvatarFile">
+    ` : ''}
   `);
 }
 
+// Кнопка «сменить аватар» в панели информации о группе — открывает системный
+// выбор файла; отправка на бэкенд обрабатывается CHANGE_ACTIONS.setChatAvatarFile.
+function pickChatAvatar() {
+  document.getElementById('chat-avatar-input')?.click();
+}
+
 // ==================== ПРОФИЛЬ ====================
+// Единая авторизованная загрузка картинки профиля: файл уходит на сервер как
+// multipart/form-data (поле 'avatar', multer upload.single('avatar')), в БД
+// пишется путь /uploads/<файл>. Так как /uploads/ закрыт Authorization-
+// заголовком, предпросмотр получаем через fetch + Blob URL.
+async function uploadProfileAvatar(file) {
+  const fd = new FormData();
+  fd.append('avatar', file, file.name || 'avatar.jpg');
+  const res = await fetch(SERVER_URL + '/api/update-profile', {
+    method: 'POST',
+    headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+    body: fd
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    return null;
+  }
+  return (data && (data.user || data)) || {};
+}
+
 function openProfileEditor() {
+  // Динамическая первая буква ника — заглушка, пока аватар не подтянут
+  const letter = ((currentUser.firstName || currentUser.name || currentUser.username || '?').trim()[0] || '?').toUpperCase();
   showModal(`
     <button class="modal-close" data-action="closeModal"><svg class="mq-icon mq-icon--sm" aria-hidden="true" focusable="false"><use href="#mq-i-x"></use></svg></button>
     <h2>${I18N.t('profile.title')}${isOwnerUser(currentUser) ? ownerBadgeHtml() : ''}</h2>
     <div style="text-align:center;margin-bottom:14px;">
-      <img id="profile-avatar-preview" src="${escapeHtml(currentUser.avatar || '')}"
-           style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--bg-message-in)" alt="avatar">
+      <img id="profile-avatar-preview" src="" alt="${escapeHtml(letter)}" data-avatar-url="${encodeURIComponent(normalizeAvatarValue(currentUser.avatar) || '')}"
+           style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--bg-message-in)">
       <div style="margin-top:8px">
         <button class="mini-btn" data-action="pickAvatar">${I18N.t('profile.photo')}</button>
       </div>
@@ -746,6 +784,20 @@ function openProfileEditor() {
     </div>
     <button class="btn" data-action="saveProfile">${I18N.t('profile.save')}</button>
   `);
+  // Подтягиваем текущий аватар профиля: ссылки /uploads/ требуют
+  // Authorization-заголовок — resolveAvatarSrc делает fetch с Bearer-токеном
+  // и возвращает Blob URL для <img src>. Если картинки нет (или загрузка
+  // не удалась) — остаётся динамическая первая буква ника в alt.
+  const preview = document.getElementById('profile-avatar-preview');
+  if (preview) {
+    let url = '';
+    try { url = decodeURIComponent(preview.getAttribute('data-avatar-url') || ''); } catch (e) { /* ignore */ }
+    if (url) {
+      resolveAvatarSrc(url).then((src) => {
+        if (src && preview.isConnected) preview.src = src;
+      });
+    }
+  }
 }
 
 function pickAvatar() {
@@ -759,24 +811,38 @@ async function uploadAvatar(el) {
     showToast(I18N.t('profile.tooBig'), 'error');
     return;
   }
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const preview = document.getElementById('profile-avatar-preview');
-    if (preview) preview.src = reader.result;
-    const res = await api('/api/update-profile', { method: 'POST', body: { avatar: reader.result } });
-    if (res.ok) {
-      const user = res.data?.user || res.data;
-      if (user) {
-        currentUser = normalizeUser(user);
-        localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
-      }
-      updateUserUI();
-      showToast(I18N.t('profile.photoSaved'), 'success');
-    } else {
-      showToast(res.error || I18N.t('profile.uploadFailed'), 'error');
+  const preview = document.getElementById('profile-avatar-preview');
+  // Мгновенный локальный предпросмотр выбранного файла (Blob URL),
+  // чтобы кнопка «отвечала» до завершения запроса к серверу.
+  const localUrl = URL.createObjectURL(file);
+  if (preview) preview.src = localUrl;
+  // Авторизованная отправка FormData на бэкенд (multer принимает поле
+  // 'avatar', пишет путь /uploads/<файл> в users.avatar).
+  const user = await uploadProfileAvatar(file);
+  if (user) {
+    currentUser = normalizeUser(user);
+    localStorage.setItem('ciphertalk_user', JSON.stringify(currentUser));
+    updateUserUI();
+    // Показываем уже серверную версию аватара (fetch + Bearer + Blob URL)
+    const serverUrl = normalizeAvatarValue(currentUser.avatar);
+    if (serverUrl && preview) {
+      resolveAvatarSrc(serverUrl).then((src) => {
+        if (src && preview.isConnected) preview.src = src;
+      });
     }
-  };
-  reader.readAsDataURL(file);
+    showToast(I18N.t('profile.photoSaved'), 'success');
+  } else {
+    // Загрузка не удалась — возвращаем на превью старый аватар либо
+    // динамическую первую букву ника (без битой картинки).
+    if (preview) {
+      preview.removeAttribute('src');
+      const fallback = normalizeAvatarValue(currentUser.avatar);
+      if (fallback) resolveAvatarSrc(fallback).then((src) => { if (src && preview.isConnected) preview.src = src; });
+    }
+    showToast(I18N.t('profile.uploadFailed'), 'error');
+  }
+  URL.revokeObjectURL(localUrl);
+  if (el) el.value = '';
 }
 
 async function saveProfile() {
@@ -824,6 +890,7 @@ Object.assign(CLICK_ACTIONS, {
     showToast(I18N.t('ttl.saved'), 'success', 'clock');
   },
   pickAvatar: () => pickAvatar(),
+  pickChatAvatar: () => pickChatAvatar(),
   saveProfile: () => saveProfile()
 });
 
@@ -832,7 +899,10 @@ Object.assign(INPUT_ACTIONS, {
 });
 
 Object.assign(CHANGE_ACTIONS, {
-  uploadAvatar: (el) => uploadAvatar(el)
+  uploadAvatar: (el) => uploadAvatar(el),
+  // Загрузка аватара группы: FormData с полем 'avatar' уходит на
+  // POST /api/chats/:id/avatar (реализация — setChatAvatar в app.js).
+  setChatAvatarFile: (el) => setChatAvatar(el)
 });
 
 // ==================== СБРОШ СОСТОЯНИЯ ПРИ СМЕНЕ ЧАТА ====================

@@ -309,6 +309,8 @@ class ChatController {
         avatar = ''; // явная очистка аватара
       }
 
+      // UPDATE chats SET avatar = ? WHERE id = ? — выполняется через db.updateChat
+      // (белый список колонок включает 'avatar', см. src/db/database.js).
       this.db.updateChat(chatId, { avatar, updated_at: Date.now() });
       chat.avatar = avatar;
       this.db.markDirty();
@@ -323,7 +325,9 @@ class ChatController {
         avatar
       });
 
-      res.json(this.getChatWithDetails(chat, req.userId));
+      // Отдаём свежие детали чата, но members пересчитываем от уже
+      // обновлённого объекта: иначе в ответе остался бы старый аватар.
+      res.json(this.getChatWithDetails(this.db.findChatById(chatId) || chat, req.userId));
     } catch (error) {
       console.error('Update chat avatar error:', error);
       res.status(500).json({ error: 'Ошибка обновления аватара' });
