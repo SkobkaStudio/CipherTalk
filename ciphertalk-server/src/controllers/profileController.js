@@ -146,6 +146,9 @@ class ProfileController {
         .slice(0, 50)
         .map(u => {
           const json = u.toSafeJSON();
+          // Корона считается по настоящему номеру ДО маскировки телефона.
+          json.crown_level = getCrownLevelByPhone(u.phone);
+          json.is_owner = json.crown_level === 'gold' ? 1 : 0;
           json.phone = maskPhone(u.phone);
           json.email = maskEmail(u.email);
           if (u.hide_online) json.online = 0;
