@@ -317,7 +317,7 @@ body {
   border: 2px solid var(--bg-secondary);
 }
 
-/* Цветной фон буквы-аватара когда нет фото — как в Telegram, буква всегда заметна */
+/* Цветной фон буквы-аватара когда нет фото — как в Telegram */
 .chat-avatar__letter.color-1 { background: #4caf50; }
 .chat-avatar__letter.color-2 { background: #ff9800; }
 .chat-avatar__letter.color-3 { background: #f44336; }
@@ -327,39 +327,41 @@ body {
 .chat-avatar__letter.color-7 { background: #795548; }
 .chat-avatar__letter.color-8 { background: #e91e63; }
 
-/* Буква-фолбэк в аватаре — видна когда картинки нет или она не загрузилась */
+/* Обёртка аватара — букву и картинку держит в рамках круга */
 .chat-avatar__wrap {
   position: relative;
   width: 100%;
   height: 100%;
-  display: inline-block;
-}
-.chat-avatar__letter {
-  position: absolute;
-  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
-  pointer-events: none;
+}
+
+/* Буква-фолбэк — в потоке, центрируется через flex обёртки, не растягивается на страницу */
+.chat-avatar__letter {
+  position: relative;
+  z-index: 1;
   font-size: 18px;
   font-weight: 700;
   color: #ffffff;
-  background: transparent;
   text-transform: uppercase;
-}
-/* Картинка поверх буквы — показывается только когда реально загрузилась */
-.chat-avatar__img {
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content:center;
+}
+
+/* Картинка поверх буквы — только когда реально загрузилась */
+.chat-avatar__img {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   object-fit: cover;
   display: block;
-  z-index: 1;
-  position: absolute;
-  inset: 0;
 }
 .member-avatar .chat-avatar__img,
 .forward-item .fi-avatar .chat-avatar__img {

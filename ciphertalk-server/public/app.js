@@ -1585,7 +1585,7 @@ function buildChatAvatarNodes(chat) {
     const span = document.createElement('span');
     span.className = `chat-avatar__letter ${colorCls}`;
     span.textContent = letter;
-    span.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
+    span.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
     frag.appendChild(span);
     return frag;
   }
@@ -1594,13 +1594,13 @@ function buildChatAvatarNodes(chat) {
   const letterWrap = document.createElement('span');
   letterWrap.className = `chat-avatar__letter ${colorCls}`;
   letterWrap.textContent = letter;
-  letterWrap.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
+  letterWrap.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
   frag.appendChild(letterWrap);
 
   const img = document.createElement('img');
   img.className = 'chat-avatar__img';
   img.alt = letter;
-  img.style.cssText = AVATAR_IMG_STYLE + ';position:absolute;inset:0;z-index:1;';
+  img.style.cssText = AVATAR_IMG_STYLE + ';position:absolute;inset:0;z-index:2;';
   img.loading = 'lazy';
   img.onerror = () => {
     img.style.display = 'none';
@@ -1651,7 +1651,7 @@ function setUserAvatar(el, user) {
   const span = document.createElement('span');
   span.className = `chat-avatar__letter ${colorCls}`;
   span.textContent = letter;
-  span.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;';
+  span.style.cssText = 'z-index:1;pointer-events:none;width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
   el.appendChild(span);
   if (!url) return;
   const apply = (src) => {
@@ -1662,8 +1662,11 @@ function setUserAvatar(el, user) {
     img.className = 'chat-avatar__img';
     img.src = src;
     img.alt = letter;
-    img.style.cssText = AVATAR_IMG_STYLE;
+    img.style.cssText = AVATAR_IMG_STYLE + ';position:absolute;inset:0;z-index:2;';
     el.appendChild(img);
+    // Скрываем букву, картинка поверх
+    const letterSpan = el.querySelector('.chat-avatar__letter');
+    if (letterSpan) letterSpan.style.display = 'none';
   };
   if (url.startsWith('/uploads/')) resolveAvatarSrc(url).then(apply);
   else apply(url);
