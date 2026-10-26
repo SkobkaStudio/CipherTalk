@@ -24,25 +24,18 @@ function phoneDigits(value) {
 
 const CREATORS = [
   {
-    phone: '+79990000001', // золотая корона
+    phone: '+79609611353', // золотая корона
     name: 'Skobka',
     level: 'gold',
     role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
   },
   {
-    phone: '+79990000002', // серебряная корона
-    name: 'Cipher',
-    level: 'silver',
-    role: 'Backend Developer',
-    description: 'База данных SQLCipher, WebSocket-сервис, presence и автоудаление сообщений.'
-  },
-  {
-    phone: '+79990000003', // медная корона
-    name: 'Nova',
-    level: 'bronze',
-    role: 'UI/UX Designer',
-    description: 'Интерфейс мессенджера, тёмная тема, анимации и адаптивная вёрстка.'
+    phone: '+79039952506', // золотая корона
+    name: 'Максим',
+    level: 'gold',
+    role: 'Основатель · Lead Developer',
+    description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
   }
 ];
 

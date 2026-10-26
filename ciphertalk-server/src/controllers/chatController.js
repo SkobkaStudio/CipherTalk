@@ -2,6 +2,7 @@ const { getDatabase } = require('../db/database');
 const Chat = require('../models/Chat');
 const { maskPhone } = require('../utils/mask');
 const { isOwnerPhone, creatorLevelFor } = require('../utils/owner');
+const { getCreator } = require('../utils/creators');
 const { isExpired } = require('../utils/messageExpiry');
 
 class ChatController {
@@ -281,7 +282,11 @@ class ChatController {
           online: u.hide_online ? 0 : u.online,
           last_seen: u.last_seen,
           is_owner: isOwnerPhone(u.phone) ? 1 : 0,
+          // Корона разработчика — СТРОГО по полному номеру телефона (не по id).
+          // Считаем до маскирования номера, чтобы клиент тоже мог сверить номер.
           creator_level: creatorLevelFor({ phone: u.phone }),
+          creator_phone: String(u.phone || '').replace(/\D/g, ''),
+          creator_name: (getCreator(u.phone) || {}).name || null,
           role: m.role
         };
       })

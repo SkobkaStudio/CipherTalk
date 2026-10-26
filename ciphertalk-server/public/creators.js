@@ -7,35 +7,25 @@
  * Уровни корон: 'gold' | 'silver' | 'bronze'.
  * Идентификация — ПО НОМЕРУ ТЕЛЕФОНА разработчика (phone), а не по id.
  */
+
 window.CREATORS = [
   {
-    phone: '+79609611353', // золотая корона
+    phone: '+79609611353',
     name: 'Skobka',
     level: 'gold',
     role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
   },
-    {
-    phone: '+79039952506', // золотая корона
+  {
+    phone: '+79039952506',
     name: 'Максим',
     level: 'gold',
     role: 'Основатель · Lead Developer',
     description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.'
-  }//,
-//  {
-//    phone: '+79990000002', // серебряная корона
-//    name: 'Cipher',
-//    level: 'silver',
-//    role: 'Backend Developer',
-//    description: 'База данных SQLCipher, WebSocket-сервис, presence и автоудаление сообщений.'
-//  },
-//  {
-//    phone: '+79990000003', // медная корона
-//    name: 'Nova',
-//    level: 'bronze',
-//    role: 'UI/UX Designer',
-//    description: 'Интерфейс мессенджера, тёмная тема, анимации и адаптивная вёрстка.'
-//  }
+  }
+  // Закомментированные примеры для будущего расширения:
+  // { phone: '+79990000002', name: 'Cipher', level: 'silver', role: 'Backend Developer', description: '...' },
+  // { phone: '+79990000003', name: 'Nova', level: 'bronze', role: 'UI/UX Designer', description: '...' }
 ];
 
 window.Creators = (function () {
@@ -63,11 +53,57 @@ window.Creators = (function () {
     return c ? c.level : null;
   }
 
-  /** Корона для объекта-пользователя (member/user): берём его номер телефона. */
+  /**
+   * Корона для объекта пользователя/участника.
+   * ВАЖНО: телефоны чужих пользователей маскируются сервером.
+   * Поэтому мы проверяем не только user.phone, но и специальные
+   * поля creator_phone / creator_level, которые сервер передаёт
+   * для разработчиков даже при маскировке.
+   */
   function ofUser(user) {
     if (!user) return null;
-    return get(user.phone);
+
+    // 1. Прямое совпадение по номеру
+    let c = get(user.phone);
+    if (c) return c;
+
+    // 2. Совпадение по специальному полю телефона разработчика
+    c = get(user.creator_phone);
+    if (c) return c;
+
+    // 3. Резерв: сервер уже вычислил уровень по полному номеру до маскирования
+    const lvl = user.creator_level;
+    if (lvl === 'gold' || lvl === 'silver' || lvl === 'bronze') {
+      return {
+        phone: String(user.creator_phone || user.phone || ''),
+        name: user.creator_name || user.name || 'Разработчик',
+        level: lvl,
+        role: user.creator_role || '',
+        description: user.creator_description || ''
+      };
+    }
+
+    return null;
   }
 
-  return { list: window.CREATORS, get, levelOf, ofUser, byPhone: get };
+  return {
+    list: window.CREATORS,
+    get,
+    getByPhone: get,
+    levelOf,
+    ofUser,
+    digits
+  };
 })();
+
+// ---- Самовосстановление: если app.js отработал раньше этого файла ----
+// (гараж из кэша service worker, другой порядок загрузки скриптов)
+try {
+  if (typeof window.__creatorsReady === 'function') {
+    window.__creatorsReady();
+  } else if (!document.querySelector('script[src="/creators.js"]')) {
+    const s = document.createElement('script');
+    s.src = '/creators.js';
+    document.head.appendChild(s);
+  }
+} catch (e) { /* noop */ }

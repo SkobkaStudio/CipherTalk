@@ -113,6 +113,8 @@ class ProfileController {
       if (user.id !== req.userId) {
         json.phone = maskPhone(user.phone);
         json.email = maskEmail(user.email);
+        // Корона считается сервером по полному номеру (до маскирования).
+        json.creator_phone = String(user.phone || '').replace(/\D/g, '');
       }
       res.json(json);
     } catch (error) {
@@ -148,6 +150,8 @@ class ProfileController {
           const json = u.toSafeJSON();
           json.phone = maskPhone(u.phone);
           json.email = maskEmail(u.email);
+          // Корона считается сервером по полному номеру (до маскирования).
+          json.creator_phone = String(u.phone || '').replace(/\D/g, '');
           if (u.hide_online) json.online = 0;
           return json;
         });

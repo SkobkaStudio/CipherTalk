@@ -993,13 +993,39 @@ function typewriter(el, text) {
 
 function normalizeUser(user) {
   if (!user) return user;
-  return {
+  const out = {
     ...user,
     name: user.name || user.firstName || user.first_name || '',
     firstName: user.firstName || user.first_name || '',
     lastName: user.lastName || user.last_name || ''
   };
+  // Корона разработчика — СТРОГО по номеру телефона из creators.js.
+  // Если у пользователя номер из списка (или сервер прислал creator_level),
+  // проставляем уровень и карточку сразу — дальше UI их только рисует.
+  try {
+    const c = (typeof creatorOf === 'function') ? creatorOf(out) : null;
+    if (c) {
+      out.creator_level = c.level;
+      out.creator_name = c.name;
+      out.creator_role = c.role || '';
+      out.creator_description = c.description || '';
+    }
+  } catch (e) { /* noop */ }
+  return out;
 }
+
+// Принудительно пересчитать короны во всех кэшированных чатах и шапке —
+// вызывается когда creators.js догружается ПОСЛЕ app.js (кривой кэш SW).
+function refreshAllCrowns() {
+  try {
+    chats = (chats || []).map(c => ({ ...c, members: (c.members || []).map(normalizeUser) }));
+    if (currentUser) currentUser = normalizeUser(currentUser);
+    renderChatListThrottled();
+    updateChatHeader();
+    updateMenuProfile();
+  } catch (e) { /* noop */ }
+}
+window.__creatorsReady = function () { refreshAllCrowns(); };
 
 function normalizeChat(chat) {
   return {
@@ -1123,18 +1149,45 @@ function appendOwnerBadge(parent, target) {
 // window.CREATORS (public/creators.js). Идентификация ПО НОМЕРУ ТЕЛЕФОНА.
 const CREATOR_LEVELS = ['gold', 'silver', 'bronze'];
 
+// Резервная копия списка на случай, если creators.js не загрузился (кэш, блокировка и т.п.)
+const FALLBACK_CREATORS = [
+  { phone: '+79609611353', name: 'Skobka', level: 'gold', role: 'Основатель · Lead Developer',
+    description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.' },
+  { phone: '+79039952506', name: 'Максим', level: 'gold', role: 'Основатель · Lead Developer',
+    description: 'Создал CipherTalk с нуля: архитектура сервера, сквозное шифрование E2EE, система публичных ID и ссылок чатов.' }
+];
+
 function creatorOf(user) {
   if (!user) return null;
-  // Основной источник — список creators.js: совпадение по номеру телефона.
-  const c = (window.Creators && window.Creators.ofUser) ? window.Creators.ofUser(user) : null;
-  if (c) return c;
-  // Сервер прислал готовый уровень (creator_level) — доверяем ему,
-  // карточку (роль/описание) берём из синхронизированного списка по номеру.
+
+  // 1. Основной источник — модуль window.Creators (public/creators.js)
+  if (window.Creators && typeof window.Creators.ofUser === 'function') {
+    const c = window.Creators.ofUser(user);
+    if (c) return c;
+  }
+
+  // 2. Если сервер прислал готовый уровень (creator_level), доверяем ему.
+  // Карточку (роль/описание) пытаемся взять из синхронизированного списка или fallback.
   const lvl = user.creator_level;
   if (CREATOR_LEVELS.includes(lvl)) {
     const byPhone = (window.Creators && window.Creators.byPhone) ? window.Creators.byPhone(user.phone) : null;
     if (byPhone) return byPhone;
-    return { phone: String(user.phone || ''), name: user.name || '', level: lvl, role: '', description: '' };
+
+    // Fallback на случай, если модуль не загрузился
+    const fallback = FALLBACK_CREATORS.find(cr => cr.phone === user.phone);
+    if (fallback) return fallback;
+
+    return {
+      phone: String(user.phone || ''),
+      name: user.name || 'Разработчик',
+      level: lvl,
+      role: '',
+      description: ''
+    };
+  }
+
+  return null;
+}
   }
   return null;
 }
