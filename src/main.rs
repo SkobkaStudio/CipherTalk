@@ -62,15 +62,23 @@ async fn main() {
     });
     let _ = _rx_stub; // сам канал живёт в AppState
 
-    // Публичная часть API (без JWT)
+    // Публичная часть API (без JWT): авторизация v2 по телефону
     let public = Router::new()
-        .route("/register", post(controllers::auth::register))
-        .route("/login", post(controllers::auth::login));
+        .route("/auth/start", post(controllers::auth::start))
+        .route("/auth/verify", post(controllers::auth::verify))
+        .route("/auth/finish", post(controllers::auth::finish))
+        .route("/auth/login", post(controllers::auth::login))
+        .route("/auth/check-username", get(controllers::auth::check_username));
 
     // Защищённая часть API: мидлварь require_auth проверяет Bearer JWT
     // и кладёт Claims в request.extensions — контроллеры читают их через Extension<Claims>.
     let protected = Router::new()
+        .route("/me", get(controllers::auth::me))
         .route("/chats", get(controllers::chats::list).post(controllers::chats::create))
+        .route("/chats/dm", post(controllers::chats::dm))
+        .route("/chats/group", post(controllers::chats::group))
+        .route("/chats/by-id/:server_id", get(controllers::chats::by_server_id))
+        .route("/users/:server_id", get(controllers::chats::user_by_server_id))
         .route("/chats/:id/join", post(controllers::chats::join))
         .route(
             "/chats/:id/messages",

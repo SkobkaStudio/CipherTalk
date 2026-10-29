@@ -7,16 +7,52 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Экран входа / регистрации -->
+  <!-- Экран авторизации: пошаговый wizard (шаг 1..5) -->
   <div id="auth-screen">
-    <form id="auth-form">
-      <h1>CipherTalk</h1>
-      <input id="username" placeholder="Имя пользователя" autocomplete="username">
-      <input id="password" type="password" placeholder="Пароль" autocomplete="current-password">
-      <button id="auth-submit" type="submit">Войти</button>
-      <a id="auth-toggle" href="#">Нет аккаунта? Зарегистрироваться</a>
-    </form>
-    <div id="auth-error"></div>
+    <div class="auth-card">
+      <!-- Шаг 1: номер телефона -->
+      <div id="auth-step-phone">
+        <h1>CipherTalk</h1>
+        <input id="phone" placeholder="+7 999 123-45-67" inputmode="tel" autocomplete="tel">
+        <button id="phone-next">Далее</button>
+      </div>
+
+      <!-- Шаг для зарегистрированных: пароль -->
+      <div id="auth-step-password" hidden>
+        <h1>CipherTalk</h1>
+        <p>Пароль для <span id="pwd-phone"></span></p>
+        <input id="password" type="password" placeholder="Пароль" autocomplete="current-password">
+        <button id="password-next">Войти</button>
+        <a id="back-phone" href="#">← Другой номер</a>
+      </div>
+
+      <!-- Шаг 2: код из «SMS» -->
+      <div id="auth-step-code" hidden>
+        <h1>CipherTalk</h1>
+        <p>Код отправлен на <span id="code-phone"></span></p>
+        <p class="hint">(в MVP код пишется в лог сервера)</p>
+        <input id="code" inputmode="numeric" maxlength="6" placeholder="6 цифр" autocomplete="one-time-code">
+        <button id="code-next">Подтвердить</button>
+        <a id="back-phone-2" href="#">← Другой номер</a>
+      </div>
+
+      <!-- Шаги 3–5: профиль, username, пароль -->
+      <div id="auth-step-profile" hidden>
+        <h1>CipherTalk</h1>
+        <p>Завершим регистрацию</p>
+        <input id="first-name" placeholder="Имя" autocomplete="given-name">
+        <input id="last-name" placeholder="Фамилия (необязательно)" autocomplete="family-name">
+        <div class="username-row">
+          <span class="at-prefix">@</span><input id="username" placeholder="username" autocomplete="off">
+        </div>
+        <span id="username-status"></span>
+        <input id="new-password" type="password" placeholder="Пароль (мин. 8)" autocomplete="new-password">
+        <input id="new-password-repeat" type="password" placeholder="Повторите пароль" autocomplete="new-password">
+        <button id="profile-finish" disabled>Зарегистрироваться</button>
+      </div>
+
+      <div id="auth-error"></div>
+    </div>
   </div>
 
   <!-- Основной экран: список чатов + окно сообщений -->
@@ -24,16 +60,19 @@
     <aside id="sidebar">
       <header>
         <span id="me-name"></span>
-        <button id="logout">Выйти</button>
+        <div class="side-actions">
+          <button id="profile-btn" title="Профиль">Профиль</button>
+          <button id="logout">Выйти</button>
+        </div>
       </header>
       <div id="chats-list"></div>
       <form id="create-chat-form">
-        <input id="new-chat-name" placeholder="Новый чат">
-        <button type="submit" title="Создать чат">+</button>
+        <input id="new-chat-name" placeholder="Новая группа">
+        <button type="submit" title="Создать группу">+</button>
       </form>
       <form id="join-chat-form">
-        <input id="join-chat-id" placeholder="ID чата" inputmode="numeric">
-        <button type="submit" title="Войти в чат по ID">→</button>
+        <input id="join-chat-id" placeholder="ID чата / ссылка" inputmode="text">
+        <button type="submit" title="Открыть по ID">→</button>
       </form>
     </aside>
 
@@ -48,6 +87,17 @@
         <button type="submit">Отправить</button>
       </form>
     </main>
+  </div>
+
+  <!-- Модалка профиля: server_id и публичная ссылка -->
+  <div id="profile-modal" hidden>
+    <div class="modal-card">
+      <h2>Профиль</h2>
+      <p>Мой ID: <code id="profile-server-id"></code></p>
+      <p>Ссылка: <a id="profile-link" target="_blank"></a></p>
+      <p>@<span id="profile-username"></span></p>
+      <button id="profile-close">Закрыть</button>
+    </div>
   </div>
 
   <!-- Всплывающие уведомления об ошибках -->
