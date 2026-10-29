@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CipherTalk — мессенджер</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Экран входа / регистрации -->
+  <div id="auth-screen">
+    <form id="auth-form">
+      <h1>CipherTalk</h1>
+      <input id="username" placeholder="Имя пользователя" autocomplete="username">
+      <input id="password" type="password" placeholder="Пароль" autocomplete="current-password">
+      <button id="auth-submit" type="submit">Войти</button>
+      <a id="auth-toggle" href="#">Нет аккаунта? Зарегистрироваться</a>
+    </form>
+    <div id="auth-error"></div>
+  </div>
+
+  <!-- Основной экран: список чатов + окно сообщений -->
+  <div id="app-screen" hidden>
+    <aside id="sidebar">
+      <header>
+        <span id="me-name"></span>
+        <button id="logout">Выйти</button>
+      </header>
+      <div id="chats-list"></div>
+      <form id="create-chat-form">
+        <input id="new-chat-name" placeholder="Новый чат">
+        <button type="submit" title="Создать чат">+</button>
+      </form>
+      <form id="join-chat-form">
+        <input id="join-chat-id" placeholder="ID чата" inputmode="numeric">
+        <button type="submit" title="Войти в чат по ID">→</button>
+      </form>
+    </aside>
+
+    <main id="chat-area">
+      <header id="chat-header">
+        <button id="back-btn" hidden>←</button>
+        <span id="chat-title">Выбери чат</span>
+      </header>
+      <div id="messages"></div>
+      <form id="send-form" hidden>
+        <input id="message-input" placeholder="Сообщение..." autocomplete="off">
+        <button type="submit">Отправить</button>
+      </form>
+    </main>
+  </div>
+
+  <!-- Всплывающие уведомления об ошибках -->
+  <div id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

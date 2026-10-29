@@ -1,11 +1,13 @@
 //! Контроллер сообщений: история и отправка + публикация в WS-брокер.
+//! Только HTTP-хендлеры: SQL — в services::chat_service.
 
-use crate::middleware::Authed;
 use crate::models::message::{Message, SendMessageRequest};
 use crate::services::chat_service;
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::jwt::Claims;
 use crate::ws::AppState;
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{Path, Query, State};
+use axum::Extension;
 use axum::Json;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -19,11 +21,10 @@ pub struct LimitQuery {
 /// Доступ только участникам чата (403 иначе).
 pub async fn list(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    Extension(claims): Extension<Claims>,
     Path(id): Path<i64>,
     Query(q): Query<LimitQuery>,
 ) -> AppResult<Json<Vec<Message>>> {
-    let Authed(claims) = Authed::from_request(&req)?;
     if !chat_service::is_member(&state.db, id, claims.sub).await? {
         return Err(AppError::Forbidden("Вы не состоите в этом чате".into()));
     }
@@ -36,11 +37,10 @@ pub async fn list(
 /// в broadcast-канал, откуда его получат все WS-подписчики этого чата.
 pub async fn send(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    Extension(claims): Extension<Claims>,
     Path(id): Path<i64>,
     Json(body): Json<SendMessageRequest>,
 ) -> AppResult<Json<Message>> {
-    let Authed(claims) = Authed::from_request(&req)?;
     if !chat_service::is_member(&state.db, id, claims.sub).await? {
         return Err(AppError::Forbidden("Вы не состоите в этом чате".into()));
     }

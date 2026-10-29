@@ -1,8 +1,2 @@
-/target/
-/.idea/
-*.swp
-*.swo
-.env
-.env.local
-.env.*.local
-.DS_Store
+data-rqlite/
+rqlited

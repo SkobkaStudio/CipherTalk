@@ -1,12 +1,13 @@
 //! JWT-мидлварь для защищённых /api/* маршрутов.
 
 use axum::extract::{Request, State};
+#[allow(unused_imports)] // Parts используется в bearer_token
 use axum::http::{header, request::Parts, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
 
-use crate::utils::jwt::{self, Claims};
+use crate::utils::jwt::{self}; // Claims кладётся в extensions через require_auth
 use crate::ws::AppState;
 
 /// Извлекает Bearer-токен из заголовка Authorization.
@@ -40,17 +41,5 @@ pub async fn require_auth(
     }
 }
 
-/// Обёртка над Claims для хендлеров.
-#[derive(Clone)]
-pub struct Authed(pub Claims);
-
-impl Authed {
-    /// Достаёт claims, которые мидлварь `require_auth` положила в extensions запроса.
-    pub fn from_request(req: &Request) -> Result<Self, crate::utils::error::AppError> {
-        req.extensions()
-            .get::<Claims>()
-            .cloned()
-            .map(Authed)
-            .ok_or_else(|| crate::utils::error::AppError::Unauthorized("Требуется авторизация".into()))
-    }
-}
+// Контроллеры получают claims через штатный экстрактор axum `Extension<Claims>` —
+// собственного FromRequestParts-экстрактора здесь нет намеренно.
