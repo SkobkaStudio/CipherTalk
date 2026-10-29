@@ -34,6 +34,22 @@ else
   echo "==> rqlite уже работает"
 fi
 
+# --- находим cargo (после установки rustup он лежит в ~/.cargo/bin,
+#     но PATH в текущей сессии может быть не обновлён) ---
+if ! command -v cargo >/dev/null 2>&1; then
+  for c in "$HOME/.cargo/bin/cargo" "/root/.cargo/bin/cargo" "/usr/local/cargo/bin/cargo" "/usr/bin/cargo"; do
+    [ -x "$c" ] && export PATH="$(dirname "$c"):$PATH" && break
+  done
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "==> cargo не найден." >&2
+  echo "    Установи Rust:" >&2
+  echo "      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" >&2
+  echo "      source \"\$HOME/.cargo/env\"" >&2
+  exit 1
+fi
+
 echo "==> Собираю мессенджер (release)"
 cargo build --release
 

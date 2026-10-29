@@ -133,21 +133,43 @@ impl Db {
         Ok(extract_rows(&v))
     }
 
-    /// Миграции: создание таблиц (идемпотентно, CREATE TABLE IF NOT EXISTS).
+    /// Миграции: проверка старой схемы и создание таблиц (идемпотентно).
     pub async fn migrate(&self) -> AppResult<()> {
+        // Если в users уже есть колонка server_id — схема v2 на месте.
+        // Если нет (старая v1 или мусорная таблица) — полный сброс (см. migrate_auth_v2).
+        if !self.users_has_server_id().await? {
+            tracing::warn!("Схема users не соответствует v2 — выполняется миграция migrate_auth_v2 (сброс данных)");
+            self.migrate_auth_v2().await?;
+        }
+        // Идемпотентное создание всех таблиц актуальной схемы v2
         self.exec(
             "CREATE TABLE IF NOT EXISTS users (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
-                username TEXT UNIQUE NOT NULL, \
-                password_hash TEXT NOT NULL, \
-                created_at INTEGER NOT NULL)",
+                server_id TEXT UNIQUE NOT NULL, \
+                phone TEXT UNIQUE NOT NULL, \
+                username TEXT UNIQUE, \
+                first_name TEXT, \
+                last_name TEXT, \
+                password_hash TEXT, \
+                created_at INTEGER NOT NULL, \
+                avatar_color TEXT NOT NULL DEFAULT '#89b4fa')",
+        )
+        .await?;
+        self.exec(
+            "CREATE TABLE IF NOT EXISTS phone_codes (\
+                phone TEXT PRIMARY KEY, \
+                code TEXT NOT NULL, \
+                expires_at INTEGER NOT NULL, \
+                attempts INTEGER NOT NULL DEFAULT 0)",
         )
         .await?;
         self.exec(
             "CREATE TABLE IF NOT EXISTS chats (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
-                name TEXT NOT NULL, \
-                owner_id INTEGER NOT NULL, \
+                server_id TEXT UNIQUE NOT NULL, \
+                kind TEXT NOT NULL, \
+                title TEXT, \
+                owner_id INTEGER, \
                 created_at INTEGER NOT NULL)",
         )
         .await?;
@@ -170,6 +192,26 @@ impl Db {
         // Индексы для частых выборок
         self.exec("CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id)").await?;
         self.exec("CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id)").await?;
+        Ok(())
+    }
+
+    /// Есть ли в таблице users колонка server_id (т.е. актуальна ли схема v2).
+    /// Таблицы может вообще не быть — тогда тоже false.
+    async fn users_has_server_id(&self) -> AppResult<bool> {
+        let rows = self.query_rows("PRAGMA table_info(users)", &[]).await?;
+        Ok(rows.iter().any(|r| r.get("name").and_then(|v| v.as_str()) == Some("server_id")))
+    }
+
+    /// Миграция схемы авторизации v2 (телефоны, server_id, типы чатов).
+    /// Честно: это учебный проект, сброс данных допустим — старую схему v1
+    /// (username-логин, name-чаты) мигрировать содержательно невозможно,
+    /// поэтому таблицы DROP'аются в порядке зависимостей и создаются заново
+    /// обычным migrate() ниже.
+    pub async fn migrate_auth_v2(&self) -> AppResult<()> {
+        for t in ["messages", "chat_members", "chats", "phone_codes", "users"] {
+            // Имя таблицы — литерал из кода, не пользовательский ввод: SQL-инъекции нет
+            self.exec(&format!("DROP TABLE IF EXISTS {t}")).await?;
+        }
         Ok(())
     }
 }

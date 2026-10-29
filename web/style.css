@@ -45,7 +45,7 @@ button:hover {
   color: #11111b;
 }
 
-/* ---------- Экран авторизации ---------- */
+/* ---------- Экран авторизации (wizard) ---------- */
 #auth-screen {
   display: flex;
   align-items: center;
@@ -53,18 +53,26 @@ button:hover {
   min-height: 100vh;
   padding: 16px;
 }
-#auth-form {
-  width: 360px;
+.auth-card {
+  width: 380px;
   max-width: 100%;
   padding: 24px;
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+}
+#auth-screen [id^="auth-step-"] {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  animation: fade .2s;
 }
-#auth-form h1 {
+#auth-screen [id^="auth-step-"][hidden] { display: none; }
+@keyframes fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; }
+}
+#auth-screen h1 {
   margin: 0 0 8px;
   font-size: 26px;
   text-align: center;
@@ -73,21 +81,62 @@ button:hover {
   background-clip: text;
   color: transparent;
 }
-#auth-submit { font-weight: 600; }
-#auth-toggle {
+#auth-screen p { margin: 0; color: var(--muted); font-size: 14px; }
+#auth-screen a {
   text-align: center;
   color: var(--muted);
   font-size: 13px;
   text-decoration: none;
   transition: .15s;
 }
-#auth-toggle:hover { color: var(--accent); }
+#auth-screen a:hover { color: var(--accent); }
+.username-row { display: flex; align-items: center; gap: 2px; }
+.at-prefix { color: var(--muted); font-weight: 600; }
+#username-status.ok { color: var(--ok); font-size: 12px; }
+#username-status.busy { color: var(--danger); font-size: 12px; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+#profile-finish:disabled { opacity: .5; cursor: not-allowed; }
+#profile-finish:disabled:hover { background: inherit; color: inherit; }
 #auth-error {
   color: var(--danger);
   font-size: 13px;
   text-align: center;
   min-height: 18px;
+  margin-top: 8px;
 }
+
+/* ---------- Модалка профиля ---------- */
+#profile-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+#profile-modal[hidden] { display: none; }
+.modal-card {
+  background: var(--panel);
+  padding: 24px;
+  border-radius: 12px;
+  min-width: 320px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.modal-card h2 { margin: 0 0 6px; font-size: 20px; }
+.modal-card p { margin: 0; color: var(--muted); font-size: 14px; }
+.modal-card a { color: var(--accent); word-break: break-all; }
+code {
+  font-family: ui-monospace, monospace;
+  background: var(--panel-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.side-actions { display: flex; gap: 6px; }
 
 /* ---------- Основной экран ---------- */
 #app-screen {
@@ -141,6 +190,7 @@ button:hover {
   text-overflow: ellipsis;
 }
 .chat-item:hover { background: var(--panel-2); }
+.chat-item small { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
 .chat-item.active {
   background: var(--accent);
   color: #11111b;

@@ -1,25 +1,25 @@
 // CipherTalk — клиент мессенджера: REST + WebSocket, без фреймворков.
+// Авторизация v2: телефон -> (код из лога | пароль) -> профиль/username/пароль.
 "use strict";
 
 // ─── Глобальное состояние приложения ────────────────────────────────
 const S = {
-  token: null,        // JWT из localStorage
-  userId: null,       // id текущего пользователя
-  username: "",       // имя текущего пользователя
-  currentChatId: null,// открытый сейчас чат
-  ws: null,           // WebSocket-соединение
-  wsClosed: true,     // флаг «закрыто намеренно» (при logout не переподключаемся)
-  mode: "login",      // "login" | "register" — режим формы авторизации
-  chats: [],          // список чатов пользователя
+  token: null,         // JWT из localStorage
+  user: null,          // {id, server_id, username, first_name, ...}
+  currentChatId: null, // открытый сейчас чат (внутренний i64 id)
+  ws: null,            // WebSocket-соединение
+  wsClosed: true,      // флаг «закрыто намеренно» (при logout не переподключаемся)
+  phone: null,         // нормализованный номер на шагах wizard
+  code: null,          // подтверждённый код для finish_register
+  chats: [],           // список чатов пользователя
 };
 
-// Короткие ссылки на DOM-элементы
 const $ = (id) => document.getElementById(id);
 
-// ─── Хранилище токена ───────────────────────────────────────────────
+// ─── Хранилище сессии ───────────────────────────────────────────────
 function saveSession() {
   localStorage.setItem("ct_token", S.token || "");
-  localStorage.setItem("ct_user", JSON.stringify({ id: S.userId, username: S.username }));
+  localStorage.setItem("ct_user", JSON.stringify(S.user || null));
 }
 function clearSession() {
   localStorage.removeItem("ct_token");
@@ -31,9 +31,9 @@ function restoreSession() {
   if (!token || !raw) return false;
   try {
     const u = JSON.parse(raw);
+    if (!u || !u.id) return false;
     S.token = token;
-    S.userId = u.id;
-    S.username = u.username;
+    S.user = u;
     return true;
   } catch {
     return false;
@@ -42,17 +42,20 @@ function restoreSession() {
 
 // ─── Обёртка над fetch ──────────────────────────────────────────────
 // Добавляет Bearer-токен, разбирает JSON-ошибки вида {error:"..."} и бросает Error.
+// err.status — HTTP-код (нужен для разлогина при 401).
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (S.token) headers["Authorization"] = "Bearer " + S.token;
   const res = await fetch(path, { ...opts, headers });
   if (!res.ok) {
     let msg = res.statusText;
+    const err = new Error(msg);
+    err.status = res.status;
     try {
       const data = await res.json();
-      if (data && data.error) msg = data.error;
+      if (data && data.error) err.message = data.error;
     } catch {}
-    throw new Error(msg || "Ошибка сервера");
+    throw err;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -69,47 +72,172 @@ function toast(text, ok = false) {
   toastTimer = setTimeout(() => (t.hidden = true), 3500);
 }
 
-// ─── Авторизация ────────────────────────────────────────────────────
-$("auth-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const errEl = $("auth-error");
-  errEl.textContent = "";
-  const username = $("username").value.trim();
-  const password = $("password").value;
-  if (!username || !password) {
-    errEl.textContent = "Заполните имя пользователя и пароль";
-    return;
-  }
-  const path = S.mode === "login" ? "/api/login" : "/api/register";
+// ─── Wizard авторизации: переключение шагов ─────────────────────────
+const AUTH_STEPS = ["auth-step-phone", "auth-step-password", "auth-step-code", "auth-step-profile"];
+function showStep(id) {
+  for (const s of AUTH_STEPS) $(s).hidden = s !== id;
+  $("auth-error").textContent = "";
+}
+function authError(msg) { $("auth-error").textContent = msg; }
+
+// Нормализация номера как на сервере: цифры/+7, убираем пробелы, скобки, дефисы
+function normalizePhone(raw) {
+  let c = (raw || "").replace(/[ ()\-\u00A0]/g, "");
+  if (c.startsWith("+")) return c;
+  if (c.startsWith("8")) return "+7" + c.slice(1);
+  return "+" + c;
+}
+
+// Шаг 1: номер телефона -> POST /api/auth/start
+$("phone-next").addEventListener("click", async () => {
+  authError("");
+  const phone = normalizePhone($("phone").value.trim());
+  if (phone.length < 9) { authError("Введите номер телефона полностью"); return; }
   try {
-    const resp = await api(path, { method: "POST", body: JSON.stringify({ username, password }) });
-    S.token = resp.token;
-    S.userId = resp.user_id;
-    S.username = username;
-    saveSession();
-    enterApp();
+    const resp = await api("/api/auth/start", { method: "POST", body: JSON.stringify({ phone }) });
+    S.phone = phone;
+    if (resp.registered) {
+      // Зарегистрированный номер — сразу экран пароля
+      $("pwd-phone").textContent = phone;
+      showStep("auth-step-password");
+      $("password").focus();
+    } else if (resp.needs_code) {
+      // Новый номер — экран кода (код в логе сервера)
+      $("code-phone").textContent = phone;
+      showStep("auth-step-code");
+      $("code").focus();
+    }
   } catch (err) {
-    errEl.textContent = err.message;
+    authError(err.message);
+  }
+});
+$("phone").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("phone-next").click(); }});
+
+// Возврат к экрану номера
+for (const [btn] of [["back-phone"], ["back-phone-2"]]) {
+  $(btn).addEventListener("click", (e) => { e.preventDefault(); showStep("auth-step-phone"); });
+}
+
+// Экран пароля (зарегистрированный пользователь): POST /api/auth/login
+$("password-next").addEventListener("click", async () => {
+  authError("");
+  const password = $("password").value;
+  if (!password) { authError("Введите пароль"); return; }
+  try {
+    const resp = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ phone: S.phone, password }),
+    });
+    onAuthOk(resp);
+  } catch (err) {
+    authError(err.message);
+  }
+});
+$("password").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("password-next").click(); }});
+
+// Шаг 2: ввод кода -> POST /api/auth/verify
+$("code-next").addEventListener("click", async () => {
+  authError("");
+  const code = $("code").value.trim();
+  if (!/^\d{6}$/.test(code)) { authError("Код — 6 цифр"); return; }
+  try {
+    await api("/api/auth/verify", { method: "POST", body: JSON.stringify({ phone: S.phone, code }) });
+    S.code = code;
+    showStep("auth-step-profile");
+    $("first-name").focus();
+  } catch (err) {
+    authError(err.message);
+  }
+});
+$("code").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("code-next").click(); }});
+
+// Шаг 4: @username с debounce 400мс -> GET /api/auth/check-username
+let unameTimer = null;
+let unameOk = false;
+$("username").addEventListener("input", () => {
+  clearTimeout(unameTimer);
+  unameOk = false;
+  updateFinishState();
+  const u = $("username").value.trim().replace(/^@/, "");
+  const st = $("username-status");
+  if (!u) { st.textContent = ""; st.className = ""; return; }
+  st.textContent = "проверяю…";
+  st.className = "";
+  unameTimer = setTimeout(async () => {
+    try {
+      const r = await api("/api/auth/check-username?username=" + encodeURIComponent(u));
+      if ($("username").value.trim().replace(/^@/, "") !== u) return; // устаревший ответ
+      unameOk = !!r.available;
+      st.textContent = r.available ? "свободен" : (r.reason || "занят");
+      st.className = r.available ? "ok" : "busy";
+      updateFinishState();
+    } catch (err) {
+      st.textContent = err.message; st.className = "busy";
+    }
+  }, 400);
+});
+
+// Кнопка «Зарегистрироваться» активна, только когда username свободен
+function updateFinishState() {
+  $("profile-finish").disabled = !unameOk;
+}
+
+// Шаги 3–5: завершение регистрации -> POST /api/auth/finish
+$("profile-finish").addEventListener("click", async () => {
+  authError("");
+  const first_name = $("first-name").value.trim();
+  const lastRaw = $("last-name").value.trim();
+  const username = $("username").value.trim().replace(/^@/, "");
+  const password = $("new-password").value;
+  const password_repeat = $("new-password-repeat").value;
+  if (!first_name) { authError("Имя обязательно"); return; }
+  if (password.length < 8) { authError("Пароль минимум 8 символов"); return; }
+  if (password !== password_repeat) { authError("Пароли не совпадают"); return; }
+  const body = { phone: S.phone, code: S.code, first_name, username, password, password_repeat };
+  if (lastRaw) body.last_name = lastRaw; // пустую фамилию не передаём
+  try {
+    const resp = await api("/api/auth/finish", { method: "POST", body: JSON.stringify(body) });
+    onAuthOk(resp);
+  } catch (err) {
+    authError(err.message);
   }
 });
 
-// Переключение login <-> register по ссылке
-$("auth-toggle").addEventListener("click", (e) => {
-  e.preventDefault();
-  S.mode = S.mode === "login" ? "register" : "login";
-  $("auth-submit").textContent = S.mode === "login" ? "Войти" : "Зарегистрироваться";
-  $("auth-toggle").textContent =
-    S.mode === "login" ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти";
-  $("auth-error").textContent = "";
-});
+// Успешная авторизация: сохранить сессию и войти (учитывая pending-ссылку)
+function onAuthOk(resp) {
+  S.token = resp.token;
+  S.user = resp.user;
+  saveSession();
+  enterApp();
+  // Если пользователь пришёл по ссылке /00000001 или /-0000... — открыть её после входа
+  if (window.__pendingRef) {
+    const ref = window.__pendingRef;
+    window.__pendingRef = null;
+    setTimeout(() => handleServerRef(ref).catch((e) => toast(e.message)), 300);
+  }
+}
 
 // ─── Вход в приложение ─────────────────────────────────────────────
 async function enterApp() {
   $("auth-screen").hidden = true;
   $("app-screen").hidden = false;
-  $("me-name").textContent = S.username;
-  await loadChats().catch((e) => toast("Не удалось загрузить чаты: " + e.message));
+  renderMeName();
+  try {
+    await loadChats();
+  } catch (e) {
+    if (e.status === 401) return logout();
+    toast("Не удалось загрузить чаты: " + e.message);
+  }
   connectWs();
+  // Автоматически открываем saved-чат («Избранное»)
+  const saved = S.chats.find((c) => c.kind === "saved");
+  if (saved) openChat(saved.id);
+}
+
+function renderMeName() {
+  if (!S.user) return;
+  const name = S.user.first_name || S.user.username || S.user.server_id;
+  $("me-name").textContent = S.user.username ? `${name} · @${S.user.username}` : name;
 }
 
 // ─── Чаты ───────────────────────────────────────────────────────────
@@ -118,61 +246,95 @@ async function loadChats() {
   renderChats();
 }
 
+// Подпись чата для списка и заголовка
+function chatLabel(chat) {
+  if (chat.kind === "saved") return "Избранное";
+  if (chat.title) return chat.title;
+  return `Чат #${chat.server_id}`;
+}
+
 function renderChats() {
   const list = $("chats-list");
   list.textContent = "";
   if (!S.chats.length) {
     const empty = document.createElement("div");
     empty.className = "chats-empty";
-    empty.textContent = "Пока нет чатов — создайте новый";
+    empty.textContent = "Пока нет чатов — создайте группу";
     list.appendChild(empty);
   }
   for (const chat of S.chats) {
     const item = document.createElement("div");
     item.className = "chat-item" + (chat.id === S.currentChatId ? " active" : "");
     item.dataset.id = chat.id;
-    item.textContent = `${chat.name} · #${chat.id}`;
+    const title = document.createElement("span");
+    title.textContent = chatLabel(chat);
+    const sid = document.createElement("small");
+    sid.textContent = chat.server_id;
+    item.appendChild(title);
+    item.appendChild(sid);
     item.addEventListener("click", () => openChat(chat.id));
     list.appendChild(item);
   }
 }
 
-// Создание чата: POST /api/chats {name} -> {chat_id}
+// Создание группы: POST /api/chats/group {kind:"group", title}
 $("create-chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const name = $("new-chat-name").value.trim();
-  if (!name) return;
+  const title = $("new-chat-name").value.trim();
+  if (!title) return;
   try {
-    const resp = await api("/api/chats", { method: "POST", body: JSON.stringify({ name }) });
+    const chat = await api("/api/chats/group", {
+      method: "POST",
+      body: JSON.stringify({ kind: "group", title }),
+    });
     $("new-chat-name").value = "";
     await loadChats();
-    openChat(resp.chat_id);
+    openChat(chat.id);
   } catch (err) {
-    toast("Создание чата: " + err.message);
+    toast("Создание группы: " + err.message);
   }
 });
 
-// Вступление в чат по ID: POST /api/chats/:id/join
+// Вступление/открытие по ID: внутреннему, server_id пользователя или группы
 $("join-chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const id = parseInt($("join-chat-id").value, 10);
-  if (!Number.isFinite(id)) return;
+  const raw = $("join-chat-id").value.trim().replace(/^\//, "");
+  if (!raw) return;
+  $("join-chat-id").value = "";
   try {
-    await api(`/api/chats/${id}/join`, { method: "POST" });
-    $("join-chat-id").value = "";
-    toast("Вы вступили в чат #" + id, true);
-    await loadChats();
-    openChat(id);
+    await handleServerRef(raw);
   } catch (err) {
-    toast("Вступление в чат: " + err.message);
+    toast(err.message);
   }
 });
+
+// Разбор ссылки: 8 цифр -> пользователь (dm/saved), -14 цифр -> чат (join)
+async function handleServerRef(ref) {
+  if (/^\d{8}$/.test(ref)) {
+    const user = await api(`/api/users/${ref}`);
+    const chat = await api("/api/chats/dm", { method: "POST", body: JSON.stringify({ user_id: user.id }) });
+    if (!S.chats.some((c) => c.id === chat.id)) await loadChats();
+    openChat(chat.id);
+  } else if (/^-\d{14}$/.test(ref)) {
+    const chat = await api(`/api/chats/by-id/${ref}`);
+    await api(`/api/chats/${chat.id}/join`, { method: "POST" }); // идемпотентно
+    if (!S.chats.some((c) => c.id === chat.id)) await loadChats();
+    openChat(chat.id);
+  } else {
+    // Возможно, старый внутренний числовой id
+    const id = parseInt(ref, 10);
+    if (!Number.isFinite(id)) throw new Error("Неверный формат ID");
+    await api(`/api/chats/${id}/join`, { method: "POST" });
+    await loadChats();
+    openChat(id);
+  }
+}
 
 // Открытие чата: загрузка истории + подписка по WS
 async function openChat(id) {
   S.currentChatId = id;
   const chat = S.chats.find((c) => c.id === id);
-  $("chat-title").textContent = chat ? `${chat.name} · #${chat.id}` : `Чат #${id}`;
+  $("chat-title").textContent = chat ? chatLabel(chat) : "Чат";
   $("send-form").hidden = false;
   $("messages").textContent = "";
   renderChats(); // подсветить активный элемент
@@ -181,6 +343,7 @@ async function openChat(id) {
     msgs.forEach(appendMessage);
     scrollToBottom();
   } catch (err) {
+    if (err.status === 401) return logout();
     toast("История сообщений: " + err.message);
   }
   // Подписываемся на события чата по WebSocket
@@ -214,7 +377,7 @@ $("send-form").addEventListener("submit", async (e) => {
 // Добавление одного сообщения в ленту (textContent — защита от XSS)
 function appendMessage(m) {
   const div = document.createElement("div");
-  div.className = "msg " + (m.user_id === S.userId ? "me" : "other");
+  div.className = "msg " + (m.user_id === (S.user && S.user.id) ? "me" : "other");
   const author = document.createElement("div");
   author.className = "msg-author";
   author.textContent = `${m.username} · ${formatTime(m.created_at)}`;
@@ -241,6 +404,7 @@ function formatTime(ts) {
 
 // ─── WebSocket ──────────────────────────────────────────────────────
 function connectWs() {
+  if (!S.token) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(S.token)}`);
   S.ws = ws;
@@ -270,32 +434,71 @@ function connectWs() {
   };
 }
 
+// ─── Профиль (модалка) ──────────────────────────────────────────────
+$("profile-btn").addEventListener("click", () => {
+  if (!S.user) return;
+  $("profile-server-id").textContent = S.user.server_id;
+  $("profile-username").textContent = S.user.username || "";
+  const link = `${location.origin}/${S.user.server_id}`;
+  const a = $("profile-link");
+  a.href = link;
+  a.textContent = link;
+  $("profile-modal").hidden = false;
+});
+$("profile-close").addEventListener("click", () => ($("profile-modal").hidden = true));
+
 // ─── Logout ─────────────────────────────────────────────────────────
-$("logout").addEventListener("click", () => {
+function logout() {
   S.wsClosed = true;
   if (S.ws) S.ws.close();
   clearSession();
   S.token = null;
-  S.userId = null;
-  S.username = "";
+  S.user = null;
   S.currentChatId = null;
   S.chats = [];
   $("app-screen").hidden = true;
   $("app-screen").classList.remove("mobile-chat-open");
+  $("profile-modal").hidden = true;
   $("auth-screen").hidden = false;
   $("messages").textContent = "";
   $("send-form").hidden = true;
   $("chat-title").textContent = "Выбери чат";
-});
+  showStep("auth-step-phone");
+}
+$("logout").addEventListener("click", logout);
 
 // Кнопка «назад» в мобильной раскладке
 $("back-btn").addEventListener("click", () => {
   $("app-screen").classList.remove("mobile-chat-open");
 });
 
-// ─── Старт: если токен сохранён — сразу в приложение ───────────────
-if (restoreSession()) {
-  enterApp();
-} else {
-  $("auth-screen").hidden = false;
-}
+// ─── Старт: восстановление сессии + обработка deep-ссылок ───────────
+// /00000001 — пользователь, /-00000000000001 — группа/канал.
+// Ссылку запоминаем всегда; применям после входа (или сразу, если сессия есть).
+(function captureDeepLink() {
+  const m = location.pathname.match(/^\/(\d{8})$/);
+  const g = location.pathname.match(/^\/(-\d{14})$/);
+  if (m || g) {
+    window.__pendingRef = (m || g)[1];
+    history.replaceState(null, "", "/"); // URL чистый, ссылка будет обработана
+  }
+})();
+
+(async function boot() {
+  if (restoreSession()) {
+    await enterApp();
+    if (window.__pendingRef) {
+      const ref = window.__pendingRef;
+      window.__pendingRef = null;
+      try {
+        await handleServerRef(ref);
+      } catch (err) {
+        if (err.status === 401) logout();
+        else toast(err.status === 404 ? (/^\d{8}$/.test(ref) ? "Пользователь не найден" : "Чат не найден") : err.message);
+      }
+    }
+  } else {
+    showStep("auth-step-phone");
+    $("phone").focus();
+  }
+})();

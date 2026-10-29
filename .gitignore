@@ -1,2 +1,2 @@
-data-rqlite/
-rqlited
+target/
+*.log
