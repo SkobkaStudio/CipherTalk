@@ -1,0 +1,29 @@
+[package]
+name = "ciphertalk-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+tower = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonwebtoken = "9"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+hmac = { version = "0.12", default-features = false }
+hex = "0.4"
+rand = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+dotenvy = "0.15"
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio-tungstenite = "0.21"
