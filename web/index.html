@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     CipherTalk — главная страница мессенджера.
+     Два экрана: экран авторизации (логин/регистрация)
+     и основной интерфейс (список чатов + окно сообщений).
+     ============================================================ -->
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CipherTalk — защищённый мессенджер</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ========== ЭКРАН АВТОРИЗАЦИИ ========== -->
+    <div id="authScreen" class="auth-screen">
+        <div class="auth-card">
+            <div class="logo">
+                <span class="logo-icon">🔒</span>
+                <h1>CipherTalk</h1>
+                <p class="tagline">Защищённый мессенджер реального времени</p>
+            </div>
+
+            <!-- Переключатель вкладки: вход / регистрация -->
+            <div class="tabs">
+                <button id="tabLogin" class="tab active">Вход</button>
+                <button id="tabRegister" class="tab">Регистрация</button>
+            </div>
+
+            <form id="authForm" autocomplete="off">
+                <label class="field">
+                    <span>Логин</span>
+                    <input type="text" id="username" placeholder="например, alice" required>
+                </label>
+                <label class="field" id="displayNameField" style="display:none;">
+                    <span>Отображаемое имя</span>
+                    <input type="text" id="displayName" placeholder="Алиса (необязательно)">
+                </label>
+                <label class="field">
+                    <span>Пароль</span>
+                    <input type="password" id="password" placeholder="минимум 6 символов" required>
+                </label>
+                <div id="authError" class="auth-error"></div>
+                <button type="submit" id="authSubmit" class="btn-primary">Войти</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ========== ОСНОВНОЙ ИНТЕРФЕЙС ========== -->
+    <div id="mainScreen" class="main-screen hidden">
+
+        <!-- Левая панель: профиль, список чатов, пользователи -->
+        <aside class="sidebar">
+            <header class="sidebar-header">
+                <div class="avatar" id="myAvatar">?</div>
+                <div class="me-info">
+                    <div class="me-name" id="myName">—</div>
+                    <div class="ws-status" id="wsStatus">подключение…</div>
+                </div>
+                <button id="logoutBtn" class="btn-icon" title="Выйти">⎋</button>
+            </header>
+
+            <div class="search-box">
+                <input type="text" id="userSearch" placeholder="Найти пользователя и начать чат…">
+                <div id="userResults" class="user-results hidden"></div>
+            </div>
+
+            <nav class="chat-list" id="chatList">
+                <!-- Чаты рендерятся из app.js -->
+            </nav>
+        </aside>
+
+        <!-- Правая панель: окно переписки -->
+        <main class="chat-area">
+            <div id="emptyState" class="empty-state">
+                <div class="empty-icon">💬</div>
+                <p>Выберите чат слева или начните новый<br>через поиск пользователей</p>
+            </div>
+
+            <div id="chatView" class="chat-view hidden">
+                <header class="chat-header">
+                    <div class="avatar chat-avatar" id="chatAvatar">?</div>
+                    <div>
+                        <div class="chat-title" id="chatTitle">—</div>
+                        <div class="chat-sub" id="chatSub"></div>
+                    </div>
+                </header>
+
+                <div class="messages" id="messages"></div>
+
+                <form class="composer" id="messageForm" autocomplete="off">
+                    <input type="text" id="messageInput" placeholder="Написать сообщение…" maxlength="4000">
+                    <button type="submit" class="btn-send" title="Отправить">➤</button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
