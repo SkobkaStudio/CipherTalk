@@ -18,7 +18,7 @@ use axum::Router;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// Проверка живости: GET /healthz -> "ok"
 async fn healthz() -> &'static str {
@@ -64,29 +64,31 @@ async fn main() {
 
     // Публичная часть API (без JWT)
     let public = Router::new()
-        .route("/api/register", post(controllers::auth::register))
-        .route("/api/login", post(controllers::auth::login));
+        .route("/register", post(controllers::auth::register))
+        .route("/login", post(controllers::auth::login));
 
     // Защищённая часть API: мидлварь require_auth проверяет Bearer JWT
+    // и кладёт Claims в request.extensions — контроллеры читают их через Extension<Claims>.
     let protected = Router::new()
-        .route("/api/chats", get(controllers::chats::list).post(controllers::chats::create))
-        .route("/api/chats/:id/join", post(controllers::chats::join))
+        .route("/chats", get(controllers::chats::list).post(controllers::chats::create))
+        .route("/chats/:id/join", post(controllers::chats::join))
         .route(
-            "/api/chats/:id/messages",
+            "/chats/:id/messages",
             get(controllers::messages::list).post(controllers::messages::send),
         )
-        .layer(axum::middleware::from_fn_with_state(
+        .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::require_auth,
         ));
 
+    // Статика фронтенда: неизвестные пути отдают index.html (SPA-роутинг)
+    let static_files = ServeDir::new("web").not_found_service(ServeFile::new("web/index.html"));
+
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler))
-        .merge(public)
-        .merge(protected)
-        // Статика фронтенда из web/ (index.html, app.js, style.css)
-        .fallback_service(ServeDir::new("web"))
+        .nest("/api", Router::new().merge(public).merge(protected))
+        .fallback_service(static_files)
         // CORS: разрешаем всё — фронтенд может открываться с file:// или другого порта
         .layer(CorsLayer::permissive())
         .with_state(state.clone());

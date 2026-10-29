@@ -67,8 +67,14 @@ impl Db {
     }
 
     /// Внутренний POST {RQLITE_URL}/db/execute с телом [[sql, p1, p2, ...]].
+    /// rqlite ожидает плоский массив: параметры идут сразу после SQL-строки,
+    /// поэтому params "разворачивается" в сам стейтмент (вложенный массив он не принимает).
     async fn exec_inner(&self, sql: &str, params: Value) -> AppResult<()> {
-        let body = json!([[sql, params]]);
+        let mut stmt = vec![json!(sql)];
+        if let Value::Array(ps) = params {
+            stmt.extend(ps);
+        }
+        let body = json!([stmt]);
         let url = format!("{}/db/execute?timings", self.base_url);
         let resp = self
             .client
@@ -90,8 +96,11 @@ impl Db {
     }
 
     /// Чтение: POST {RQLITE_URL}/db/query, ответ — сырой JSON rqlite.
+    /// Параметры, как и в execute, передаются плоским списком сразу после SQL.
     pub async fn query(&self, sql: &str, params: &[Value]) -> AppResult<Value> {
-        let body = json!([[sql, params]]);
+        let mut stmt = vec![json!(sql)];
+        stmt.extend(params.iter().cloned());
+        let body = json!([stmt]);
         let url = format!("{}/db/query?timings", self.base_url);
         let resp = self
             .client
@@ -128,7 +137,7 @@ impl Db {
     pub async fn migrate(&self) -> AppResult<()> {
         self.exec(
             "CREATE TABLE IF NOT EXISTS users (\
-                id INTEGER PRIMARY KEY, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 username TEXT UNIQUE NOT NULL, \
                 password_hash TEXT NOT NULL, \
                 created_at INTEGER NOT NULL)",
@@ -136,7 +145,7 @@ impl Db {
         .await?;
         self.exec(
             "CREATE TABLE IF NOT EXISTS chats (\
-                id INTEGER PRIMARY KEY, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 name TEXT NOT NULL, \
                 owner_id INTEGER NOT NULL, \
                 created_at INTEGER NOT NULL)",
@@ -151,7 +160,7 @@ impl Db {
         .await?;
         self.exec(
             "CREATE TABLE IF NOT EXISTS messages (\
-                id INTEGER PRIMARY KEY, \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
                 chat_id INTEGER NOT NULL, \
                 user_id INTEGER NOT NULL, \
                 body TEXT NOT NULL, \
