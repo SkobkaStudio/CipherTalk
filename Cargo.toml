@@ -1,0 +1,28 @@
+# Манифест проекта мессенджера на Rust (axum + tokio + rqlite)
+[package]
+name = "messenger"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async-рантайм
+tokio = { version = "1", features = ["full"] }
+# HTTP / WebSocket сервер
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+# HTTP-клиент к rqlite (rustls — без openssl)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Сериализация
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# JWT HS256
+jsonwebtoken = "9"
+# Аргон2-хеширование паролей
+argon2 = "0.5"
+# Генерация случайных данных (salt, секрет JWT)
+rand = "0.8"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = "0.3"
