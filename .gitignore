@@ -1,3 +1,6 @@
-data-rqlite/*.db
-data-rqlite/*.db-shm
-data-rqlite/*.db-wal
+data-rqlite/db.sqlite
+data-rqlite/db.sqlite-shm
+data-rqlite/db.sqlite-wal
+data-rqlite/raft.db
+data-rqlite/clean_snapshot
+data-rqlite/wsnapshots/
