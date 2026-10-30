@@ -93,7 +93,7 @@ function normalizePhone(raw) {
 // в красивый формат "+7 (999) 123-45-67". Сырые цифры храним в dataset.digits,
 // поэтому маска не мешает серверной нормализации (normalizePhone).
 
-/// Красивый вывод до 11 цифр в российском формате.
+// Красивый вывод до 11 цифр в российском формате.
 function prettyPhone(d) {
   if (!d) return "";
   let out = "+" + d[0];                       // первая цифра (7 или 8)
@@ -105,8 +105,8 @@ function prettyPhone(d) {
   return out;
 }
 
-/// Перекрасить поле телефона из dataset.digits, сохранив позицию каретки
-/// (пересчитываем индекс: сколько цифр было до курсора → где они в маске).
+// Перекрасить поле телефона из dataset.digits, сохранив позицию каретки
+// (пересчитываем индекс: сколько цифр было до курсора → где они в маске).
 function rerenderPhone(el, keepCaretAfter) {
   const before = el.value;
   const digits = el.dataset.digits || "";
