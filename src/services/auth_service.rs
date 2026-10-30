@@ -76,8 +76,22 @@ pub async fn start_auth(db: &Db, phone_raw: &str) -> AppResult<StartAuthResponse
     if registered {
         return Ok(StartAuthResponse { registered: true, needs_code: false });
     }
-    // Новый (или незавершённый) номер: выдаём одноразовый код, TTL 5 минут
-    let code = server_id::random_code();
+    // Новый (или незавершённый) номер: выдаём одноразовый код, TTL 5 минут.
+    // ВАЖНО: если активный НЕИСТЁКШИЙ код уже есть — переиспользуем его,
+    // а не генерируем новый. Иначе повторный /auth/start (а фронт вызывает
+    // его и перед verify) перезаписывал код во БД, и старый код из лога
+    // перставал быть валидным — пользователь видел «Неверный код» /
+    // «Сначала запросите код», хотя код в логе был.
+    let existing = db
+        .query_rows(
+            "SELECT code FROM phone_codes WHERE phone = ? AND expires_at >= ?",
+            &[json!(&phone), json!(now_ts())],
+        )
+        .await?;
+    let code = match existing.first().and_then(|r| r.get("code")).and_then(|v| v.as_str()) {
+        Some(c) => c.to_string(),
+        None => server_id::random_code(),
+    };
     let expires = now_ts() + 300;
     db.exec_params(
         "INSERT OR REPLACE INTO phone_codes (phone, code, expires_at, attempts) VALUES (?, ?, ?, 0)",

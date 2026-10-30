@@ -88,6 +88,85 @@ function normalizePhone(raw) {
   return "+" + c;
 }
 
+// ─── Маски полей «только цифры» ─────────────────────────────────────
+// В поле номера можно печатать только цифры — они сами превращаются
+// в красивый формат "+7 (999) 123-45-67". Сырые цифры храним в dataset.digits,
+// поэтому маска не мешает серверной нормализации (normalizePhone).
+
+// Красивый вывод до 11 цифр в российском формате.
+function prettyPhone(d) {
+  if (!d) return "";
+  let out = "+" + d[0];                       // первая цифра (7 или 8)
+  if (d.length > 1) out += " (" + d.slice(1, 4);
+  if (d.length >= 4) out += ")";
+  if (d.length > 4) out += " " + d.slice(4, 7);
+  if (d.length > 7) out += "-" + d.slice(7, 9);
+  if (d.length > 9) out += "-" + d.slice(9, 11);
+  return out;
+}
+
+// Перекрасить поле телефона из dataset.digits, сохранив позицию каретки
+// (пересчитываем индекс: сколько цифр было до курсора → где они в маске).
+function rerenderPhone(el, keepCaretAfter) {
+  const before = el.value;
+  const digits = el.dataset.digits || "";
+  el.value = prettyPhone(digits);
+  if (keepCaretAfter) { el.setSelectionRange(el.value.length, el.value.length); return; }
+  // Кол-во цифр слева от курсора в старом значении
+  const pos = el.selectionStart ?? el.value.length;
+  const leftDigits = before.slice(0, pos).replace(/\D/g, "").length;
+  // Позиция в новом значении: после leftDigits-й цифры
+  let seen = 0, caret = el.value.length;
+  for (let i = 0; i < el.value.length; i++) {
+    if (/\d/.test(el.value[i])) { seen++; if (seen === leftDigits) { caret = i + 1; break; } }
+  }
+  if (leftDigits === 0) caret = 0;
+  el.setSelectionRange(caret, caret);
+}
+
+const phoneInput = $("phone");
+// Фильтруем ввод: оставляем только цифры, ведущий 8 меняем на 7 (как на сервере), макс 11
+phoneInput.addEventListener("beforeinput", (e) => {
+  if (e.data != null) {
+    const only = e.data.replace(/\D/g, "");
+    if (only !== e.data) e.preventDefault();          // буквы/символы не набираются
+    if (only) {
+      e.preventDefault();
+      let digits = (phoneInput.dataset.digits || "") + only;
+      if (digits[0] === "8") digits = "7" + digits.slice(1);
+      phoneInput.dataset.digits = digits.slice(0, 11);
+      rerenderPhone(phoneInput, true);
+    }
+  } else if (e.inputType === "deleteContentBackward" || e.inputType === "deleteContentForward") {
+    e.preventDefault();
+    const digits = (phoneInput.dataset.digits || "").slice(0, -1);
+    phoneInput.dataset.digits = digits;
+    rerenderPhone(phoneInput, true);
+  } else if (e.inputType === "insertFromPaste") {
+    e.preventDefault();
+    const data = (e.dataTransfer || {}).getData
+      ? (e.clipboardData || window.clipboardData).getData("text") : "";
+    let digits = (data || "").replace(/\D/g, "").slice(0, 11);
+    if (digits[0] === "8") digits = "7" + digits.slice(1);
+    phoneInput.dataset.digits = digits;
+    rerenderPhone(phoneInput, true);
+  }
+});
+// Страховка на случай IME/автозаполнения: любая лишняя нецифра вычищается
+phoneInput.addEventListener("input", () => {
+  const cleaned = phoneInput.value.replace(/\D/g, "").slice(0, 11);
+  if (cleaned !== (phoneInput.dataset.digits || "")) {
+    phoneInput.dataset.digits = cleaned;
+    phoneInput.value = prettyPhone(cleaned);
+  }
+});
+
+// Поле кода: только цифры, максимум 6
+$("code").addEventListener("input", (e) => {
+  const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+  e.target.value = v;
+});
+
 // Шаг 1: номер телефона -> POST /api/auth/start
 $("phone-next").addEventListener("click", async () => {
   authError("");
@@ -135,7 +214,9 @@ $("password-next").addEventListener("click", async () => {
 });
 $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("password-next").click(); }});
 
-// Шаг 2: ввод кода -> POST /api/auth/verify
+// Шаг 2: ввод кода -> POST /api/auth/verify.
+// Сервер при повторном /auth/start переиспользует неизрасходованный код,
+// так что код из лога остаётся валидным все 5 минут TTL.
 $("code-next").addEventListener("click", async () => {
   authError("");
   const code = $("code").value.trim();
@@ -146,7 +227,18 @@ $("code-next").addEventListener("click", async () => {
     showStep("auth-step-profile");
     $("first-name").focus();
   } catch (err) {
-    authError(err.message);
+    if (err.message === "Неверный код" || err.message === "Сначала запросите код") {
+      // Код мог истечь (TTL 5 мин) — перевыдаём новый и подсказываем пользователю
+      try {
+        await api("/api/auth/start", { method: "POST", body: JSON.stringify({ phone: S.phone }) });
+        $("code").value = "";
+        authError(err.message + ". Новый код отправлен (см. лог сервера).");
+      } catch {
+        authError(err.message);
+      }
+    } else {
+      authError(err.message);
+    }
   }
 });
 $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("code-next").click(); }});
