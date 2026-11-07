@@ -17,7 +17,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Таймаут HTTP-запроса к rqlite.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -149,7 +149,14 @@ impl Db {
     }
 
     /// Создаёт таблицы и индексы, если их ещё нет.
+    ///
+    /// Перед созданием схемы проверяет, не осталась ли в rqlite несовместимая
+    /// схема расширенной ветки (`users.server_id`, `chats.kind`). Такие таблицы
+    /// переименовываются в `*_legacy_<timestamp>`, чтобы приложение запустилось
+    /// и не потеряло старые данные безвозвратно.
     pub async fn init_schema(&self) -> AppResult<()> {
+        self.migrate_legacy_schema().await?;
+
         for statement in SCHEMA {
             self.execute(statement, &[]).await.map_err(|error| {
                 AppError::Database(format!("не удалось применить миграцию: {error}"))
@@ -157,6 +164,72 @@ impl Db {
         }
         tracing::info!("схема БД проверена/создана");
         Ok(())
+    }
+
+    /// Если в БД осталась схема другой версии (например, после запуска
+    /// расширенной ветки), переименовывает её таблицы в архивные.
+    async fn migrate_legacy_schema(&self) -> AppResult<()> {
+        let user_columns = self.column_names("users").await?;
+        let chat_columns = self.column_names("chats").await?;
+
+        let incompatible = user_columns.iter().any(|column| column == "server_id")
+            || chat_columns
+                .iter()
+                .any(|column| column == "server_id" || column == "kind");
+
+        if !incompatible {
+            return Ok(());
+        }
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+
+        tracing::warn!(
+            "в rqlite обнаружена несовместимая схема (users.server_id / chats.kind). \
+             Переименовываю старые таблицы в *_legacy_{suffix} и создаю актуальную схему"
+        );
+
+        // Имена таблиц — константы из кода, не пользовательский ввод.
+        for table in ["messages", "chat_members", "chats", "users"] {
+            if !self.table_exists(table).await? {
+                continue;
+            }
+
+            let archive_table = format!("{table}_legacy_{suffix}");
+            let statement = format!("ALTER TABLE {table} RENAME TO {archive_table}");
+            self.execute(&statement, &[]).await?;
+            tracing::info!("таблица {table} сохранена как {archive_table}");
+        }
+
+        Ok(())
+    }
+
+    /// Возвращает имена колонок таблицы через `PRAGMA table_info`.
+    async fn column_names(&self, table: &str) -> AppResult<Vec<String>> {
+        // `PRAGMA` не принимает параметр в имени таблицы, но здесь только
+        // фиксированные имена из кода — конкатенации пользовательских данных нет.
+        let statement = match table {
+            "users" => "PRAGMA table_info(users)",
+            "chats" => "PRAGMA table_info(chats)",
+            _ => return Ok(Vec::new()),
+        };
+
+        let rows = self.query(statement, &[]).await?;
+        Ok(rows.iter().filter_map(|row| row.string("name")).collect())
+    }
+
+    /// Проверяет наличие таблицы в SQLite.
+    async fn table_exists(&self, table: &str) -> AppResult<bool> {
+        let row = self
+            .query_one(
+                "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?",
+                &[Value::String(table.to_string())],
+            )
+            .await?;
+
+        Ok(row.and_then(|row| row.i64("n")).unwrap_or(0) > 0)
     }
 
     /// Выполняет один SQL-запрос без возврата строк.
