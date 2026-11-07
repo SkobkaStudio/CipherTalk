@@ -19,10 +19,22 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tracing_subscriber::fmt::time::FormatTime;
 
 /// Проверка живости: GET /healthz -> "ok"
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// Время в логах — локальное время процесса (часовой пояс сервера, например
+/// +07:00), а не UTC: стандартный форматтер tracing-subscriber печатает UTC,
+/// из-за чего логи «отстают» на смещение пояса.
+struct LocalTimer;
+
+impl FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+    }
 }
 
 #[tokio::main]
@@ -33,6 +45,7 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info".into()),
         )
+        .with_timer(LocalTimer)
         .init();
 
     let cfg = Config::from_env();

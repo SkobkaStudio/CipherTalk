@@ -27,5 +27,7 @@ regex = "1"
 base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Локальное время в логах (часовой пояс сервера вместо UTC)
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = "0.3"
 once_cell = "1.21.4"

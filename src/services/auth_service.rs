@@ -149,7 +149,23 @@ fn validate_username(raw: &str) -> AppResult<String> {
 /// проверяем ещё раз (защита от прямого вызова endpoint'а), создаём
 /// пользователя, его saved-чат («Избранное») и выдаём JWT.
 pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest) -> AppResult<AuthResponse> {
-    verify_code(db, &req.phone, &req.code).await?;
+    let phone = normalize_phone(&req.phone);
+    // Номер могли зарегистрировать, пока пользователь заполнял профиль (вторая
+    // вкладка/устройство). После успешной регистрации код удаляется, поэтому
+    // verify_code ниже ответил бы невнятным «Сначала запросите код» — проверяем
+    // регистрацию заранее и отправляем такого пользователя на вход по паролю.
+    let already = db
+        .query_rows("SELECT password_hash FROM users WHERE phone = ?", &[json!(&phone)])
+        .await?
+        .first()
+        .map(|r| r.get("password_hash").and_then(|v| v.as_str()).is_some())
+        .unwrap_or(false);
+    if already {
+        return Err(AppError::Conflict(
+            "Этот номер уже зарегистрирован — войдите с паролем".into(),
+        ));
+    }
+    verify_code(db, &phone, &req.code).await?;
 
     // Имя обязательно, фамилия опциональна
     let first = req.first_name.trim();
@@ -173,7 +189,6 @@ pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest)
         return Err(AppError::BadRequest("Пароли не совпадают".into()));
     }
     let hash = password::hash_password(&req.password)?;
-    let phone = normalize_phone(&req.phone);
     let server = server_id::next_user_server_id(db).await?;
     let color = server_id::avatar_color_for(&server);
     let ts = now_ts();

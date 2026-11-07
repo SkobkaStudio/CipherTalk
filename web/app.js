@@ -80,6 +80,35 @@ function showStep(id) {
 }
 function authError(msg) { $("auth-error").textContent = msg; }
 
+// Ошибки сервера, означающие, что сохранённого кода больше нет: истёк TTL,
+// исчерпан лимит попыток или сервер перезапускался (таблица phone_codes сброшена).
+function isCodeGone(msg) {
+  return msg === "Сначала запросите код"
+    || msg === "Код истёк, запросите новый"
+    || msg === "Слишком много попыток, запросите новый код";
+}
+
+// Запросить код заново и вернуться на шаг его ввода. Поля профиля при этом
+// не очищаются — после подтверждения кода пользователь вернётся к ним.
+async function resendCode(message) {
+  if (!S.phone) {
+    showStep("auth-step-phone");
+    authError("Введите номер телефона заново");
+    return;
+  }
+  try {
+    await api("/api/auth/start", { method: "POST", body: JSON.stringify({ phone: S.phone }) });
+    S.code = null;
+    $("code").value = "";
+    $("code-phone").textContent = S.phone;
+    showStep("auth-step-code"); // showStep очищает auth-error
+    authError(message);
+    $("code").focus();
+  } catch (e) {
+    authError(e.message);
+  }
+}
+
 // Нормализация номера как на сервере: цифры/+7, убираем пробелы, скобки, дефисы
 function normalizePhone(raw) {
   let c = (raw || "").replace(/[ ()\-\u00A0]/g, "");
@@ -227,15 +256,9 @@ $("code-next").addEventListener("click", async () => {
     showStep("auth-step-profile");
     $("first-name").focus();
   } catch (err) {
-    if (err.message === "Неверный код" || err.message === "Сначала запросите код") {
-      // Код мог истечь (TTL 5 мин) — перевыдаём новый и подсказываем пользователю
-      try {
-        await api("/api/auth/start", { method: "POST", body: JSON.stringify({ phone: S.phone }) });
-        $("code").value = "";
-        authError(err.message + ". Новый код отправлен (см. лог сервера).");
-      } catch {
-        authError(err.message);
-      }
+    if (isCodeGone(err.message)) {
+      // Код истёк или уже удалён — перевыдаём и подсказываем пользователю
+      await resendCode("Код недействителен — запрошен новый (см. лог сервера)");
     } else {
       authError(err.message);
     }
@@ -291,7 +314,20 @@ $("profile-finish").addEventListener("click", async () => {
     const resp = await api("/api/auth/finish", { method: "POST", body: JSON.stringify(body) });
     onAuthOk(resp);
   } catch (err) {
-    authError(err.message);
+    if (err.message === "Этот номер уже зарегистрирован — войдите с паролем") {
+      // Номер успели зарегистрировать, пока пользователь заполнял профиль
+      // (например, в другой вкладке) — отправляем на экран входа по паролю.
+      $("pwd-phone").textContent = S.phone;
+      showStep("auth-step-password");
+      authError("Номер уже зарегистрирован — введите пароль");
+      $("password").focus();
+    } else if (isCodeGone(err.message)) {
+      // Код удалён/просрочен: просим новый и возвращаем на шаг кода.
+      // Имя, username и пароль остаются в полях — не придётся вводить заново.
+      await resendCode("Код устарел — запрошен новый (см. лог сервера)");
+    } else {
+      authError(err.message);
+    }
   }
 });
 
