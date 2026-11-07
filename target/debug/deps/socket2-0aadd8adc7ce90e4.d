@@ -1,9 +1,0 @@
-/media/disk_d/CipherTalk/target/debug/deps/socket2-0aadd8adc7ce90e4.d: /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/lib.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockaddr.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/socket.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockref.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sys/unix.rs
-
-/media/disk_d/CipherTalk/target/debug/deps/libsocket2-0aadd8adc7ce90e4.rmeta: /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/lib.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockaddr.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/socket.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockref.rs /media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sys/unix.rs
-
-/media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/lib.rs:
-/media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockaddr.rs:
-/media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/socket.rs:
-/media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sockref.rs:
-/media/disk_d/CipherTalk/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.5/src/sys/unix.rs:
