@@ -11,6 +11,8 @@ pub struct Config {
     pub rqlite_url: String,
     /// Секрет для подписи JWT (HS256)
     pub jwt_secret: String,
+    /// Сколько запросов в минуту разрешено с одного IP на auth-эндпоинты
+    pub auth_rate_limit: u32,
 }
 
 impl Config {
@@ -43,6 +45,14 @@ impl Config {
             }
         };
 
-        Config { port, rqlite_url, jwt_secret }
+        // Лимит на /api/auth/*: 30 запросов в минуту с одного IP по умолчанию.
+        // За обратным прокси стоит поднять (все клиенты придут с его адреса).
+        let auth_rate_limit = env::var("AUTH_RATE_LIMIT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(30);
+
+        Config { port, rqlite_url, jwt_secret, auth_rate_limit }
     }
 }

@@ -1,8 +1,11 @@
-//! JWT-мидлварь для защищённых /api/* маршрутов.
+//! Мидлвари: JWT-проверка для защищённых /api/*, rate-limit для auth
+//! и базовые security-заголовки для всех ответов.
+
+pub mod rate_limit;
 
 use axum::extract::{Request, State};
 #[allow(unused_imports)] // Parts используется в bearer_token
-use axum::http::{header, request::Parts, StatusCode};
+use axum::http::{header, request::Parts, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
@@ -43,3 +46,25 @@ pub async fn require_auth(
 
 // Контроллеры получают claims через штатный экстрактор axum `Extension<Claims>` —
 // собственного FromRequestParts-экстрактора здесь нет намеренно.
+
+/// Заголовки безопасности на каждый ответ.
+///
+/// CSP разрешает только свои скрипты/стили и WebSocket на тот же хост:
+/// фронтенд — ванильный, внешних CDN и inline-скриптов нет, так что
+/// ломаться нечему. `frame-ancestors`/`X-Frame-Options` закрывают кликджекинг.
+pub async fn security_headers(req: Request, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; \
+             base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        ),
+    );
+    res
+}

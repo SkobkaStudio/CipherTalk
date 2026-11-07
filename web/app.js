@@ -531,10 +531,24 @@ function formatTime(ts) {
 }
 
 // ─── WebSocket ──────────────────────────────────────────────────────
-function connectWs() {
+// JWT в URL сокета не передаём: сначала берём одноразовый тикет
+// (GET /api/ws-ticket, живёт 30 с и сгорает при подключении).
+async function connectWs() {
   if (!S.token) return;
+  let ticket;
+  try {
+    const r = await api("/api/ws-ticket");
+    ticket = r.ticket;
+  } catch (e) {
+    if (e.status === 401) return logout();
+    // Сервер недоступен — попробуем позже, как и при обрыве сокета
+    if (!S.wsClosed && S.token) setTimeout(connectWs, 2000);
+    return;
+  }
+  // Пока ходили за тикетом, пользователь мог выйти
+  if (S.wsClosed || !S.token) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(S.token)}`);
+  const ws = new WebSocket(`${proto}://${location.host}/ws?ticket=${encodeURIComponent(ticket)}`);
   S.ws = ws;
   S.wsClosed = false;
 

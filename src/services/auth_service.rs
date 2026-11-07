@@ -11,11 +11,22 @@ use crate::models::user::{
     AuthResponse, FinishRegisterRequest, LoginRequest, StartAuthResponse, UsernameCheckResponse, User,
 };
 use crate::utils::error::{AppError, AppResult};
+use crate::services::chat_service;
 use crate::utils::{jwt, password, server_id};
 
 fn now_ts() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
+
+/// Время жизни одноразового кода (5 минут).
+const CODE_TTL_SECS: i64 = 300;
+/// Сколько неверных вводов кода допускается до блокировки.
+const MAX_CODE_ATTEMPTS: i64 = 5;
+/// Минимальный интервал между выдачами новых кодов на один номер.
+const RESEND_COOLDOWN_SECS: i64 = 60;
+/// Минимальная и максимальная длина пароля (в символах).
+const PASSWORD_MIN_CHARS: usize = 8;
+const PASSWORD_MAX_CHARS: usize = 128;
 
 /// Телефон после нормализации: "+", затем 8..15 цифр, первая не ноль.
 static PHONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\+[1-9][0-9]{7,14}$").unwrap());
@@ -36,6 +47,26 @@ pub fn normalize_phone(raw: &str) -> String {
     } else {
         format!("+{cleaned}")
     }
+}
+
+/// Зарегистрирован ли номер (есть password_hash — регистрация завершена).
+async fn registered_by_phone(db: &Db, phone: &str) -> AppResult<bool> {
+    let rows = db
+        .query_rows("SELECT password_hash FROM users WHERE phone = ?", &[json!(phone)])
+        .await?;
+    Ok(rows
+        .first()
+        .and_then(|r| r.get("password_hash"))
+        .and_then(|v| v.as_str())
+        .is_some())
+}
+
+/// Занят ли @username.
+async fn username_taken(db: &Db, username: &str) -> AppResult<bool> {
+    let rows = db
+        .query_rows("SELECT 1 AS ok FROM users WHERE username = ?", &[json!(username)])
+        .await?;
+    Ok(!rows.is_empty())
 }
 
 /// Чтение строки users (SELECT по любому уникальному ключу) -> модель User.
@@ -65,37 +96,51 @@ pub async fn start_auth(db: &Db, phone_raw: &str) -> AppResult<StartAuthResponse
     if !PHONE_RE.is_match(&phone) {
         return Err(AppError::BadRequest("Неверный номер телефона".into()));
     }
-    // Ищем пользователя с завершённой регистрацией (password_hash NOT NULL)
-    let rows = db
-        .query_rows("SELECT id, password_hash FROM users WHERE phone = ?", &[json!(&phone)])
-        .await?;
-    let registered = rows
-        .first()
-        .map(|r| r.get("password_hash").and_then(|v| v.as_str()).is_some())
-        .unwrap_or(false);
-    if registered {
+    // Зарегистрированный номер -> сразу экран пароля, код не нужен
+    if registered_by_phone(db, &phone).await? {
         return Ok(StartAuthResponse { registered: true, needs_code: false });
     }
-    // Новый (или незавершённый) номер: выдаём одноразовый код, TTL 5 минут.
-    // ВАЖНО: если активный НЕИСТЁКШИЙ код уже есть — переиспользуем его,
-    // а не генерируем новый. Иначе повторный /auth/start (а фронт вызывает
-    // его и перед verify) перезаписывал код во БД, и старый код из лога
-    // перставал быть валидным — пользователь видел «Неверный код» /
-    // «Сначала запросите код», хотя код в логе был.
+
+    let now = now_ts();
     let existing = db
         .query_rows(
-            "SELECT code FROM phone_codes WHERE phone = ? AND expires_at >= ?",
-            &[json!(&phone), json!(now_ts())],
+            "SELECT code, expires_at, attempts, sent_at FROM phone_codes WHERE phone = ?",
+            &[json!(&phone)],
         )
         .await?;
-    let code = match existing.first().and_then(|r| r.get("code")).and_then(|v| v.as_str()) {
-        Some(c) => c.to_string(),
-        None => server_id::random_code(),
-    };
-    let expires = now_ts() + 300;
+
+    if let Some(row) = existing.first() {
+        let expires_at = row.get("expires_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        let attempts = row.get("attempts").and_then(|v| v.as_i64()).unwrap_or(0);
+        let sent_at = row.get("sent_at").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        // Живой код с остатком попыток отдаём как есть: НЕ сбрасываем attempts
+        // и не продлеваем TTL. Иначе клиент одним повторным /auth/start
+        // обнулял счётчик и лимит в 5 попыток не работал вообще.
+        if expires_at > now && attempts < MAX_CODE_ATTEMPTS {
+            return Ok(StartAuthResponse { registered: false, needs_code: true });
+        }
+
+        // Код исчерпан или просрочен. Новый выдаём не чаще раза в минуту:
+        // иначе тот же перебор продолжается бесконечно.
+        let elapsed = now.saturating_sub(sent_at);
+        if elapsed < RESEND_COOLDOWN_SECS {
+            let wait = RESEND_COOLDOWN_SECS - elapsed;
+            return Err(AppError::TooManyRequests(format!(
+                "Новый код можно запросить через {wait} с"
+            )));
+        }
+    }
+
+    // Новый код: TTL 5 минут, счётчик попыток обнуляется только здесь.
+    let code = server_id::random_code();
+    let expires = now + CODE_TTL_SECS;
     db.exec_params(
-        "INSERT OR REPLACE INTO phone_codes (phone, code, expires_at, attempts) VALUES (?, ?, ?, 0)",
-        &[json!(&phone), json!(&code), json!(expires)],
+        "INSERT INTO phone_codes (phone, code, expires_at, attempts, sent_at) \
+         VALUES (?, ?, ?, 0, ?) \
+         ON CONFLICT(phone) DO UPDATE SET code = excluded.code, \
+         expires_at = excluded.expires_at, attempts = 0, sent_at = excluded.sent_at",
+        &[json!(&phone), json!(&code), json!(expires), json!(now)],
     )
     .await?;
     // В MVP вместо реальной SMS код пишется в лог сервера
@@ -119,7 +164,7 @@ pub async fn verify_code(db: &Db, phone_raw: &str, code: &str) -> AppResult<()> 
     if expires < now_ts() {
         return Err(AppError::BadRequest("Код истёк, запросите новый".into()));
     }
-    if attempts >= 5 {
+    if attempts >= MAX_CODE_ATTEMPTS {
         return Err(AppError::BadRequest("Слишком много попыток, запросите новый код".into()));
     }
     if code.trim() != stored {
@@ -145,6 +190,27 @@ fn validate_username(raw: &str) -> AppResult<String> {
     Ok(u)
 }
 
+/// Проверка пароля: длина в СИМВОЛАХ (а не в байтах — иначе кириллический
+/// пароль из 4 букв проходил бы порог «8»), совпадение, верхняя граница
+/// (чтобы не хешировать мегабайты по запросу).
+fn validate_password(password: &str, repeat: &str) -> AppResult<()> {
+    let len = password.chars().count();
+    if len < PASSWORD_MIN_CHARS {
+        return Err(AppError::BadRequest(format!(
+            "Пароль должен быть не короче {PASSWORD_MIN_CHARS} символов"
+        )));
+    }
+    if len > PASSWORD_MAX_CHARS {
+        return Err(AppError::BadRequest(format!(
+            "Пароль слишком длинный (макс. {PASSWORD_MAX_CHARS} символов)"
+        )));
+    }
+    if password != repeat {
+        return Err(AppError::BadRequest("Пароли не совпадают".into()));
+    }
+    Ok(())
+}
+
 /// Шаг 3–6: завершение регистрации. Код уже подтверждён frontend'ом —
 /// проверяем ещё раз (защита от прямого вызова endpoint'а), создаём
 /// пользователя, его saved-чат («Избранное») и выдаём JWT.
@@ -154,13 +220,7 @@ pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest)
     // вкладка/устройство). После успешной регистрации код удаляется, поэтому
     // verify_code ниже ответил бы невнятным «Сначала запросите код» — проверяем
     // регистрацию заранее и отправляем такого пользователя на вход по паролю.
-    let already = db
-        .query_rows("SELECT password_hash FROM users WHERE phone = ?", &[json!(&phone)])
-        .await?
-        .first()
-        .map(|r| r.get("password_hash").and_then(|v| v.as_str()).is_some())
-        .unwrap_or(false);
-    if already {
+    if registered_by_phone(db, &phone).await? {
         return Err(AppError::Conflict(
             "Этот номер уже зарегистрирован — войдите с паролем".into(),
         ));
@@ -178,29 +238,48 @@ pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest)
         Some(_) => return Err(AppError::BadRequest("Фамилия слишком длинная".into())),
     };
     let username = validate_username(&req.username)?;
-    let rows = db.query_rows("SELECT id FROM users WHERE username = ?", &[json!(&username)]).await?;
-    if !rows.is_empty() {
+    if username_taken(db, &username).await? {
         return Err(AppError::Conflict("Этот username уже занят".into()));
     }
-    if req.password.len() < 8 {
-        return Err(AppError::BadRequest("Пароль должен быть не короче 8 символов".into()));
-    }
-    if req.password != req.password_repeat {
-        return Err(AppError::BadRequest("Пароли не совпадают".into()));
-    }
+    validate_password(&req.password, &req.password_repeat)?;
     let hash = password::hash_password(&req.password)?;
-    let server = server_id::next_user_server_id(db).await?;
-    let color = server_id::avatar_color_for(&server);
     let ts = now_ts();
-    db.exec_params(
-        "INSERT INTO users (server_id, phone, username, first_name, last_name, \
-         password_hash, created_at, avatar_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        &[
-            json!(&server), json!(&phone), json!(&username), json!(first),
-            json!(last.clone()), json!(hash), json!(ts), json!(color),
-        ],
-    )
-    .await?;
+    // Проверки username/телефона выше — не атомарны: параллельная регистрация
+    // может занять тот же ключ. Поэтому вставляем с ON CONFLICT DO NOTHING и,
+    // если строка не вставилась, отвечаем 409 с точной причиной, а не 500.
+    let mut created_server_id = String::new();
+    for _ in 0..5 {
+        let server = server_id::next_user_server_id(db).await?;
+        let color = server_id::avatar_color_for(&server);
+        let affected = db
+            .exec_params_affected(
+                "INSERT INTO users (server_id, phone, username, first_name, last_name, \
+                 password_hash, created_at, avatar_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+                 ON CONFLICT DO NOTHING",
+                &[
+                    json!(&server), json!(&phone), json!(&username), json!(first),
+                    json!(last.clone()), json!(&hash), json!(ts), json!(color),
+                ],
+            )
+            .await?;
+        if affected > 0 {
+            created_server_id = server;
+            break;
+        }
+        if registered_by_phone(db, &phone).await? {
+            return Err(AppError::Conflict(
+                "Этот номер уже зарегистрирован — войдите с паролем".into(),
+            ));
+        }
+        if username_taken(db, &username).await? {
+            return Err(AppError::Conflict("Этот username уже занят".into()));
+        }
+    }
+    if created_server_id.is_empty() {
+        return Err(AppError::Internal(
+            "Не удалось подобрать свободный server_id пользователя".into(),
+        ));
+    }
     // Код больше не нужен
     db.exec_params("DELETE FROM phone_codes WHERE phone = ?", &[json!(&phone)]).await?;
     // rqlite не поддерживает RETURNING — читаем созданную строку по уникальному phone
@@ -211,22 +290,12 @@ pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest)
         AppError::Internal("Пользователь не найден после INSERT".into())
     })?;
 
-    // Saved-чат «Избранное»: server_id совпадает с server_id пользователя
-    // (не конфликт — другая таблица), owner — сам пользователь.
-    db.exec_params(
-        "INSERT INTO chats (server_id, kind, title, owner_id, created_at) VALUES (?, 'saved', NULL, ?, ?)",
-        &[json!(&user.server_id), json!(user.id), json!(ts)],
-    )
-    .await?;
-    let rows = db
-        .query_rows("SELECT id FROM chats WHERE server_id = ?", &[json!(&user.server_id)])
-        .await?;
-    if let Some(cid) = rows.first().and_then(|r| r.get("id")).and_then(|v| v.as_i64()) {
-        db.exec_params(
-            "INSERT OR IGNORE INTO chat_members (chat_id, user_id) VALUES (?, ?)",
-            &[json!(cid), json!(user.id)],
-        )
-        .await?;
+    // «Избранное»: раньше здесь использовался server_id пользователя, и он мог
+    // совпасть с уже существующим dm (общая 8-значная нумерация chats) — регистрация
+    // падала на UNIQUE. Теперь chat_service сам выделяет свободный id.
+    // Ошибку не считаем фатальной: чат досоздастся при первом открытии «Избранного».
+    if let Err(e) = chat_service::ensure_saved_chat(db, user.id).await {
+        tracing::warn!("Не удалось создать «Избранное» для user_id={}: {e}", user.id);
     }
 
     let token = jwt::issue_token(secret, user.id, &username)?;
@@ -267,8 +336,7 @@ pub async fn check_username(db: &Db, raw: &str) -> AppResult<UsernameCheckRespon
             reason: Some("Недопустимые символы".into()),
         });
     }
-    let rows = db.query_rows("SELECT 1 AS ok FROM users WHERE username = ?", &[json!(u)]).await?;
-    if rows.is_empty() {
+    if !username_taken(db, u).await? {
         Ok(UsernameCheckResponse { available: true, reason: None })
     } else {
         Ok(UsernameCheckResponse { available: false, reason: Some("занят".into()) })
@@ -283,4 +351,42 @@ pub async fn get_user_by_id(db: &Db, user_id: i64) -> AppResult<User> {
     rows.first()
         .map(row_to_user)
         .ok_or_else(|| AppError::NotFound("Пользователь не найден".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_common_phone_styles() {
+        assert_eq!(normalize_phone("+7 999 000-11-22"), "+79990001122");
+        assert_eq!(normalize_phone("8 (999) 000-11-22"), "+79990001122");
+        assert_eq!(normalize_phone("79990001122"), "+79990001122");
+        assert_eq!(normalize_phone("+1 415 555 0100"), "+14155550100");
+    }
+
+    #[test]
+    fn phone_regex_rejects_garbage() {
+        assert!(PHONE_RE.is_match(&normalize_phone("+79990001122")));
+        assert!(!PHONE_RE.is_match(&normalize_phone("123")));
+        assert!(!PHONE_RE.is_match(&normalize_phone("+09990001122")));
+        assert!(!PHONE_RE.is_match(&normalize_phone("+7abcdefghij")));
+    }
+
+    #[test]
+    fn username_validation() {
+        assert_eq!(validate_username("  @alice_1 ").unwrap(), "alice_1");
+        assert!(validate_username("ab").is_err());       // короче 4
+        assert!(validate_username("кириллица").is_err());
+        assert!(validate_username("with space").is_err());
+    }
+
+    #[test]
+    fn password_length_counts_chars_not_bytes() {
+        // 4 кириллические буквы — 8 байт, но всё равно слишком короткий пароль
+        assert!(validate_password("пароль", "пароль").is_err());
+        assert!(validate_password("пароль12", "пароль12").is_ok());
+        assert!(validate_password("пароль12", "пароль13").is_err());
+        assert!(validate_password(&"x".repeat(200), &"x".repeat(200)).is_err());
+    }
 }

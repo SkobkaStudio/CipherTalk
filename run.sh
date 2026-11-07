@@ -11,7 +11,11 @@ set -euo pipefail
 
 RQLITE_URL=${RQLITE_URL:-http://localhost:4001}
 PORT=${PORT:-3000}
-JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
+# Секрет JWT намеренно НЕ имеет дефолта из репозитория: с публично известным
+# секретом любой мог бы подписать токен на чужой id. Если JWT_SECRET не задан,
+# берём локальный файл .jwt_secret, а если его нет — генерируем (chmod 600).
+JWT_SECRET_FILE=${JWT_SECRET_FILE:-.jwt_secret}
+RQLITED_VERSION=${RQLITED_VERSION:-v10.6.6}
 
 REPO_URL="https://github.com/SkobkaStudio/CipherTalk.git"
 DO_UPDATE=false
@@ -87,19 +91,62 @@ if [ "$DO_UPDATE" = true ]; then
   # Иначе продолжаем в этом же процессе: сразу пойдём в сборку и запуск ниже.
 fi
 
+# ─── JWT-секрет ───────────────────────────────────────────────────
+ensure_jwt_secret() {
+  if [ -n "${JWT_SECRET:-}" ]; then
+    echo "==> JWT_SECRET взят из переменной окружения"
+    return
+  fi
+  if [ -s "$JWT_SECRET_FILE" ]; then
+    JWT_SECRET="$(cat "$JWT_SECRET_FILE")"
+    echo "==> JWT_SECRET прочитан из $JWT_SECRET_FILE"
+    return
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+  else
+    JWT_SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '\n')"
+  fi
+  (umask 077; printf '%s' "$JWT_SECRET" > "$JWT_SECRET_FILE")
+  echo "==> Сгенерирован JWT_SECRET -> $JWT_SECRET_FILE (в git не попадает)"
+}
+
+# ─── rqlited: локальный бинарник или скачивание ───────────────────
+download_rqlited() {
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "==> Неизвестная архитектура $(uname -m): скачай rqlited вручную" >&2; return 1 ;;
+  esac
+  tmp="$(mktemp -d)"
+  url="https://github.com/rqlite/rqlite/releases/download/${RQLITED_VERSION}/rqlite-${RQLITED_VERSION}-linux-${arch}.tar.gz"
+  echo "==> rqlited не найден, скачиваю ${RQLITED_VERSION} (${arch})..."
+  if ! curl -fsSL "$url" -o "$tmp/rqlite.tgz"; then rm -rf "$tmp"; return 1; fi
+  if ! tar -xzf "$tmp/rqlite.tgz" -C "$tmp"; then rm -rf "$tmp"; return 1; fi
+  if ! cp "$tmp"/rqlite-*/rqlited ./rqlited; then rm -rf "$tmp"; return 1; fi
+  chmod +x ./rqlited
+  rm -rf "$tmp"
+  echo "==> rqlited скачан в ./rqlited (каталог в .gitignore)"
+  return 0
+}
+
 echo "==> Проверяю rqlite на $RQLITE_URL"
 if ! curl -sf "$RQLITE_URL/readyz" >/dev/null 2>&1; then
   echo "==> rqlite не запущен, стартую..."
   if command -v docker >/dev/null 2>&1; then
     docker rm -f ciphertalk-rqlite >/dev/null 2>&1 || true
-    docker run -d --name ciphertalk-rqlite -p 4001:4001 rqlite/rqlite >/dev/null
+    # Только loopback: у rqlite по умолчанию нет аутентификации, и порт,
+    # опубликованный на 0.0.0.0, отдаёт всю переписку любому в сети.
+    docker run -d --name ciphertalk-rqlite -p 127.0.0.1:4001:4001 rqlite/rqlite >/dev/null
   elif command -v rqlited >/dev/null 2>&1; then
     mkdir -p ./data-rqlite
-    nohup rqlited -node-id 1 ./data-rqlite >/tmp/rqlite.log 2>&1 &
+    nohup rqlited -http-addr 127.0.0.1:4001 -node-id 1 ./data-rqlite >/tmp/rqlite.log 2>&1 &
   elif [ -x ./rqlited ]; then
-    # локально скачанный бинарник (см. README — раздел «без docker»)
     mkdir -p ./data-rqlite
-    nohup ./rqlited -node-id 1 ./data-rqlite >/tmp/rqlite.log 2>&1 &
+    nohup ./rqlited -http-addr 127.0.0.1:4001 -node-id 1 ./data-rqlite >/tmp/rqlite.log 2>&1 &
+  elif download_rqlited; then
+    mkdir -p ./data-rqlite
+    nohup ./rqlited -http-addr 127.0.0.1:4001 -node-id 1 ./data-rqlite >/tmp/rqlite.log 2>&1 &
   else
     echo "Нет docker и нет rqlited. Установи docker или скачай rqlited:" >&2
     echo "  https://github.com/rqlite/rqlite/releases" >&2
@@ -130,6 +177,8 @@ if ! command -v cargo >/dev/null 2>&1; then
   echo "      source \"\$HOME/.cargo/env\"" >&2
   exit 1
 fi
+
+ensure_jwt_secret
 
 echo "==> Собираю мессенджер (release)"
 cargo build --release

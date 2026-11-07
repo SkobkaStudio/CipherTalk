@@ -66,6 +66,16 @@ pub async fn check_username(
     Ok(Json(resp))
 }
 
+/// GET /api/ws-ticket (Bearer JWT) -> {ticket, expires_in} — одноразовый
+/// тикет для подключения к /ws. Живёт 30 секунд и сгорает при использовании.
+pub async fn ws_ticket(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
+) -> AppResult<Json<serde_json::Value>> {
+    let ticket = state.issue_ws_ticket(claims.sub);
+    Ok(Json(json!({ "ticket": ticket, "expires_in": 30 })))
+}
+
 /// GET /api/me (Bearer JWT) -> {user: User} — текущий профиль.
 pub async fn me(
     State(state): State<Arc<AppState>>,

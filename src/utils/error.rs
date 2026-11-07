@@ -17,6 +17,8 @@ pub enum AppError {
     NotFound(String),
     /// Конфликт (например, имя занято) (409)
     Conflict(String),
+    /// Слишком много запросов / попыток (429)
+    TooManyRequests(String),
     /// Внутренняя ошибка сервера (500)
     Internal(String),
 }
@@ -32,6 +34,7 @@ impl AppError {
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Conflict(_) => StatusCode::CONFLICT,
+            AppError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -70,6 +73,7 @@ impl AppError {
             | AppError::Forbidden(m)
             | AppError::NotFound(m)
             | AppError::Conflict(m)
+            | AppError::TooManyRequests(m)
             | AppError::Internal(m) => m,
         }
     }

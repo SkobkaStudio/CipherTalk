@@ -39,8 +39,7 @@ async fn last_numeric_id(db: &Db, table: &str) -> AppResult<Option<u64>> {
         .first()
         .and_then(|r| r.get("server_id"))
         .and_then(|v| v.as_str())
-        .map(|s| s.trim_start_matches('-').parse::<u64>().ok())
-        .flatten())
+        .and_then(|s| s.trim_start_matches('-').parse::<u64>().ok()))
 }
 
 /// Проверка: занят ли уже такой server_id в таблице.
@@ -57,13 +56,12 @@ async fn id_taken(db: &Db, table: &str, sid: &str) -> AppResult<bool> {
 /// Следующий свободный 8-значный server_id пользователя ("00000001", ...).
 pub async fn next_user_server_id(db: &Db) -> AppResult<String> {
     // Начинаем с последнего выданного + 1; если таблица пуста — с единицы.
-    let mut candidate = last_numeric_id(db, "users").await?.map(|n| n + 1).unwrap_or(1);
-    for _ in 0..MAX_TRIES {
+    let first = last_numeric_id(db, "users").await?.map(|n| n + 1).unwrap_or(1);
+    for candidate in first..first + u64::from(MAX_TRIES) {
         let sid = fmt_user_like(candidate);
         if !id_taken(db, "users", &sid).await? {
             return Ok(sid);
         }
-        candidate += 1;
     }
     Err(AppError::Internal("Не удалось подобрать server_id пользователя".into()))
 }
@@ -77,17 +75,16 @@ pub async fn next_chat_server_id(db: &Db, kind: &str) -> AppResult<String> {
     // Для групп стартуем с 1 по своей 14-значной шкале (существующие 8-значные
     // dm-id в этой же таблице не конфликтуют: формат строк разный, а проверка
     // id_taken ниже ловит любые реальные коллизии).
-    let mut candidate = match last {
+    let first = match last {
         Some(n) if groupish && n >= 1_000_000_000_000_000 => n + 1, // продолжаем 14-значную шкалу
         Some(n) if !groupish && n < 100_000_000 => n + 1,          // продолжаем 8-значную шкалу
         _ => 1,
     };
-    for _ in 0..MAX_TRIES {
+    for candidate in first..first + u64::from(MAX_TRIES) {
         let sid = if groupish { fmt_group_like(candidate) } else { fmt_user_like(candidate) };
         if !id_taken(db, "chats", &sid).await? {
             return Ok(sid);
         }
-        candidate += 1;
     }
     Err(AppError::Internal("Не удалось подобрать server_id чата".into()))
 }
@@ -103,4 +100,32 @@ pub fn avatar_color_for(server_id: &str) -> &'static str {
 pub fn random_code() -> String {
     let n: u32 = rand::thread_rng().gen_range(0..1_000_000);
     format!("{n:06}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_server_ids_with_fixed_width() {
+        assert_eq!(fmt_user_like(1), "00000001");
+        assert_eq!(fmt_group_like(1), "-00000000000001");
+        assert_eq!(fmt_group_like(1).len(), 15); // минус + 14 цифр
+    }
+
+    #[test]
+    fn random_code_is_six_digits() {
+        for _ in 0..200 {
+            let c = random_code();
+            assert_eq!(c.len(), 6);
+            assert!(c.chars().all(|ch| ch.is_ascii_digit()));
+        }
+    }
+
+    #[test]
+    fn avatar_color_is_stable_and_from_palette() {
+        let a = avatar_color_for("00000001");
+        assert_eq!(a, avatar_color_for("00000001"));
+        assert!(AVATAR_PALETTE.contains(&a));
+    }
 }
