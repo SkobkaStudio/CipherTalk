@@ -1,5 +1,17 @@
+# Логи
 *.log
-data-rqlite/db.sqlite
-data-rqlite/db.sqlite-shm
-data-rqlite/db.sqlite-wal
-data-rqlite/raft.db
+
+# Данные rqlite (локальная БД и снимки raft) — не коммитим
+/data-*/
+
+# Артефакты сборки Rust
+/target/
+
+# Локальный бинарник rqlited (run.sh скачивает его сам)
+/rqlited
+
+# Секрет JWT, сгенерированный run.sh
+/.jwt_secret
+
+# Служебный bare-репозиторий для `run.sh -u`
+/.ciphertalk-src/
