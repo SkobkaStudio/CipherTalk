@@ -15,30 +15,24 @@
 
 ---
 
-<div align="center">
-
-| 🚀 Быстрый старт | 🧱 Стек | 📦 Размер |
-|:---:|:---:|:---:|
-| `./run.sh` | Rust · axum · rqlite | ~6 МБ бинарник |
-
-</div>
+> ⚠️ **О шифровании.** В этой ветке **нет end-to-end шифрования**: сообщения
+> хранятся и передаются в открытом виде (TLS — на уровне reverse-proxy, если вы
+> его поставите). Клиентское E2EE было в JS-версии (`old-javascript-v`), в
+> Rust-переписывании его пока нет. Не используйте проект для действительно
+> секретной переписки.
 
 ---
 
 ## ✨ Возможности
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
 ### 🔐 Безопасность
-- **argon2**-хеширование паролей
-- **JWT (HS256)** на все защищённые роуты
-- Параметризованные SQL-запросы — никакой конкатенации
+- **argon2id**-хеширование паролей, JWT (HS256) на защищённых роутах
+- Параметризованные SQL-запросы — конкатенации пользовательских данных нет
 - `textContent`, а не `innerHTML` — XSS-безопасный рендер
-
-</td>
-<td width="50%" valign="top">
+- Код подтверждения: TTL 5 минут, 5 попыток, кулдаун на перевыдачу
+- Rate-limit по IP на auth-эндпоинты (429 + `Retry-After`)
+- Одноразовые тикеты на WebSocket — JWT не попадает в URL и логи
+- CSP, `nosniff`, `X-Frame-Options: DENY` на всех ответах
 
 ### ⚡ Реальное время
 - **WebSocket** через `tokio::sync::broadcast`
@@ -46,83 +40,36 @@
 - Автопереподключение при обрыве
 - Мгновенная доставка всем участникам
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
 ### 🎨 Фронтенд
-- Ванильные **HTML / CSS / JS**
-- Тёмная тема, CSS-переменные
-- Адаптив: десктоп + мобильный
-- Без npm, React, Vite и сборщиков
-
-</td>
-<td width="50%" valign="top">
+- Ванильные **HTML / CSS / JS**, без npm/React/Vite
+- Тёмная тема, CSS-переменные, адаптив под мобильные
 
 ### 🧩 Архитектура
 - Чистый **MVC**: models / controllers / services
-- Слой БД изолирован в `db.rs`
-- JWT-мидлварь отдельно
+- Слой БД изолирован в `db.rs`, JWT-мидлварь отдельно
 - Один бинарник, раздаёт и API, и фронт
-
-</td>
-</tr>
-</table>
 
 ---
 
 ## 🧱 Стек
 
-<table>
-<tr>
-<td align="center" width="120"><b>HTTP / WS</b></td>
-<td><a href="https://github.com/tokio-rs/axum">axum 0.7</a> + <a href="https://tokio.rs">tokio</a> — async-сервер и WebSocket</td>
-</tr>
-<tr>
-<td align="center"><b>База данных</b></td>
-<td><a href="https://rqlite.io">rqlite</a> — распределённый SQLite через HTTP API</td>
-</tr>
-<tr>
-<td align="center"><b>HTTP-клиент</b></td>
-<td>reqwest (rustls) — запросы к rqlite</td>
-</tr>
-<tr>
-<td align="center"><b>Авторизация</b></td>
-<td>jsonwebtoken (HS256) + argon2</td>
-</tr>
-<tr>
-<td align="center"><b>Статика</b></td>
-<td>tower-http: <code>ServeDir</code>, <code>ServeFile</code>, <code>CorsLayer</code></td>
-</tr>
-<tr>
-<td align="center"><b>Логи</b></td>
-<td>tracing, tracing-subscriber</td>
-</tr>
-<tr>
-<td align="center"><b>Фронтенд</b></td>
-<td>ванильные HTML + CSS + JS, без сборщиков</td>
-</tr>
-</table>
+| Слой | Технологии |
+|---|---|
+| HTTP / WS | axum 0.7 + tokio |
+| База данных | rqlite (SQLite поверх HTTP API) |
+| HTTP-клиент | reqwest (rustls, без openssl) |
+| Авторизация | jsonwebtoken (HS256) + argon2 |
+| Статика | tower-http: `ServeDir`, `ServeFile`, `CorsLayer` |
+| Логи | tracing, tracing-subscriber (локальное время) |
 
 ---
 
 ## 📋 Требования
 
-<table>
-<tr>
-<td valign="middle" width="40">🦀</td>
-<td><b>Rust</b> (stable, edition 2021) и <code>cargo</code></td>
-</tr>
-<tr>
-<td valign="middle">🐳</td>
-<td><b>Docker</b> <em>или</em> бинарник <a href="https://github.com/rqlite/rqlite/releases"><code>rqlited</code></a> в <code>PATH</code></td>
-</tr>
-<tr>
-<td valign="middle">🌐</td>
-<td><b><code>curl</code></b> — для запуска и проверок</td>
-</tr>
-</table>
+- **Rust** (stable, edition 2021) и `cargo`
+- **Docker** *или* бинарник `rqlited`. Если нет ни того, ни другого, `run.sh`
+  скачает rqlite нужной версии сам (`RQLITED_VERSION`, по умолчанию `v10.6.6`)
+- `curl` — для запуска и проверок
 
 ---
 
@@ -136,77 +83,64 @@
 # http://localhost:3000/
 ```
 
-<details>
-<summary><b>Что делает <code>run.sh</code> под капотом</b> (нажми, чтобы развернуть)</summary>
+Что делает `run.sh`:
 
 1. Проверяет `GET $RQLITE_URL/readyz`
-2. Если rqlite не запущен — стартует контейнер `ciphertalk-rqlite` (или `rqlited`)
+2. Поднимает rqlite (docker / `rqlited` / скачивает бинарник), только на `127.0.0.1`
 3. Ждёт готовности rqlite (до 30 секунд)
-4. Выполняет `cargo build --release`
-5. Запускает `./target/release/messenger` на `PORT` (по умолчанию `3000`)
+4. Берёт `JWT_SECRET` из окружения или из файла `.jwt_secret` (создаёт его при первом запуске)
+5. Выполняет `cargo build --release`
+6. Запускает `./target/release/messenger` на `PORT` (по умолчанию `3000`)
 
-</details>
-
-> ⏹ **Остановить:** `Ctrl+C`.  
+> ⏹ **Остановить:** `Ctrl+C`.
 > 🐳 **Остановить rqlite-контейнер:** `docker rm -f ciphertalk-rqlite`.
+
+Обновление кода из GitHub:
+
+```bash
+./run.sh -u -dev    # ветка dev-rust-v
+./run.sh -u -main   # ветка main
+```
 
 ---
 
 ## 🛠 Ручной запуск
 
-Если `run.sh` не подходит (отладка, кастомный rqlite):
-
 ```bash
-# 1. База
-docker run --rm -p 4001:4001 rqlite/rqlite
+# 1. База (только loopback — у rqlite нет аутентификации)
+docker run --rm -p 127.0.0.1:4001:4001 rqlite/rqlite
 #   или
-rqlited -node-id 1 ./data-rqlite
+rqlited -http-addr 127.0.0.1:4001 -node-id 1 ./data-rqlite
 
 # 2. Сервер (в другом терминале)
 export RQLITE_URL=http://localhost:4001
-export JWT_SECRET=dev-secret-change-me
+export JWT_SECRET="$(openssl rand -base64 48)"
 export PORT=3000
 cargo run --release
 ```
 
-> 💡 Сервер сам создаёт таблицы при первом старте (`CREATE TABLE IF NOT EXISTS`).
-> Если rqlite недоступен — сервер завершится с понятной ошибкой и подсказкой.
+Сервер сам создаёт таблицы при первом старте (`CREATE TABLE IF NOT EXISTS`) и
+досоздаёт новые колонки в существующих. Если rqlite недоступен — выйдет с
+понятной ошибкой и подсказкой.
+
+> ⚠️ При переходе **со схемы v1** (логин по username) таблицы придётся
+> пересоздать. Сервер не делает это молча: он откажется стартовать, пока вы не
+> запустите его с `ALLOW_DESTRUCTIVE_MIGRATION=1` (данные будут удалены).
 
 ---
 
 ## ⚙️ Переменные окружения
 
-<table>
-<thead>
-<tr>
-<th>Переменная</th>
-<th>По умолчанию</th>
-<th>Назначение</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>PORT</code></td>
-<td><code>3000</code></td>
-<td>Порт HTTP-сервера (слушает <code>0.0.0.0</code>)</td>
-</tr>
-<tr>
-<td><code>RQLITE_URL</code></td>
-<td><code>http://localhost:4001</code></td>
-<td>Базовый URL rqlite (без завершающего <code>/</code>)</td>
-</tr>
-<tr>
-<td><code>JWT_SECRET</code></td>
-<td><em>случайный при старте</em></td>
-<td>Секрет HMAC для JWT. <b>Если не задан</b> — генерируется случайный и печатается WARN. Все токены станут недействительны после перезапуска. В проде задавать обязательно.</td>
-</tr>
-<tr>
-<td><code>RUST_LOG</code></td>
-<td><code>info</code></td>
-<td>Уровень логов tracing (<code>debug</code>, <code>trace</code>, …)</td>
-</tr>
-</tbody>
-</table>
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `PORT` | `3000` | Порт HTTP-сервера (слушает `0.0.0.0`) |
+| `RQLITE_URL` | `http://localhost:4001` | Базовый URL rqlite (без завершающего `/`) |
+| `JWT_SECRET` | из `.jwt_secret` | Секрет HMAC для JWT. Если не задан, `run.sh` читает/создаёт файл `.jwt_secret` (права 600, в git не попадает). Без `run.sh` сервер сгенерирует случайный секрет на старте — тогда токены умрут при перезапуске |
+| `JWT_SECRET_FILE` | `.jwt_secret` | Путь к файлу с секретом |
+| `AUTH_RATE_LIMIT` | `30` | Запросов в минуту с одного IP на `/api/auth/{start,verify,finish,login}` |
+| `ALLOW_DESTRUCTIVE_MIGRATION` | — | `1` разрешает сброс таблиц при переходе со схемы v1 |
+| `RQLITED_VERSION` | `v10.6.6` | Версия rqlite, которую скачивает `run.sh` |
+| `RUST_LOG` | `info` | Уровень логов tracing (`debug`, `trace`, …) |
 
 ---
 
@@ -214,36 +148,19 @@ cargo run --release
 
 ```
 .
-├── 🦀 Cargo.toml
-├── 🔒 Cargo.lock
+├── 🦀 Cargo.toml / Cargo.lock
 ├── 🚀 run.sh                  # единый запуск (rqlite + сервер)
 ├── 📖 README.md
 ├── src/
-│   ├── main.rs                # сборка роутера, запуск
-│   ├── config.rs              # PORT, RQLITE_URL, JWT_SECRET
+│   ├── main.rs                # роутер, мидлвари, запуск
+│   ├── config.rs              # PORT, RQLITE_URL, JWT_SECRET, AUTH_RATE_LIMIT
 │   ├── db.rs                  # клиент rqlite + миграции
-│   ├── ws.rs                  # WebSocket + broadcast-брокер
+│   ├── ws.rs                  # WebSocket, тикеты, broadcast-брокер
 │   ├── models/                # структуры данных (serde)
-│   │   ├── mod.rs
-│   │   ├── user.rs
-│   │   ├── chat.rs
-│   │   └── message.rs
 │   ├── controllers/           # HTTP-хендлеры axum, без SQL
-│   │   ├── mod.rs
-│   │   ├── auth.rs
-│   │   ├── chats.rs
-│   │   └── messages.rs
 │   ├── services/              # бизнес-логика и все SQL
-│   │   ├── mod.rs
-│   │   ├── auth_service.rs
-│   │   └── chat_service.rs
-│   ├── middleware/            # JWT-мидлварь → Extension<Claims>
-│   │   └── mod.rs
-│   └── utils/                 # jwt, password, error
-│       ├── mod.rs
-│       ├── jwt.rs
-│       ├── password.rs
-│       └── error.rs
+│   ├── middleware/            # JWT, rate-limit, security-заголовки
+│   └── utils/                 # jwt, password, error, server_id
 └── web/                       # фронтенд, раздаётся тем же сервером
     ├── index.html
     ├── app.js
@@ -254,82 +171,28 @@ cargo run --release
 
 ## 🏛 Архитектура
 
-<div align="center">
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Browser (SPA)                          │
-│         HTML / CSS / JS   ·   WebSocket   ·   fetch         │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ HTTP + WS
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        axum router                          │
-│  ┌───────────────┐   ┌───────────────────────────────────┐  │
-│  │  middleware   │──▶│         controllers               │  │
-│  │ require_auth  │   │   auth · chats · messages         │  │
-│  └───────────────┘   └───────────────┬───────────────────┘  │
-│                                      │                      │
-│                                      ▼                      │
-│                      ┌───────────────────────────────┐      │
-│                      │           services            │      │
-│                      │   auth_service · chat_service │      │
-│                      └───────────────┬───────────────┘      │
-│                                      │                      │
-│              ┌───────────────────────┼───────────────────┐  │
-│              ▼                       ▼                   ▼  │
-│      ┌───────────────┐       ┌───────────────┐   ┌────────┐ │
-│      │     db.rs     │       │     ws.rs     │   │ utils  │ │
-│      │ rqlite client │       │  broadcast    │   │ jwt…   │ │
-│      └───────┬───────┘       └───────┬───────┘   └────────┘ │
-└──────────────┼───────────────────────┼──────────────────────┘
-               │ HTTP /db/execute       │ broadcast
-               ▼                       ▼
-        ┌─────────────┐         ┌─────────────┐
-        │   rqlite    │         │  WS-клиенты │
-        │  (SQLite)   │         │  (все чаты) │
-        └─────────────┘         └─────────────┘
+Browser (SPA: HTML/CSS/JS + WebSocket + fetch)
+        │ HTTP + WS
+        ▼
+    axum router
+    ├── middleware: security_headers, rate_limit (auth), require_auth
+    ├── controllers: auth · chats · messages
+    ├── services: auth_service · chat_service   (валидация, права, SQL)
+    ├── ws: broadcast-брокер + подписки
+    └── db: rqlite client
+        │ POST /db/execute, /db/query
+        ▼
+    rqlite (SQLite)
 ```
 
-</div>
-
-### Слои
-
-<table>
-<tr>
-<td align="center" width="120"><b>Models</b></td>
-<td><code>src/models/</code> — только структуры с <code>serde</code> (<code>User</code>, <code>Chat</code>, <code>Message</code>) и DTO запросов/ответов. Никакой логики.</td>
-</tr>
-<tr>
-<td align="center"><b>Controllers</b></td>
-<td><code>src/controllers/</code> — HTTP-хендлеры axum. Извлекают параметры (<code>State</code>, <code>Extension&lt;Claims&gt;</code>, <code>Path</code>, <code>Query</code>, <code>Json</code>), вызывают сервисы, возвращают <code>Json</code>/<code>AppError</code>. <b>Не содержат SQL</b>.</td>
-</tr>
-<tr>
-<td align="center"><b>Services</b></td>
-<td><code>src/services/</code> — вся бизнес-логика и SQL. Валидация, проверка прав (<code>is_member</code>), публикация в WS-канал после сохранения. <b>Не знают про HTTP</b>.</td>
-</tr>
-<tr>
-<td align="center"><b>DB</b></td>
-<td><code>src/db.rs</code> — клиент rqlite. Все значения — только позиционные параметры (<code>?</code>). Здесь же миграции.</td>
-</tr>
-<tr>
-<td align="center"><b>Middleware</b></td>
-<td><code>src/middleware/mod.rs</code> — <code>require_auth</code>: проверяет <code>Bearer JWT</code>, кладёт <code>Claims</code> в <code>req.extensions_mut()</code>. Хендлеры читают через штатный <code>Extension&lt;Claims&gt;</code>.</td>
-</tr>
-<tr>
-<td align="center"><b>WS</b></td>
-<td><code>src/ws.rs</code> — <code>GET /ws?token=…</code>. Проверка токена <em>до</em> апгрейда, split на read/write, фильтрация <code>broadcast::Receiver&lt;Message&gt;</code> по <code>chat_id</code>.</td>
-</tr>
-</table>
-
-### 🔄 Поток отправки сообщения
+Поток отправки сообщения:
 
 ```
 POST /api/chats/:id/messages
-  │
-  ├─▶ middleware::require_auth          (Claims → extensions)
+  ├─▶ require_auth                      (Claims → extensions)
   ├─▶ controllers::messages::send
-  ├─▶ services::chat_service            (is_member → save_message)
+  ├─▶ chat_service::is_member → save_message
   ├─▶ db.rs                             (exec_params → rqlite)
   ├─▶ state.tx.send(msg)                (broadcast всем WS-клиентам)
   └─▶ 200 OK + JSON клиенту
@@ -339,89 +202,66 @@ POST /api/chats/:id/messages
 
 ## 🌐 HTTP API
 
-Все ответы — JSON. Ошибки — `{ "error": "текст" }` с корректным статусом.
+Все ответы — JSON, ошибки — `{ "error": "текст" }` с корректным статусом.
 
 ### 🟢 Публичные (без JWT)
 
-<table>
-<thead>
-<tr><th>Метод</th><th>Путь</th><th>Тело</th><th>Ответ</th></tr>
-</thead>
-<tbody>
-<tr>
-<td align="center"><code>GET</code></td>
-<td><code>/healthz</code></td>
-<td>—</td>
-<td><code>ok</code> (plain text)</td>
-</tr>
-<tr>
-<td align="center"><code>POST</code></td>
-<td><code>/api/register</code></td>
-<td><code>{"username","password"}</code></td>
-<td><code>{"token","user_id"}</code></td>
-</tr>
-<tr>
-<td align="center"><code>POST</code></td>
-<td><code>/api/login</code></td>
-<td><code>{"username","password"}</code></td>
-<td><code>{"token","user_id"}</code></td>
-</tr>
-</tbody>
-</table>
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| `GET` | `/healthz` | — | `ok` (plain text) |
+| `POST` | `/api/auth/start` | `{"phone"}` | `{"registered","needs_code"}` |
+| `POST` | `/api/auth/verify` | `{"phone","code"}` | `{"ok":true}` |
+| `POST` | `/api/auth/finish` | `{"phone","code","first_name","username","password","password_repeat"[,"last_name"]}` | `{"token","user"}` — `201` |
+| `POST` | `/api/auth/login` | `{"phone","password"}` | `{"token","user"}` |
+| `GET` | `/api/auth/check-username?username=…` | — | `{"available","reason"}` |
+
+> В MVP роль SMS играет лог сервера: `SMS-код для +7999…: 123456`.
+> Код живёт 5 минут, даётся 5 попыток; после исчерпания новый выдаётся не
+> раньше чем через минуту.
 
 ### 🔒 Требуют `Authorization: Bearer <JWT>`
 
-<table>
-<thead>
-<tr><th>Метод</th><th>Путь</th><th>Тело</th><th>Ответ</th></tr>
-</thead>
-<tbody>
-<tr>
-<td align="center"><code>GET</code></td>
-<td><code>/api/chats</code></td>
-<td>—</td>
-<td><code>[{"id","name","owner_id","created_at"}]</code></td>
-</tr>
-<tr>
-<td align="center"><code>POST</code></td>
-<td><code>/api/chats</code></td>
-<td><code>{"name"}</code></td>
-<td><code>{"chat_id"}</code> (создатель сразу в <code>chat_members</code>)</td>
-</tr>
-<tr>
-<td align="center"><code>POST</code></td>
-<td><code>/api/chats/:id/join</code></td>
-<td>—</td>
-<td><code>{"ok":true}</code></td>
-</tr>
-<tr>
-<td align="center"><code>GET</code></td>
-<td><code>/api/chats/:id/messages?limit=50</code></td>
-<td>—</td>
-<td><code>[{Message}]</code> по возрастанию <code>id</code></td>
-</tr>
-<tr>
-<td align="center"><code>POST</code></td>
-<td><code>/api/chats/:id/messages</code></td>
-<td><code>{"body"}</code></td>
-<td><code>{Message}</code></td>
-</tr>
-</tbody>
-</table>
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| `GET` | `/api/me` | — | `{"user"}` |
+| `GET` | `/api/ws-ticket` | — | `{"ticket","expires_in":30}` |
+| `GET` | `/api/chats` | — | `[Chat]` — включает «Избранное» |
+| `POST` | `/api/chats/group` | `{"kind":"group"\|"channel","title"[,"member_ids"]}` | `Chat` |
+| `POST` | `/api/chats/dm` | `{"user_id"}` | `Chat` (свой id → «Избранное») |
+| `POST` | `/api/chats` | `{"name"}` | `{"chat_id"}` — устаревший алиас группы |
+| `GET` | `/api/chats/by-id/:server_id` | — | `Chat` |
+| `GET` | `/api/users/:server_id` | — | `User` (без телефона) |
+| `POST` | `/api/chats/:id/join` | — | `{"ok":true}` — только `group`/`channel` |
+| `GET` | `/api/chats/:id/messages?limit=50` | — | `[Message]` (лимит 1…200) |
+| `POST` | `/api/chats/:id/messages` | `{"body"}` | `Message` |
 
 <details>
-<summary><b>Пример <code>Message</code></b></summary>
+<summary><b>Пример <code>Chat</code> и <code>Message</code></b></summary>
+
+```json
+{
+  "id": 2,
+  "server_id": "-00000000000001",
+  "kind": "group",
+  "title": "general",
+  "owner_id": 1,
+  "created_at": 1730000000
+}
+```
 
 ```json
 {
   "id": 1,
-  "chat_id": 1,
+  "chat_id": 2,
   "user_id": 1,
-  "username": "alice",
+  "username": "Алиса",
   "body": "привет",
   "created_at": 1730000000
 }
 ```
+
+`username` в `Message` — отображаемое имя: `first_name`, иначе `@username`,
+иначе `?`.
 </details>
 
 ### 📊 Коды статусов
@@ -431,19 +271,24 @@ POST /api/chats/:id/messages
 | `200` | Успех |
 | `201` | Регистрация создана |
 | `400` | Ошибка валидации |
-| `401` | Нет/невалидный токен |
-| `403` | Не участник чата |
+| `401` | Нет/невалидный токен, неверный код или пароль |
+| `403` | Не участник чата, прямой вход в dm/saved запрещён |
 | `404` | Не найдено |
-| `409` | Имя занято |
+| `409` | Номер/username занят |
+| `429` | Rate-limit или исчерпаны попытки кода |
 | `500` | Внутренняя ошибка |
 
 ---
 
 ## 🔌 WebSocket
 
-> **Подключение:** `ws(s)://<host>/ws?token=<JWT>`
+> **Подключение:** `GET /api/ws-ticket` (с JWT) → `{"ticket": "…"}` →
+> `ws(s)://<host>/ws?ticket=<ticket>`
 
-JWT проверяется **до** апгрейда — при невалидном токене возвращается `401`, соединение не поднимается.
+Тикет одноразовый и живёт 30 секунд: он сгорает при подключении, поэтому
+утёкший URL сокета (логи прокси, история) уже ничего не даёт. JWT в URL
+больше не передаётся. Невалидный/просроченный тикет → `401`, соединение не
+поднимается.
 
 ### Клиент → сервер
 
@@ -459,58 +304,72 @@ JWT проверяется **до** апгрейда — при невалидн
 
 ```json
 {"type":"subscribed","chat_id":1}
-{"type":"message","chat_id":1,"user_id":1,"username":"alice","body":"привет","created_at":1730000000}
+{"type":"message","chat_id":1,"user_id":1,"username":"Алиса","body":"привет","created_at":1730000000}
 {"type":"error","error":"…"}
 ```
-
-> ⚡ Событие `message` приходит **всем** WS-подписчикам чата одновременно с `POST /api/chats/:id/messages`.
 
 ---
 
 ## 🗄 Схема БД
 
-Таблицы создаются при старте (`db.migrate()`), идемпотентно:
+Таблицы создаются при старте (`db.migrate()`), идемпотентно; новые колонки
+досоздаются через `ALTER TABLE`.
 
 ```sql
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY,
-  username      TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
+CREATE TABLE users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id     TEXT UNIQUE NOT NULL,   -- "00000001"
+  phone         TEXT UNIQUE NOT NULL,   -- "+79990001122"
+  username      TEXT UNIQUE,            -- "alice"
+  first_name    TEXT,
+  last_name     TEXT,
+  password_hash TEXT,                   -- argon2id; NULL = регистрация не завершена
+  created_at    INTEGER NOT NULL,
+  avatar_color  TEXT NOT NULL DEFAULT '#89b4fa'
 );
 
-CREATE TABLE IF NOT EXISTS chats (
-  id         INTEGER PRIMARY KEY,
-  name       TEXT NOT NULL,
-  owner_id   INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+CREATE TABLE phone_codes (
+  phone      TEXT PRIMARY KEY,
+  code       TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,          -- unix-seconds
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  sent_at    INTEGER NOT NULL DEFAULT 0 -- для кулдауна перевыдачи
 );
 
-CREATE TABLE IF NOT EXISTS chat_members (
+CREATE TABLE chats (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id  TEXT UNIQUE NOT NULL,      -- "00000002" (dm/saved) / "-00000000000001" (group)
+  kind       TEXT NOT NULL,             -- dm | group | channel | saved
+  title      TEXT,
+  owner_id   INTEGER,
+  created_at INTEGER NOT NULL,
+  dm_key     TEXT                       -- "1:2" — один диалог на пару
+);
+
+CREATE TABLE chat_members (
   chat_id INTEGER,
   user_id INTEGER,
   PRIMARY KEY (chat_id, user_id)
 );
 
-CREATE TABLE IF NOT EXISTS messages (
-  id         INTEGER PRIMARY KEY,
+CREATE TABLE messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   chat_id    INTEGER NOT NULL,
   user_id    INTEGER NOT NULL,
   body       TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
-CREATE INDEX IF NOT EXISTS idx_members_user  ON chat_members(user_id);
+CREATE INDEX idx_messages_chat ON messages(chat_id, id);
+CREATE INDEX idx_members_user  ON chat_members(user_id);
+CREATE UNIQUE INDEX idx_chats_dm_key ON chats(dm_key) WHERE dm_key IS NOT NULL;
 ```
 
-> ### ⚠️ Особенности rqlite, учтённые в коде
->
-> - `POST /db/execute` **не возвращает** `last_insert_rowid()` и **не поддерживает** `RETURNING`.
-> - После `INSERT` id получается отдельным `SELECT`:
->   - по уникальному полю (`username`, `name + owner_id`) — для users/chats,
->   - по `MAX(id)+1` — для messages.
-> - Если rqlite недоступен при старте — сервер завершится с подсказкой, как его запустить.
+> **Особенности rqlite, учтённые в коде**
+> - `/db/execute` не возвращает `last_insert_rowid()` и не поддерживает `RETURNING`:
+>   id читается отдельным `SELECT` по уникальному полю.
+> - `server_id` вычисляется из `MAX(id)`, поэтому конкурентные создания
+>   разрешаются через `INSERT … ON CONFLICT DO NOTHING` + повтор.
 
 ---
 
@@ -518,16 +377,17 @@ CREATE INDEX IF NOT EXISTS idx_members_user  ON chat_members(user_id);
 
 ```bash
 cargo check                    # быстрая проверка типов
+cargo test                     # юнит-тесты (валидация, server_id, dm_key)
 cargo run                      # debug-сборка и запуск
 RUST_LOG=debug cargo run       # подробные логи
-cargo fmt                      # форматирование
-cargo clippy -- -D warnings    # линтер
+cargo fmt
+cargo clippy -- -D warnings
 ```
 
 Перед коммитом:
 
 ```bash
-cargo check && cargo build --release
+cargo check && cargo test && cargo build --release
 ./run.sh   # smoke-тест всего стека
 ```
 
@@ -539,96 +399,69 @@ cargo check && cargo build --release
 
 ```bash
 # живость
-curl -s localhost:4001/readyz
-curl -s localhost:3000/healthz
+curl -s localhost:4001/readyz && echo
+curl -s localhost:3000/healthz; echo
 
-# регистрация
-curl -s -X POST localhost:3000/api/register \
-  -H 'content-type: application/json' \
-  -d '{"username":"alice","password":"secret123"}'
+# 1. старт регистрации: код появится в логе сервера
+curl -s -X POST localhost:3000/api/auth/start \
+  -H 'content-type: application/json' -d '{"phone":"+79990001122"}'
 
-# логин → токен в переменную
-TOKEN=$(curl -s -X POST localhost:3000/api/login \
+# 2. код из лога (например 123456) -> verify и finish
+CODE=123456
+curl -s -X POST localhost:3000/api/auth/verify \
+  -H 'content-type: application/json' -d "{\"phone\":\"+79990001122\",\"code\":\"$CODE\"}"
+
+TOKEN=$(curl -s -X POST localhost:3000/api/auth/finish \
   -H 'content-type: application/json' \
-  -d '{"username":"alice","password":"secret123"}' \
+  -d "{\"phone\":\"+79990001122\",\"code\":\"$CODE\",\"first_name\":\"Алиса\",\"username\":\"alice\",\"password\":\"password123\",\"password_repeat\":\"password123\"}" \
   | grep -o '"token":"[^"]*' | cut -d'"' -f4)
 
-# создать чат
-curl -s -X POST localhost:3000/api/chats \
-  -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"name":"general"}'
+# 3. группа и сообщение
+curl -s -X POST localhost:3000/api/chats/group \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"kind":"group","title":"general"}'
 
-# отправить и получить сообщения
-curl -s -X POST localhost:3000/api/chats/1/messages \
-  -H "authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' \
+curl -s -X POST localhost:3000/api/chats/2/messages \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"body":"привет"}'
 
-curl -s localhost:3000/api/chats/1/messages \
+curl -s "localhost:3000/api/chats/2/messages?limit=50" \
   -H "authorization: Bearer $TOKEN"
 
-# данные реально в rqlite
-curl -s -X POST localhost:4001/db/query \
-  -H 'content-type: application/json' \
-  -d '["SELECT id, username FROM users"]'
-
-curl -s -X POST localhost:4001/db/query \
-  -H 'content-type: application/json' \
-  -d '["SELECT id, chat_id, body FROM messages"]'
+# 4. тикет для WebSocket
+curl -s localhost:3000/api/ws-ticket -H "authorization: Bearer $TOKEN"
 ```
 
-> 🖥 **Браузер:** открой `http://localhost:3000/`, зарегистрируй `alice`, создай чат.
-> Открой приватное окно, зарегистрируй `bob`, вступи в чат по ID —
-> сообщения должны появляться у обоих мгновенно.
+> 🖥 **Браузер:** открой `http://localhost:3000/`, зарегистрируй `alice`,
+> создай группу. Открой приватное окно, зарегистрируй `bob`, вступи в группу по
+> `server_id` (`-00000000000001`) — сообщения появятся у обоих мгновенно.
 
 ---
 
 ## 🚧 Известные ограничения
 
-<table>
-<tr>
-<td align="center" width="40">🔑</td>
-<td>Нет refresh-токенов: срок жизни JWT — 7 дней</td>
-</tr>
-<tr>
-<td align="center">🔒</td>
-<td>Пароли хешируются argon2 без pepper; <code>JWT_SECRET</code> — из env</td>
-</tr>
-<tr>
-<td align="center">🌍</td>
-<td>Чаты «публичные»: любой аутентифицированный может вступить, зная <code>id</code>. Приватность — вне текущей версии</td>
-</tr>
-<tr>
-<td align="center">🛡</td>
-<td>Нет rate-limit и капчи на <code>/api/register</code> и <code>/api/login</code></td>
-</tr>
-<tr>
-<td align="center">🌐</td>
-<td>CORS открыт (<code>CorsLayer::permissive()</code>) — сузить до origin в проде</td>
-</tr>
-<tr>
-<td align="center">📜</td>
-<td>Нет пагинации истории: <code>?limit=</code> возвращает последние N (макс. 200). Курсорная пагинация — в следующих версиях</td>
-</tr>
-</table>
+| | Ограничение |
+|---|---|
+| 🔓 | **Нет E2EE.** Сообщения хранятся в БД открытым текстом; обещание «E2EE» в описании репозитория к этой ветке не относится |
+| 🗄 | У rqlite нет аутентификации: держите его на loopback (так делает `run.sh`) или закрывайте rqlite-паролем |
+| 🔑 | Нет refresh-токенов: JWT живёт 7 дней, отозвать его нельзя |
+| 🌍 | Чаты «публичные»: любой аутентифицированный вступает в `group`/`channel`, зная `id` |
+| 📜 | Нет пагинации: `?limit=` отдаёт последние N (макс. 200) |
+| 🖼 | Нет вложений, удаления и редактирования сообщений |
+| 📱 | Код «SMS» пишется в лог сервера — реальной отправки нет |
+| 🧮 | Rate-limit in-memory: считается в рамках одного процесса |
+| 🌐 | `CorsLayer::permissive()` — для прода сузить до своего origin |
 
 ---
 
 ## 📄 Лицензия
 
-<div align="center">
-
 **MIT** — делай что хочешь, только не удаляй копирайт.
 
-Учебный проект. Используй как угодно.
-
-</div>
+Учебный проект.
 
 ---
 
 <div align="center">
-
 <sub>Сделано с 🦀 и ❤️ на Rust</sub>
-
 </div>
