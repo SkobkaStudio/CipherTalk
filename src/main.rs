@@ -1,5 +1,8 @@
-//! Точка входа мессенджера: конфиг, подключение к rqlite, миграции,
-//! сборка роутера axum (API + JWT-мидлварь + WebSocket + статика) и запуск.
+//! Точка входа CipherTalk.
+//!
+//! Собирает приложение по MVC-слоям, проверяет доступность rqlite, применяет
+//! миграции, поднимает HTTP + WebSocket на порту из конфигурации и раздаёт
+//! статику из `web/`.
 
 mod config;
 mod controllers;
@@ -10,91 +13,86 @@ mod services;
 mod utils;
 mod ws;
 
-use crate::config::Config;
-use crate::db::Db;
-use crate::ws::AppState;
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::Router;
+use config::Config;
+use db::Db;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
-use tracing_subscriber::fmt::time::FormatTime;
-
-/// Проверка живости: GET /healthz -> "ok"
-async fn healthz() -> &'static str {
-    "ok"
-}
-
-/// Время в логах — локальное время процесса (часовой пояс сервера, например
-/// +07:00), а не UTC: стандартный форматтер tracing-subscriber печатает UTC,
-/// из-за чего логи «отстают» на смещение пояса.
-struct LocalTimer;
-
-impl FormatTime for LocalTimer {
-    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
-        write!(w, "{}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
-    }
-}
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::EnvFilter;
+use ws::AppState;
 
 #[tokio::main]
 async fn main() {
-    // Логирование через tracing-subscriber
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .with_timer(LocalTimer)
-        .init();
+    init_tracing();
 
-    let cfg = Config::from_env();
-    println!(
-        "Конфигурация: PORT={}, RQLITE_URL={}",
-        cfg.port, cfg.rqlite_url
-    );
+    let config = Config::from_env();
 
-    // Подключение к rqlite: без него приложение бессмысленно — падаем с подсказкой
-    let db = Db::new(cfg.rqlite_url.clone());
-    if let Err(e) = db.check_connection().await {
-        eprintln!("ОШИБКА: {e}");
+    // 1. Проверяем rqlite ещё до старта сервера: без БД приложение бесполезно.
+    let db = Db::new(&config.rqlite_url);
+    if let Err(error) = db.ensure_ready().await {
+        eprintln!("❌ {error}");
+        eprintln!("   Подсказка: запусти rqlite, например:");
+        eprintln!("     rqlited -node-id 1 ./data");
+        eprintln!("   или:");
+        eprintln!("     docker run -d -p 4001:4001 rqlite/rqlite");
         std::process::exit(1);
     }
-    if let Err(e) = db.migrate().await {
-        eprintln!("ОШИБКА миграций: {e}");
+
+    if let Err(error) = db.init_schema().await {
+        eprintln!("❌ Не удалось применить схему БД: {error}");
         std::process::exit(1);
     }
-    tracing::info!("Схема rqlite готова");
 
-    // Broadcast-канал для WS-событий (буфер 1024 сообщения)
-    let (tx, _rx_stub) = tokio::sync::broadcast::channel::<crate::models::message::Message>(1024);
-    let state = Arc::new(AppState {
+    // 2. Общий broadcast-канал: сюда контроллеры кладут новые сообщения,
+    //    а WS-соединения читают их и фильтруют по подпискам.
+    let (tx, _rx) = broadcast::channel::<models::message::Message>(1024);
+
+    let state = AppState {
         db,
-        jwt_secret: cfg.jwt_secret.clone(),
-        tx: Arc::new(tx),
-    });
-    let _ = _rx_stub; // сам канал живёт в AppState
+        jwt_secret: Arc::new(config.jwt_secret.clone()),
+        tx,
+    };
 
-    // Публичная часть API (без JWT): авторизация v2 по телефону
-    let public = Router::new()
-        .route("/auth/start", post(controllers::auth::start))
-        .route("/auth/verify", post(controllers::auth::verify))
-        .route("/auth/finish", post(controllers::auth::finish))
-        .route("/auth/login", post(controllers::auth::login))
-        .route("/auth/check-username", get(controllers::auth::check_username));
+    let app = build_router(state);
 
-    // Защищённая часть API: мидлварь require_auth проверяет Bearer JWT
-    // и кладёт Claims в request.extensions — контроллеры читают их через Extension<Claims>.
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("❌ Не удалось занять порт {}: {error}", config.port);
+            std::process::exit(1);
+        }
+    };
+
+    tracing::info!("CipherTalk запущен: http://localhost:{}", config.port);
+    tracing::info!("rqlite: {}", config.rqlite_url);
+
+    if let Err(error) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+    {
+        eprintln!("❌ HTTP-сервер завершился с ошибкой: {error}");
+        std::process::exit(1);
+    }
+}
+
+/// Собирает роутер: публичные роуты, защищённые через route_layer, статика.
+fn build_router(state: AppState) -> Router {
+    // Защищённые маршруты: мидлварь применяется только к ним, register/login
+    // остаются публичными.
     let protected = Router::new()
-        .route("/me", get(controllers::auth::me))
-        .route("/chats", get(controllers::chats::list).post(controllers::chats::create))
-        .route("/chats/dm", post(controllers::chats::dm))
-        .route("/chats/group", post(controllers::chats::group))
-        .route("/chats/by-id/:server_id", get(controllers::chats::by_server_id))
-        .route("/users/:server_id", get(controllers::chats::user_by_server_id))
-        .route("/chats/:id/join", post(controllers::chats::join))
         .route(
-            "/chats/:id/messages",
+            "/api/chats",
+            get(controllers::chats::list).post(controllers::chats::create),
+        )
+        .route("/api/chats/:id/join", post(controllers::chats::join))
+        .route(
+            "/api/chats/:id/messages",
             get(controllers::messages::list).post(controllers::messages::send),
         )
         .route_layer(axum::middleware::from_fn_with_state(
@@ -102,22 +100,72 @@ async fn main() {
             middleware::require_auth,
         ));
 
-    // Статика фронтенда: неизвестные пути отдают index.html (SPA-роутинг)
+    // SPA-статика: если файла нет — отдаём index.html (fallback).
     let static_files = ServeDir::new("web").not_found_service(ServeFile::new("web/index.html"));
 
-    let app = Router::new()
+    Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler))
-        .nest("/api", Router::new().merge(public).merge(protected))
+        .route("/api/register", post(controllers::auth::register))
+        .route("/api/login", post(controllers::auth::login))
+        .merge(protected)
+        // Неизвестный /api/* должен отвечать JSON-ошибкой, а не index.html.
+        .route("/api/*path", any(api_not_found))
         .fallback_service(static_files)
-        // CORS: разрешаем всё — фронтенд может открываться с file:// или другого порта
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
-        .with_state(state.clone());
+        .with_state(state)
+}
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("не удалось привязаться к порту");
-    tracing::info!("HTTP сервер запущен на http://{} (порт {})", addr, cfg.port);
-    axum::serve(listener, app).await.expect("сервер завершился с ошибкой");
+/// GET /healthz — простая проверка живости.
+async fn healthz() -> &'static str {
+    "ok"
+}
+
+/// JSON 404 для неизвестных API-маршрутов.
+async fn api_not_found() -> utils::error::AppError {
+    utils::error::AppError::NotFound("Маршрут API не найден".into())
+}
+
+/// Инициализация логов; уровень управляется через RUST_LOG.
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .compact()
+        .init();
+}
+
+/// Ждёт Ctrl+C или SIGTERM для корректной остановки.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::warn!("не удалось повесить обработчик Ctrl+C: {error}");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::warn!("не удалось повесить обработчик SIGTERM: {error}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("получен сигнал остановки, завершаюсь…");
 }

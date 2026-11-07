@@ -1,286 +1,175 @@
-//! Авторизация v2: телефон -> код из «SMS» (лог) -> профиль -> username -> пароль.
-//! Весь SQL и бизнес-правила живут здесь; про HTTP сервис ничего не знает.
+//! Сервис авторизации: регистрация и вход.
+//!
+//! Слой не зависит от axum: принимает `Db`, секрет и DTO, возвращает модель
+//! или `AppError`. Пароли хешируются argon2id в `spawn_blocking`, чтобы не
+//! блокировать async-рантайм на время вычислений.
 
-use once_cell::sync::Lazy;
-use regex::Regex;
-use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::db::Db;
-use crate::models::user::{
-    AuthResponse, FinishRegisterRequest, LoginRequest, StartAuthResponse, UsernameCheckResponse, User,
-};
+use crate::db::{Db, Row};
+use crate::models::user::{AuthRequest, AuthResponse, User};
 use crate::utils::error::{AppError, AppResult};
-use crate::utils::{jwt, password, server_id};
+use crate::utils::jwt::{create_token, now_ts};
+use crate::utils::password;
+use serde_json::json;
 
-fn now_ts() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
-}
+/// Минимальная длина пароля.
+const MIN_PASSWORD_LEN: usize = 6;
+/// Максимальная длина пароля (ограничение argon2 и здравого смысла).
+const MAX_PASSWORD_LEN: usize = 128;
 
-/// Телефон после нормализации: "+", затем 8..15 цифр, первая не ноль.
-static PHONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\+[1-9][0-9]{7,14}$").unwrap());
-/// @username: латиница, цифры, подчёркивание, 4..32 символа.
-static USERNAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_]{4,32}$").unwrap());
+/// Регистрирует нового пользователя и сразу выдаёт JWT.
+pub async fn register(db: &Db, secret: &str, request: AuthRequest) -> AppResult<AuthResponse> {
+    let (username, password_value) = validate_credentials(&request.username, &request.password)?;
 
-/// Нормализация номера: убираем пробелы, скобки, дефисы; ведущий 8 (росформат)
-/// заменяем на +7; если "+" нет — добавляем.
-pub fn normalize_phone(raw: &str) -> String {
-    let cleaned: String = raw
-        .chars()
-        .filter(|c| !matches!(c, ' ' | '(' | ')' | '-' | '\u{00A0}'))
-        .collect();
-    if let Some(rest) = cleaned.strip_prefix('+') {
-        format!("+{rest}")
-    } else if let Some(rest) = cleaned.strip_prefix('8') {
-        format!("+7{rest}")
-    } else {
-        format!("+{cleaned}")
-    }
-}
-
-/// Чтение строки users (SELECT по любому уникальному ключу) -> модель User.
-/// Поле может отсутствовать (NULL) — тогда Option::None.
-fn row_to_user(r: &serde_json::Value) -> User {
-    let opt_str = |k: &str| r.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
-    User {
-        id: r.get("id").and_then(|v| v.as_i64()).unwrap_or(0),
-        server_id: opt_str("server_id").unwrap_or_default(),
-        phone: opt_str("phone").unwrap_or_default(),
-        username: opt_str("username"),
-        first_name: opt_str("first_name"),
-        last_name: opt_str("last_name"),
-        created_at: r.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0),
-        avatar_color: opt_str("avatar_color").unwrap_or_else(|| "#89b4fa".to_string()),
-    }
-}
-
-const USER_COLS: &str =
-    "id, server_id, phone, username, first_name, last_name, created_at, avatar_color";
-
-/// Шаг 1: старт авторизации по номеру.
-/// Зарегистрированный номер (с паролем) -> сразу экран пароля;
-/// нового номера нет -> генерируем 6-значный код и пишем его в лог (MVP без SMS).
-pub async fn start_auth(db: &Db, phone_raw: &str) -> AppResult<StartAuthResponse> {
-    let phone = normalize_phone(phone_raw);
-    if !PHONE_RE.is_match(&phone) {
-        return Err(AppError::BadRequest("Неверный номер телефона".into()));
-    }
-    // Ищем пользователя с завершённой регистрацией (password_hash NOT NULL)
-    let rows = db
-        .query_rows("SELECT id, password_hash FROM users WHERE phone = ?", &[json!(&phone)])
-        .await?;
-    let registered = rows
-        .first()
-        .map(|r| r.get("password_hash").and_then(|v| v.as_str()).is_some())
-        .unwrap_or(false);
-    if registered {
-        return Ok(StartAuthResponse { registered: true, needs_code: false });
-    }
-    // Новый (или незавершённый) номер: выдаём одноразовый код, TTL 5 минут.
-    // ВАЖНО: если активный НЕИСТЁКШИЙ код уже есть — переиспользуем его,
-    // а не генерируем новый. Иначе повторный /auth/start (а фронт вызывает
-    // его и перед verify) перезаписывал код во БД, и старый код из лога
-    // перставал быть валидным — пользователь видел «Неверный код» /
-    // «Сначала запросите код», хотя код в логе был.
+    // UNIQUE-поле username: сначала понятная проверка, затем страховка на гонку.
     let existing = db
-        .query_rows(
-            "SELECT code FROM phone_codes WHERE phone = ? AND expires_at >= ?",
-            &[json!(&phone), json!(now_ts())],
+        .query_one(
+            "SELECT id FROM users WHERE username = ?",
+            &[json!(&username)],
         )
         .await?;
-    let code = match existing.first().and_then(|r| r.get("code")).and_then(|v| v.as_str()) {
-        Some(c) => c.to_string(),
-        None => server_id::random_code(),
-    };
-    let expires = now_ts() + 300;
-    db.exec_params(
-        "INSERT OR REPLACE INTO phone_codes (phone, code, expires_at, attempts) VALUES (?, ?, ?, 0)",
-        &[json!(&phone), json!(&code), json!(expires)],
-    )
-    .await?;
-    // В MVP вместо реальной SMS код пишется в лог сервера
-    tracing::info!("SMS-код для {}: {}", phone, code);
-    Ok(StartAuthResponse { registered: false, needs_code: true })
-}
+    if existing.is_some() {
+        return Err(AppError::Conflict("Имя пользователя уже занято".into()));
+    }
 
-/// Шаг 2: проверка кода. Срок, счётчик попыток (макс. 5), совпадение.
-pub async fn verify_code(db: &Db, phone_raw: &str, code: &str) -> AppResult<()> {
-    let phone = normalize_phone(phone_raw);
-    let rows = db
-        .query_rows(
-            "SELECT code, expires_at, attempts FROM phone_codes WHERE phone = ?",
-            &[json!(&phone)],
+    // argon2 — CPU-ёмкая операция; уводим её с async-воркеров.
+    let password_for_hash = password_value.clone();
+    let password_hash =
+        tokio::task::spawn_blocking(move || password::hash_password(&password_for_hash))
+            .await
+            .map_err(|error| AppError::Internal(format!("задача хеширования упала: {error}")))??;
+
+    let created_at = now_ts();
+    let insert = db
+        .execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+            &[json!(&username), json!(password_hash), json!(created_at)],
         )
-        .await?;
-    let row = rows.first().ok_or_else(|| AppError::BadRequest("Сначала запросите код".into()))?;
-    let stored = row.get("code").and_then(|v| v.as_str()).unwrap_or_default();
-    let expires = row.get("expires_at").and_then(|v| v.as_i64()).unwrap_or(0);
-    let attempts = row.get("attempts").and_then(|v| v.as_i64()).unwrap_or(0);
-    if expires < now_ts() {
-        return Err(AppError::BadRequest("Код истёк, запросите новый".into()));
+        .await;
+
+    if let Err(error) = insert {
+        // На случай параллельной регистрации того же имени.
+        let message = error.to_string();
+        if message.contains("UNIQUE") || message.contains("unique") {
+            return Err(AppError::Conflict("Имя пользователя уже занято".into()));
+        }
+        return Err(error);
     }
-    if attempts >= 5 {
-        return Err(AppError::BadRequest("Слишком много попыток, запросите новый код".into()));
-    }
-    if code.trim() != stored {
-        // Увеличиваем счётчик неверных попыток
-        db.exec_params(
-            "UPDATE phone_codes SET attempts = attempts + 1 WHERE phone = ?",
-            &[json!(&phone)],
+
+    // rqlite не поддерживает RETURNING — читаем по уникальному username.
+    let row = db
+        .query_one(
+            "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",
+            &[json!(&username)],
         )
-        .await?;
-        return Err(AppError::Unauthorized("Неверный код".into()));
-    }
-    Ok(())
-}
-
-/// Валидация и нормализация @username: trim, снятие ведущего "@", regex.
-fn validate_username(raw: &str) -> AppResult<String> {
-    let u = raw.trim().trim_start_matches('@').to_string();
-    if !USERNAME_RE.is_match(&u) {
-        return Err(AppError::BadRequest(
-            "Username: 4–32 символа, только латиница, цифры и _".into(),
-        ));
-    }
-    Ok(u)
-}
-
-/// Шаг 3–6: завершение регистрации. Код уже подтверждён frontend'ом —
-/// проверяем ещё раз (защита от прямого вызова endpoint'а), создаём
-/// пользователя, его saved-чат («Избранное») и выдаём JWT.
-pub async fn finish_register(db: &Db, secret: &str, req: &FinishRegisterRequest) -> AppResult<AuthResponse> {
-    let phone = normalize_phone(&req.phone);
-    // Номер могли зарегистрировать, пока пользователь заполнял профиль (вторая
-    // вкладка/устройство). После успешной регистрации код удаляется, поэтому
-    // verify_code ниже ответил бы невнятным «Сначала запросите код» — проверяем
-    // регистрацию заранее и отправляем такого пользователя на вход по паролю.
-    let already = db
-        .query_rows("SELECT password_hash FROM users WHERE phone = ?", &[json!(&phone)])
         .await?
-        .first()
-        .map(|r| r.get("password_hash").and_then(|v| v.as_str()).is_some())
-        .unwrap_or(false);
-    if already {
-        return Err(AppError::Conflict(
-            "Этот номер уже зарегистрирован — войдите с паролем".into(),
+        .ok_or_else(|| AppError::Internal("пользователь не найден после INSERT".into()))?;
+
+    let user = row_to_user(&row)?;
+    let token = create_token(user.id, &user.username, secret)?;
+
+    Ok(AuthResponse {
+        token,
+        user_id: user.id,
+        username: user.username,
+    })
+}
+
+/// Проверяет логин и пароль, возвращая JWT.
+pub async fn login(db: &Db, secret: &str, request: AuthRequest) -> AppResult<AuthResponse> {
+    let username = request.username.trim();
+    if username.is_empty() || request.password.is_empty() {
+        return Err(AppError::BadRequest(
+            "Укажите имя пользователя и пароль".into(),
         ));
     }
-    verify_code(db, &phone, &req.code).await?;
 
-    // Имя обязательно, фамилия опциональна
-    let first = req.first_name.trim();
-    if first.is_empty() || first.chars().count() > 64 {
-        return Err(AppError::BadRequest("Имя обязательно (до 64 символов)".into()));
-    }
-    let last = match req.last_name.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some(l) if l.chars().count() <= 64 => Some(l.to_string()),
-        Some(_) => return Err(AppError::BadRequest("Фамилия слишком длинная".into())),
-    };
-    let username = validate_username(&req.username)?;
-    let rows = db.query_rows("SELECT id FROM users WHERE username = ?", &[json!(&username)]).await?;
-    if !rows.is_empty() {
-        return Err(AppError::Conflict("Этот username уже занят".into()));
-    }
-    if req.password.len() < 8 {
-        return Err(AppError::BadRequest("Пароль должен быть не короче 8 символов".into()));
-    }
-    if req.password != req.password_repeat {
-        return Err(AppError::BadRequest("Пароли не совпадают".into()));
-    }
-    let hash = password::hash_password(&req.password)?;
-    let server = server_id::next_user_server_id(db).await?;
-    let color = server_id::avatar_color_for(&server);
-    let ts = now_ts();
-    db.exec_params(
-        "INSERT INTO users (server_id, phone, username, first_name, last_name, \
-         password_hash, created_at, avatar_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        &[
-            json!(&server), json!(&phone), json!(&username), json!(first),
-            json!(last.clone()), json!(hash), json!(ts), json!(color),
-        ],
-    )
-    .await?;
-    // Код больше не нужен
-    db.exec_params("DELETE FROM phone_codes WHERE phone = ?", &[json!(&phone)]).await?;
-    // rqlite не поддерживает RETURNING — читаем созданную строку по уникальному phone
-    let rows = db
-        .query_rows(&format!("SELECT {USER_COLS} FROM users WHERE phone = ?"), &[json!(&phone)])
-        .await?;
-    let user = rows.first().map(row_to_user).ok_or_else(|| {
-        AppError::Internal("Пользователь не найден после INSERT".into())
-    })?;
-
-    // Saved-чат «Избранное»: server_id совпадает с server_id пользователя
-    // (не конфликт — другая таблица), owner — сам пользователь.
-    db.exec_params(
-        "INSERT INTO chats (server_id, kind, title, owner_id, created_at) VALUES (?, 'saved', NULL, ?, ?)",
-        &[json!(&user.server_id), json!(user.id), json!(ts)],
-    )
-    .await?;
-    let rows = db
-        .query_rows("SELECT id FROM chats WHERE server_id = ?", &[json!(&user.server_id)])
-        .await?;
-    if let Some(cid) = rows.first().and_then(|r| r.get("id")).and_then(|v| v.as_i64()) {
-        db.exec_params(
-            "INSERT OR IGNORE INTO chat_members (chat_id, user_id) VALUES (?, ?)",
-            &[json!(cid), json!(user.id)],
+    let row = db
+        .query_one(
+            "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",
+            &[json!(username)],
         )
         .await?;
-    }
 
-    let token = jwt::issue_token(secret, user.id, &username)?;
-    Ok(AuthResponse { token, user })
-}
-
-/// Логин по телефону и паролю.
-pub async fn login(db: &Db, secret: &str, req: &LoginRequest) -> AppResult<AuthResponse> {
-    let phone = normalize_phone(&req.phone);
-    let rows = db
-        .query_rows(
-            &format!("SELECT {USER_COLS}, password_hash FROM users WHERE phone = ?"),
-            &[json!(&phone)],
-        )
-        .await?;
-    let row = rows
-        .first()
-        .ok_or_else(|| AppError::Unauthorized("Неверный номер или пароль".into()))?;
-    let hash = row.get("password_hash").and_then(|v| v.as_str());
-    let Some(hash) = hash else {
-        // Регистрация начата, но не завершена — идём по потоку кода
-        return Err(AppError::BadRequest("Сначала завершите регистрацию по коду".into()));
+    let Some(row) = row else {
+        return Err(AppError::Unauthorized(
+            "Неверное имя пользователя или пароль".into(),
+        ));
     };
-    if !password::verify_password(&req.password, hash) {
-        return Err(AppError::Unauthorized("Неверный номер или пароль".into()));
+
+    let user = row_to_user(&row)?;
+    let password_value = request.password;
+    let hash = user.password_hash.clone();
+
+    let valid =
+        tokio::task::spawn_blocking(move || password::verify_password(&password_value, &hash))
+            .await
+            .map_err(|error| {
+                AppError::Internal(format!("задача проверки пароля упала: {error}"))
+            })?;
+
+    if !valid {
+        return Err(AppError::Unauthorized(
+            "Неверное имя пользователя или пароль".into(),
+        ));
     }
-    let user = row_to_user(row);
-    let token = jwt::issue_token(secret, user.id, user.username.as_deref().unwrap_or(""))?;
-    Ok(AuthResponse { token, user })
+
+    let token = create_token(user.id, &user.username, secret)?;
+
+    Ok(AuthResponse {
+        token,
+        user_id: user.id,
+        username: user.username,
+    })
 }
 
-/// Проверка доступности @username (GET /api/auth/check-username, debounce на фронте).
-pub async fn check_username(db: &Db, raw: &str) -> AppResult<UsernameCheckResponse> {
-    let u = raw.trim().trim_start_matches('@');
-    if !USERNAME_RE.is_match(u) {
-        return Ok(UsernameCheckResponse {
-            available: false,
-            reason: Some("Недопустимые символы".into()),
-        });
+/// Тримит и валидирует учётные данные.
+fn validate_credentials(raw_username: &str, password: &str) -> AppResult<(String, String)> {
+    let username = raw_username.trim();
+
+    let username_len = username.chars().count();
+    if !(3..=32).contains(&username_len) {
+        return Err(AppError::BadRequest(
+            "Имя пользователя должно быть от 3 до 32 символов".into(),
+        ));
     }
-    let rows = db.query_rows("SELECT 1 AS ok FROM users WHERE username = ?", &[json!(u)]).await?;
-    if rows.is_empty() {
-        Ok(UsernameCheckResponse { available: true, reason: None })
-    } else {
-        Ok(UsernameCheckResponse { available: false, reason: Some("занят".into()) })
+    if !username
+        .chars()
+        .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-' | '.'))
+    {
+        return Err(AppError::BadRequest(
+            "Имя пользователя может содержать буквы, цифры, '_', '-' и '.'".into(),
+        ));
     }
+
+    let password_len = password.chars().count();
+    if password_len < MIN_PASSWORD_LEN {
+        return Err(AppError::BadRequest(format!(
+            "Пароль должен быть не короче {MIN_PASSWORD_LEN} символов"
+        )));
+    }
+    if password_len > MAX_PASSWORD_LEN {
+        return Err(AppError::BadRequest(format!(
+            "Пароль должен быть не длиннее {MAX_PASSWORD_LEN} символов"
+        )));
+    }
+
+    Ok((username.to_string(), password.to_string()))
 }
 
-/// Получение пользователя по внутреннему id (для контроллера /api/me).
-pub async fn get_user_by_id(db: &Db, user_id: i64) -> AppResult<User> {
-    let rows = db
-        .query_rows(&format!("SELECT {USER_COLS} FROM users WHERE id = ?"), &[json!(user_id)])
-        .await?;
-    rows.first()
-        .map(row_to_user)
-        .ok_or_else(|| AppError::NotFound("Пользователь не найден".into()))
+/// Преобразует строку БД в модель пользователя.
+fn row_to_user(row: &Row) -> AppResult<User> {
+    Ok(User {
+        id: row
+            .i64("id")
+            .ok_or_else(|| AppError::Internal("в строке users нет id".into()))?,
+        username: row
+            .string("username")
+            .ok_or_else(|| AppError::Internal("в строке users нет username".into()))?,
+        password_hash: row
+            .string("password_hash")
+            .ok_or_else(|| AppError::Internal("в строке users нет password_hash".into()))?,
+        created_at: row
+            .i64("created_at")
+            .ok_or_else(|| AppError::Internal("в строке users нет created_at".into()))?,
+    })
 }

@@ -1,5 +1,5 @@
-//! Вспомогательные модули: ошибки, пароли, JWT, server_id.
+//! Утилиты: JWT, пароли и единый тип ошибки.
+
 pub mod error;
 pub mod jwt;
 pub mod password;
-pub mod server_id;

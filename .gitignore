@@ -1,5 +1,17 @@
+# Сборка Rust
+/target
+
+# Данные и бинарник rqlite
+/data-rqlite
+/data
+/rqlited
+
+# Служебный git-репозиторий для обновления без .git
+.ciphertalk-src
+
+# Логи и локальные переменные
 *.log
-data-rqlite/db.sqlite
-data-rqlite/db.sqlite-shm
-data-rqlite/db.sqlite-wal
-data-rqlite/raft.db
+.env
+
+# Локальный кэш cargo (если ~/.cargo недоступен для записи)
+/.cargo-home

@@ -1,33 +1,33 @@
-# Манифест проекта мессенджера на Rust (axum + tokio + rqlite)
 [package]
 name = "messenger"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "CipherTalk — мессенджер на Rust + axum + rqlite"
 
 [dependencies]
-# Async-рантайм
+# HTTP-сервер, роутер и WebSocket
+axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-# HTTP / WebSocket сервер
-axum = { version = "0.7", features = ["ws", "macros"] }
-tower = "0.4"
+
+# Статика и CORS
 tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
-# HTTP-клиент к rqlite (rustls — без openssl)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-# Сериализация
+
+# Сериализация JSON
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# JWT HS256
+
+# HTTP-клиент к rqlite (только rustls, без OpenSSL)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Авторизация
 jsonwebtoken = "9"
-# Аргон2-хеширование паролей
 argon2 = "0.5"
-# Генерация случайных данных (salt, секрет JWT, SMS-коды)
 rand = "0.8"
-# Строгая валидация телефонов и @username (только формат, без конкатенации SQL)
-regex = "1"
-base64 = "0.22"
+
+# Логи
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Локальное время в логах (часовой пояс сервера вместо UTC)
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Утилиты для WebSocket (split sink/stream)
 futures-util = "0.3"
-once_cell = "1.21.4"

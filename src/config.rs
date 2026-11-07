@@ -1,48 +1,66 @@
-//! Конфигурация приложения: чтение переменных окружения с дефолтами.
+//! Конфигурация приложения.
+//!
+//! Все параметры читаются из переменных окружения. Если `JWT_SECRET` пуст
+//! или не задан — генерируется случайный секрет, а в лог пишется WARN:
+//! после перезапуска такие токены станут недействительными.
 
-use std::env;
+use rand::RngCore;
 
-/// Итоговая конфигурация, собираемая при старте сервера.
+/// Настройки, необходимые для запуска сервера.
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Порт HTTP-сервера
+    /// Порт HTTP-сервера (по умолчанию 3000).
     pub port: u16,
-    /// Базовый URL rqlite (например http://localhost:4001)
+    /// Базовый URL rqlite (по умолчанию http://localhost:4001).
     pub rqlite_url: String,
-    /// Секрет для подписи JWT (HS256)
+    /// Секрет для подписи JWT (HS256).
     pub jwt_secret: String,
 }
 
 impl Config {
-    /// Читает PORT, RQLITE_URL, JWT_SECRET из окружения.
-    /// Если JWT_SECRET не задан — генерирует случайный и печатает WARN в лог.
+    /// Читает конфигурацию из окружения и подставляет безопасные дефолты.
     pub fn from_env() -> Self {
-        let port = env::var("PORT")
+        let port = std::env::var("PORT")
             .ok()
-            .and_then(|s| s.parse().ok())
+            .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or(3000);
-        let rqlite_url =
-            env::var("RQLITE_URL").unwrap_or_else(|_| "http://localhost:4001".to_string());
-        // Удаём завершающий слэш, чтобы не получать //db/execute
-        let rqlite_url = rqlite_url.trim_end_matches('/').to_string();
 
-        let jwt_secret = match env::var("JWT_SECRET") {
-            Ok(s) if !s.is_empty() => s,
+        // Убираем завершающий слэш, чтобы не получить `//db/query`.
+        let rqlite_url = std::env::var("RQLITE_URL")
+            .ok()
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "http://localhost:4001".to_string());
+
+        let jwt_secret = match std::env::var("JWT_SECRET") {
+            Ok(value) if !value.trim().is_empty() => value,
             _ => {
-                // Случайный секрет на 32 байта, base64 — чтобы переживать перезапуск безопасно
-                use rand::Rng;
-                let mut rng = rand::thread_rng();
-                let bytes: [u8; 32] = rng.gen();
-                use base64::Engine;
-                let secret = base64::engine::general_purpose::STANDARD.encode(bytes);
+                let generated = random_secret();
                 tracing::warn!(
                     "JWT_SECRET не задан — сгенерирован случайный секрет. \
-                     Все выданные токены будут недействительны после перезапуска сервера."
+                     Токены перестанут действовать после перезапуска сервера."
                 );
-                secret
+                generated
             }
         };
 
-        Config { port, rqlite_url, jwt_secret }
+        Self {
+            port,
+            rqlite_url,
+            jwt_secret,
+        }
     }
+}
+
+/// Генерирует случайный 256-битный секрет в hex-виде.
+fn random_secret() -> String {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let mut secret = String::with_capacity(64);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        // `write!` в String не может завершиться ошибкой.
+        let _ = write!(secret, "{byte:02x}");
+    }
+    secret
 }

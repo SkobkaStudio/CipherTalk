@@ -1,4 +1,5 @@
-//! Модели данных (View-структуры для сериализации в JSON).
+//! Модели предметной области (слой M в MVC).
+
 pub mod chat;
 pub mod message;
 pub mod user;

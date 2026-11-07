@@ -1,51 +1,64 @@
-//! Контроллер сообщений: история и отправка + публикация в WS-брокер.
-//! Только HTTP-хендлеры: SQL — в services::chat_service.
+//! Контроллер сообщений: история чата и отправка.
+//!
+//! После успешного INSERT сообщение публикуется в broadcast-канал, откуда его
+//! получают все WebSocket-подписчики чата.
 
+use crate::controllers::json_body;
 use crate::models::message::{Message, SendMessageRequest};
 use crate::services::chat_service;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::jwt::Claims;
 use crate::ws::AppState;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
-use axum::Extension;
-use axum::Json;
+use axum::{Extension, Json};
 use serde::Deserialize;
-use std::sync::Arc;
 
-#[derive(Deserialize)]
+/// Query-параметр `?limit=50`.
+#[derive(Debug, Deserialize)]
 pub struct LimitQuery {
     limit: Option<i64>,
 }
 
 /// GET /api/chats/:id/messages?limit=50 — последние N сообщений по возрастанию.
-/// Доступ только участникам чата (403 иначе).
 pub async fn list(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<i64>,
-    Query(q): Query<LimitQuery>,
+    Path(chat_id): Path<i64>,
+    Query(query): Query<LimitQuery>,
 ) -> AppResult<Json<Vec<Message>>> {
-    if !chat_service::is_member(&state.db, id, claims.sub).await? {
-        return Err(AppError::Forbidden("Вы не состоите в этом чате".into()));
-    }
-    let limit = q.limit.unwrap_or(50);
-    let msgs = chat_service::recent_messages(&state.db, id, limit).await?;
-    Ok(Json(msgs))
+    ensure_chat_access(&state, chat_id, claims.sub).await?;
+
+    let limit = query.limit.unwrap_or(50);
+    let messages = chat_service::recent_messages(&state.db, chat_id, limit).await?;
+    Ok(Json(messages))
 }
 
-/// POST /api/chats/:id/messages {body} — сохраняет сообщение и публикует событие
-/// в broadcast-канал, откуда его получат все WS-подписчики этого чата.
+/// POST /api/chats/:id/messages {body} — сохранить и разослать сообщение.
 pub async fn send(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Path(id): Path<i64>,
-    Json(body): Json<SendMessageRequest>,
+    Path(chat_id): Path<i64>,
+    payload: Result<Json<SendMessageRequest>, JsonRejection>,
 ) -> AppResult<Json<Message>> {
-    if !chat_service::is_member(&state.db, id, claims.sub).await? {
+    let request = json_body(payload)?;
+    ensure_chat_access(&state, chat_id, claims.sub).await?;
+
+    let message = chat_service::save_message(&state.db, chat_id, claims.sub, &request.body).await?;
+
+    // Ошибка отправки означает лишь отсутствие подписчиков — это нормально.
+    let _ = state.tx.send(message.clone());
+
+    Ok(Json(message))
+}
+
+/// Проверяет, что чат существует и пользователь состоит в нём.
+async fn ensure_chat_access(state: &AppState, chat_id: i64, user_id: i64) -> AppResult<()> {
+    if !chat_service::chat_exists(&state.db, chat_id).await? {
+        return Err(AppError::NotFound("Чат не найден".into()));
+    }
+    if !chat_service::is_member(&state.db, chat_id, user_id).await? {
         return Err(AppError::Forbidden("Вы не состоите в этом чате".into()));
     }
-    // Имя автора берём из claims JWT — оно подтверждено подписью токена
-    let msg = chat_service::save_message(&state.db, id, claims.sub, &body.body).await?;
-    let _ = state.tx.send(msg.clone()); // публикация всем WS-коннектам
-    Ok(Json(msg))
+    Ok(())
 }

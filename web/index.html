@@ -1,108 +1,244 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#181825">
+  <meta name="description" content="CipherTalk — быстрый мессенджер на Rust, axum и rqlite">
   <title>CipherTalk — мессенджер</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <!-- Экран авторизации: пошаговый wizard (шаг 1..5) -->
-  <div id="auth-screen">
-    <div class="auth-card">
-      <!-- Шаг 1: номер телефона -->
-      <div id="auth-step-phone">
-        <h1>CipherTalk</h1>
-        <input id="phone" placeholder="+7 999 123-45-67" inputmode="tel" autocomplete="tel">
-        <button id="phone-next">Далее</button>
-      </div>
+  <!-- ══════════════════ ЭКРАН АВТОРИЗАЦИИ ══════════════════ -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-glow auth-glow-1" aria-hidden="true"></div>
+    <div class="auth-glow auth-glow-2" aria-hidden="true"></div>
 
-      <!-- Шаг для зарегистрированных: пароль -->
-      <div id="auth-step-password" hidden>
-        <h1>CipherTalk</h1>
-        <p>Пароль для <span id="pwd-phone"></span></p>
-        <input id="password" type="password" placeholder="Пароль" autocomplete="current-password">
-        <button id="password-next">Войти</button>
-        <a id="back-phone" href="#">← Другой номер</a>
-      </div>
-
-      <!-- Шаг 2: код из «SMS» -->
-      <div id="auth-step-code" hidden>
-        <h1>CipherTalk</h1>
-        <p>Код отправлен на <span id="code-phone"></span></p>
-        <p class="hint">(в MVP код пишется в лог сервера)</p>
-        <input id="code" inputmode="numeric" maxlength="6" placeholder="6 цифр" autocomplete="one-time-code">
-        <button id="code-next">Подтвердить</button>
-        <a id="back-phone-2" href="#">← Другой номер</a>
-      </div>
-
-      <!-- Шаги 3–5: профиль, username, пароль -->
-      <div id="auth-step-profile" hidden>
-        <h1>CipherTalk</h1>
-        <p>Завершим регистрацию</p>
-        <input id="first-name" placeholder="Имя" autocomplete="given-name">
-        <input id="last-name" placeholder="Фамилия (необязательно)" autocomplete="family-name">
-        <div class="username-row">
-          <span class="at-prefix">@</span><input id="username" placeholder="username" autocomplete="off">
+    <main class="auth-card">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">C<span class="brand-dot"></span></div>
+        <div class="brand-text">
+          <h1>CipherTalk</h1>
+          <p>Разговоры в реальном времени</p>
         </div>
-        <span id="username-status"></span>
-        <input id="new-password" type="password" placeholder="Пароль (мин. 8)" autocomplete="new-password">
-        <input id="new-password-repeat" type="password" placeholder="Повторите пароль" autocomplete="new-password">
-        <button id="profile-finish" disabled>Зарегистрироваться</button>
       </div>
 
-      <div id="auth-error"></div>
-    </div>
-  </div>
+      <div class="auth-tabs" role="tablist" aria-label="Режим авторизации">
+        <button class="auth-tab active" type="button" role="tab" aria-selected="true" data-mode="login">Вход</button>
+        <button class="auth-tab" type="button" role="tab" aria-selected="false" data-mode="register">Регистрация</button>
+      </div>
 
-  <!-- Основной экран: список чатов + окно сообщений -->
-  <div id="app-screen" hidden>
-    <aside id="sidebar">
-      <header>
-        <span id="me-name"></span>
-        <div class="side-actions">
-          <button id="profile-btn" title="Профиль">Профиль</button>
-          <button id="logout">Выйти</button>
-        </div>
-      </header>
-      <div id="chats-list"></div>
-      <form id="create-chat-form">
-        <input id="new-chat-name" placeholder="Новая группа">
-        <button type="submit" title="Создать группу">+</button>
-      </form>
-      <form id="join-chat-form">
-        <input id="join-chat-id" placeholder="ID чата / ссылка" inputmode="text">
-        <button type="submit" title="Открыть по ID">→</button>
-      </form>
-    </aside>
+      <form id="auth-form" class="auth-form" novalidate>
+        <label class="field">
+          <span>Имя пользователя</span>
+          <input id="auth-username" class="input" name="username" type="text"
+                 autocomplete="username" placeholder="например, alice"
+                 minlength="3" maxlength="32" spellcheck="false" required>
+        </label>
 
-    <main id="chat-area">
-      <header id="chat-header">
-        <button id="back-btn" hidden>←</button>
-        <span id="chat-title">Выбери чат</span>
-      </header>
-      <div id="messages"></div>
-      <form id="send-form" hidden>
-        <input id="message-input" placeholder="Сообщение..." autocomplete="off">
-        <button type="submit">Отправить</button>
+        <label class="field">
+          <span>Пароль</span>
+          <input id="auth-password" class="input" name="password" type="password"
+                 autocomplete="current-password" placeholder="минимум 6 символов"
+                 minlength="6" maxlength="128" required>
+        </label>
+
+        <div id="auth-error" class="form-error" role="alert" aria-live="polite"></div>
+
+        <button id="auth-submit" class="btn primary wide" type="submit">Войти</button>
       </form>
+
+      <div class="auth-foot">
+        <span class="dot online" aria-hidden="true"></span>
+        <span>Rust · axum · rqlite · WebSocket</span>
+      </div>
     </main>
   </div>
 
-  <!-- Модалка профиля: server_id и публичная ссылка -->
-  <div id="profile-modal" hidden>
-    <div class="modal-card">
-      <h2>Профиль</h2>
-      <p>Мой ID: <code id="profile-server-id"></code></p>
-      <p>Ссылка: <a id="profile-link" target="_blank"></a></p>
-      <p>@<span id="profile-username"></span></p>
-      <button id="profile-close">Закрыть</button>
+  <!-- ══════════════════ ОСНОВНОЕ ПРИЛОЖЕНИЕ ══════════════════ -->
+  <div id="app-screen" class="app-screen hidden">
+    <aside class="sidebar" aria-label="Список чатов">
+      <header class="sidebar-head">
+        <div class="brand small">
+          <div class="brand-mark sm" aria-hidden="true">C</div>
+          <div class="brand-text">
+            <h2>CipherTalk</h2>
+            <p>messenger</p>
+          </div>
+        </div>
+        <button id="profile-btn" class="avatar avatar-btn" type="button"
+                title="Профиль" aria-label="Открыть профиль">?</button>
+      </header>
+
+      <div class="sidebar-tools">
+        <label class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-3.2-3.2"></path>
+          </svg>
+          <input id="chat-search" type="search" placeholder="Поиск чатов" autocomplete="off">
+        </label>
+
+        <div class="sidebar-actions">
+          <button id="new-chat-btn" class="btn accent" type="button">
+            <span class="plus" aria-hidden="true">+</span> Новый чат
+          </button>
+          <button id="join-chat-btn" class="btn ghost" type="button">По ID</button>
+        </div>
+      </div>
+
+      <div id="chats-list" class="chats-list" role="list" aria-label="Мои чаты"></div>
+
+      <footer class="sidebar-foot">
+        <div class="conn" title="Статус WebSocket-соединения">
+          <span id="conn-dot" class="dot connecting" aria-hidden="true"></span>
+          <span id="conn-status">Подключение…</span>
+        </div>
+        <span class="sidebar-version">v0.1</span>
+      </footer>
+    </aside>
+
+    <main class="chat">
+      <div id="chat-empty" class="chat-empty">
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7
+                     8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8
+                     8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5
+                     a8.5 8.5 0 0 1 8 8v.5z"></path>
+          </svg>
+        </div>
+        <h2>Выберите чат</h2>
+        <p>Создайте новый чат или войдите по ID,<br>чтобы начать общение.</p>
+        <button id="empty-new-chat" class="btn accent" type="button">Создать первый чат</button>
+      </div>
+
+      <section id="chat-view" class="chat-view hidden" aria-label="Чат">
+        <header class="chat-head">
+          <button id="back-btn" class="icon-btn back" type="button" aria-label="К списку чатов">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m15 18-6-6 6-6"></path>
+            </svg>
+          </button>
+          <div id="chat-avatar" class="avatar" aria-hidden="true">#</div>
+          <div class="chat-head-info">
+            <h2 id="chat-title">Чат</h2>
+            <p id="chat-meta">—</p>
+          </div>
+          <span id="chat-id-badge" class="badge">#0</span>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite" aria-relevant="additions">
+          <div id="messages-empty" class="messages-empty hidden">
+            <div class="messages-empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+              </svg>
+            </div>
+            <strong>Здесь пока тихо</strong>
+            <span>Напишите первым — начните разговор.</span>
+          </div>
+        </div>
+
+        <form id="message-form" class="composer">
+          <textarea id="message-input" rows="1" maxlength="4000"
+                    placeholder="Напишите сообщение…" aria-label="Текст сообщения"
+                    autocomplete="off"></textarea>
+          <button id="send-btn" class="send-btn" type="submit" aria-label="Отправить сообщение">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+              <path d="M22 2 11 13"></path>
+            </svg>
+          </button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- ══════════════════ ПРОФИЛЬ ══════════════════ -->
+  <div id="profile-modal" class="modal hidden" role="dialog" aria-modal="true"
+       aria-labelledby="profile-name">
+    <div class="modal-card profile-card">
+      <button class="icon-btn modal-close" type="button" data-close="profile" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+
+      <div id="profile-avatar" class="avatar xl" aria-hidden="true">?</div>
+      <h2 id="profile-name">Пользователь</h2>
+      <p class="profile-sub">Вы вошли в CipherTalk</p>
+
+      <div class="profile-rows">
+        <div class="profile-row">
+          <span>ID пользователя</span>
+          <strong id="profile-id">—</strong>
+        </div>
+        <div class="profile-row">
+          <span>Сервер</span>
+          <strong id="profile-host">—</strong>
+        </div>
+        <div class="profile-row">
+          <span>Соединение</span>
+          <strong id="profile-conn">—</strong>
+        </div>
+      </div>
+
+      <button id="logout-btn" class="btn danger wide" type="button">Выйти из аккаунта</button>
     </div>
   </div>
 
-  <!-- Всплывающие уведомления об ошибках -->
-  <div id="toast" hidden></div>
+  <!-- ══════════════════ СОЗДАНИЕ / ВХОД В ЧАТ ══════════════════ -->
+  <div id="chat-modal" class="modal hidden" role="dialog" aria-modal="true"
+       aria-labelledby="chat-modal-title">
+    <div class="modal-card">
+      <button class="icon-btn modal-close" type="button" data-close="chat" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
 
-  <script src="app.js"></script>
+      <h2 id="chat-modal-title">Новый чат</h2>
+      <p id="chat-modal-subtitle" class="modal-sub">Придумайте название — участники смогут войти по ID.</p>
+
+      <div class="auth-tabs mini" role="tablist" aria-label="Действие с чатом">
+        <button id="chat-tab-create" class="auth-tab active" type="button" role="tab"
+                aria-selected="true">Создать</button>
+        <button id="chat-tab-join" class="auth-tab" type="button" role="tab"
+                aria-selected="false">Войти по ID</button>
+      </div>
+
+      <form id="chat-form" class="auth-form" novalidate>
+        <label id="create-field" class="field">
+          <span>Название чата</span>
+          <input id="new-chat-name" class="input" type="text" maxlength="64"
+                 placeholder="Например, general" autocomplete="off">
+        </label>
+
+        <label id="join-field" class="field hidden">
+          <span>ID чата</span>
+          <input id="join-chat-id" class="input" type="number" min="1" step="1"
+                 placeholder="Например, 1" inputmode="numeric">
+        </label>
+
+        <div id="chat-modal-error" class="form-error" role="alert" aria-live="polite"></div>
+
+        <button id="chat-submit" class="btn primary wide" type="submit">Создать чат</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="/app.js" defer></script>
 </body>
 </html>

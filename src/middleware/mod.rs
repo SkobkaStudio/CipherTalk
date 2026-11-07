@@ -1,45 +1,41 @@
-//! JWT-мидлварь для защищённых /api/* маршрутов.
+//! JWT-мидлварь для защищённых маршрутов.
+//!
+//! Проверяет заголовок `Authorization: Bearer <JWT>`, декодирует claims и
+//! кладёт их в расширения запроса. Хендлеры затем просто принимают
+//! `Extension<Claims>` — собственный `FromRequestParts` не нужен и не
+//! используется.
 
-use axum::extract::{Request, State};
-#[allow(unused_imports)] // Parts используется в bearer_token
-use axum::http::{header, request::Parts, StatusCode};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use std::sync::Arc;
-
-use crate::utils::jwt::{self}; // Claims кладётся в extensions через require_auth
+use crate::utils::error::AppError;
+use crate::utils::jwt::decode_token;
 use crate::ws::AppState;
+use axum::extract::{Request, State};
+use axum::http::header::AUTHORIZATION;
+use axum::middleware::Next;
+use axum::response::Response;
 
-/// Извлекает Bearer-токен из заголовка Authorization.
-fn bearer_token(parts: &Parts) -> Option<String> {
-    parts
-        .headers
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.trim().to_string())
-}
-
-/// Мидлварь: проверяет JWT и инжектирует Claims в extensions запроса.
+/// Проверяет Bearer-токен и добавляет `Claims` в `request.extensions_mut()`.
 pub async fn require_auth(
-    State(state): State<Arc<AppState>>,
-    req: Request,
+    State(state): State<AppState>,
+    mut request: Request,
     next: Next,
-) -> Response {
-    let (mut parts, body) = req.into_parts();
-    match bearer_token(&parts).and_then(|t| jwt::verify_token(&state.jwt_secret, &t).ok()) {
-        Some(claims) => {
-            parts.extensions.insert(claims);
-            next.run(Request::from_parts(parts, body)).await
-        }
-        None => (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({"error": "Требуется авторизация"})),
-        )
-            .into_response(),
-    }
-}
+) -> Result<Response, AppError> {
+    let header = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| AppError::Unauthorized("Требуется заголовок Authorization".into()))?;
 
-// Контроллеры получают claims через штатный экстрактор axum `Extension<Claims>` —
-// собственного FromRequestParts-экстрактора здесь нет намеренно.
+    let token = header
+        .strip_prefix("Bearer ")
+        .or_else(|| header.strip_prefix("bearer "))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| AppError::Unauthorized("Ожидается формат: Bearer <JWT>".into()))?;
+
+    let claims = decode_token(token, &state.jwt_secret)?;
+
+    // Именно штатный Extension — хендлеры читают claims через Extension<Claims>.
+    request.extensions_mut().insert(claims);
+
+    Ok(next.run(request).await)
+}
