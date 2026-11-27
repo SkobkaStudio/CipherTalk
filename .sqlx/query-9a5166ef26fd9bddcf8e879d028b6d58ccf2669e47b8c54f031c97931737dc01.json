@@ -1,0 +1,103 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT m.id, m.chat_id, m.content, m.reply_to_id, m.edited_at,\n               m.deleted_at, m.created_at,\n               u.id AS \"sender_id?\",\n               u.username AS \"sender_username?\",\n               u.display_name AS \"sender_display_name?\",\n               u.avatar_url AS \"sender_avatar_url?\",\n               r.content AS \"reply_content?\",\n               r.deleted_at AS \"reply_deleted_at?\",\n               ru.display_name AS \"reply_sender_name?\"\n        FROM messages m\n        LEFT JOIN users u ON u.id = m.sender_id\n        LEFT JOIN messages r ON r.id = m.reply_to_id\n        LEFT JOIN users ru ON ru.id = r.sender_id\n        WHERE m.chat_id = $1\n          AND ($2::BIGINT IS NULL OR m.id < $2)\n        ORDER BY m.id DESC\n        LIMIT $3 OFFSET $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "reply_to_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "edited_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "sender_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "sender_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "sender_display_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "sender_avatar_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "reply_content?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "reply_deleted_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "reply_sender_name?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "9a5166ef26fd9bddcf8e879d028b6d58ccf2669e47b8c54f031c97931737dc01"
+}

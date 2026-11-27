@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id FROM attachments\n            WHERE id = $1\n              AND chat_id = $2\n              AND uploader_id = $3\n              AND message_id IS NULL\n            FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b302a8b72097a3b80ba52d92f9c5d86bbf0088423fe58d995bd458dddfb7f3e6"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT 1 as \"one!\"\n        FROM sessions\n        WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > now()\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "17e1ee5fbaf825b31794d85446268b2f3f56dbb025120b81b8ea552a275f89ed"
+}

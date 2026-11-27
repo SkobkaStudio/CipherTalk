@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT m.chat_id, m.sender_id, m.deleted_at, c.kind,\n               cm.role AS \"role!\"\n        FROM messages m\n        JOIN chats c ON c.id = m.chat_id\n        JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $2\n        WHERE m.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "sender_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "role!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "cee5594059b5947fdcf9f206f076486f532679087ac8524a6f74d339e9e0b2b3"
+}

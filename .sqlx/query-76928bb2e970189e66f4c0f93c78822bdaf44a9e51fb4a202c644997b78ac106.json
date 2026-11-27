@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE sessions\n        SET refresh_token_hash = $2,\n            last_used_at = now(),\n            expires_at = $3,\n            user_agent = $4\n        WHERE id = $1\n          AND refresh_token_hash = $5\n          AND revoked_at IS NULL\n          AND expires_at > now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76928bb2e970189e66f4c0f93c78822bdaf44a9e51fb4a202c644997b78ac106"
+}

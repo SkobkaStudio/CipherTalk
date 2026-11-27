@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ciphertalk
+      POSTGRES_USER: ciphertalk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ciphertalk}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ciphertalk -d ciphertalk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ciphertalk:${POSTGRES_PASSWORD:-ciphertalk}@postgres:5432/ciphertalk
+      DATABASE_MAX_CONNECTIONS: ${DATABASE_MAX_CONNECTIONS:-10}
+      RUN_MIGRATIONS: "true"
+      REDIS_URL: redis://redis:6379/0
+      # Change this before exposing the app publicly:
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+      JWT_ISSUER: ${JWT_ISSUER:-ciphertalk}
+      ACCESS_TOKEN_TTL_SECS: ${ACCESS_TOKEN_TTL_SECS:-900}
+      REFRESH_TOKEN_TTL_SECS: ${REFRESH_TOKEN_TTL_SECS:-2592000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      HOST: 0.0.0.0
+      PORT: 8080
+      STATIC_DIR: /app/web
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      MAX_AVATAR_MB: ${MAX_AVATAR_MB:-8}
+      MEDIA_TOKEN_TTL_SECS: ${MEDIA_TOKEN_TTL_SECS:-86400}
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-}"
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      MAX_MESSAGE_LEN: ${MAX_MESSAGE_LEN:-4096}
+      MAX_GROUP_MEMBERS: ${MAX_GROUP_MEMBERS:-500}
+      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-20}
+      RATE_LIMIT_API_PER_MINUTE: ${RATE_LIMIT_API_PER_MINUTE:-600}
+      RUST_LOG: ${RUST_LOG:-ciphertalk=info,tower_http=info,sqlx=warn}
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:

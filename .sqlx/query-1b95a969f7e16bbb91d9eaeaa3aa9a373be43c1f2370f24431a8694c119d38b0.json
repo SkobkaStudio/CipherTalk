@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.storage_key, a.thumbnail_key, a.mime_type, a.file_name, a.kind\n        FROM attachments a\n        JOIN messages m ON m.id = a.message_id\n        JOIN chat_members cm ON cm.chat_id = a.chat_id AND cm.user_id = $2\n        WHERE a.id = $1 AND m.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "thumbnail_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "mime_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1b95a969f7e16bbb91d9eaeaa3aa9a373be43c1f2370f24431a8694c119d38b0"
+}

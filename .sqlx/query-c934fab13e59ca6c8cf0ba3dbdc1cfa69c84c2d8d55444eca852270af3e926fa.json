@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE chat_members\n        SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $3)\n        WHERE chat_id = $1\n          AND user_id = $2\n          AND EXISTS (\n              SELECT 1 FROM messages WHERE id = $3 AND chat_id = $1\n          )\n        RETURNING last_read_message_id AS \"last_read_message_id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_read_message_id!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c934fab13e59ca6c8cf0ba3dbdc1cfa69c84c2d8d55444eca852270af3e926fa"
+}

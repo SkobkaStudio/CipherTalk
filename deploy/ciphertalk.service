@@ -1,0 +1,35 @@
+[Unit]
+Description=CipherTalk messenger
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ciphertalk
+Group=ciphertalk
+WorkingDirectory=/opt/ciphertalk
+EnvironmentFile=/opt/ciphertalk/.env
+ExecStart=/opt/ciphertalk/ciphertalk
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+KillSignal=SIGTERM
+SyslogIdentifier=ciphertalk
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ciphertalk
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+UMask=0027
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

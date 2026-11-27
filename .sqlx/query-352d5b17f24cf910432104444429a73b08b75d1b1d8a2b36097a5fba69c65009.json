@@ -1,0 +1,144 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            c.id,\n            c.kind,\n            c.title,\n            c.description,\n            c.avatar_url,\n            c.created_at,\n            c.last_message_at,\n            cm.role AS \"my_role!\",\n            cm.last_read_message_id,\n            pc.id AS \"peer_id?\",\n            pc.username AS \"peer_username?\",\n            pc.display_name AS \"peer_display_name?\",\n            pc.avatar_url AS \"peer_avatar_url?\",\n            pc.last_seen_at AS \"peer_last_seen_at?\",\n            lm.id AS \"last_message_id?\",\n            lm.content AS \"last_message_content?\",\n            lu.display_name AS \"last_message_sender_name?\",\n            lm.created_at AS \"last_message_created_at?\",\n            lm.deleted_at AS \"last_message_deleted_at?\",\n            (\n                SELECT COUNT(*)\n                FROM messages um\n                WHERE um.chat_id = c.id\n                  AND um.deleted_at IS NULL\n                  AND um.id > COALESCE(cm.last_read_message_id, 0)\n                  AND um.sender_id IS DISTINCT FROM $1\n            ) AS \"unread_count!\",\n            (\n                SELECT COUNT(*) FROM chat_members mc WHERE mc.chat_id = c.id\n            ) AS \"member_count!\"\n        FROM chat_members cm\n        JOIN chats c ON c.id = cm.chat_id\n        LEFT JOIN LATERAL (\n            SELECT u.id, u.username, u.display_name, u.avatar_url, u.last_seen_at\n            FROM chat_members pcm\n            JOIN users u ON u.id = pcm.user_id\n            WHERE c.kind = 'private'\n              AND pcm.chat_id = c.id\n              AND pcm.user_id <> $1\n            LIMIT 1\n        ) pc ON TRUE\n        LEFT JOIN messages lm ON lm.id = c.last_message_id\n        LEFT JOIN users lu ON lu.id = lm.sender_id\n        WHERE cm.user_id = $1\n        ORDER BY c.last_message_at DESC, c.id DESC\n        LIMIT $2 OFFSET $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_message_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "my_role!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_read_message_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "peer_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "peer_username?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "peer_display_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "peer_avatar_url?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "peer_last_seen_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "last_message_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "last_message_content?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "last_message_sender_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "last_message_created_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "last_message_deleted_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "unread_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "member_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "352d5b17f24cf910432104444429a73b08b75d1b1d8a2b36097a5fba69c65009"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO chat_members (chat_id, user_id, role, last_read_message_id)\n        SELECT $1, uid, 'member', $2\n        FROM UNNEST($3::BIGINT[]) AS uid\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "34a511d90e6b67a06bffa15ba64fe73eaf490475ace018043679aafc78453135"
+}

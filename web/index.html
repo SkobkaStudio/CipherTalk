@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1621">
+  <title>CipherTalk</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="bg-[#0e1621] text-[#eef3f8] antialiased">
+  <noscript>
+    <div class="noscript">Для работы CipherTalk нужен JavaScript.</div>
+  </noscript>
+
+  <!-- ================= AUTH ================= -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-glow auth-glow-a"></div>
+    <div class="auth-glow auth-glow-b"></div>
+
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.4A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/>
+            <path d="M8.5 10.5h7M8.5 14h4.5"/>
+          </svg>
+        </div>
+        <div>
+          <h1>CipherTalk</h1>
+          <p>Быстрый. Приватный. Ваш.</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs" id="auth-tabs">
+        <button type="button" id="tab-login" class="auth-tab active" role="tab" aria-selected="true">Вход</button>
+        <button type="button" id="tab-register" class="auth-tab" role="tab" aria-selected="false">Регистрация</button>
+        <span class="auth-tab-indicator" aria-hidden="true"></span>
+      </div>
+
+      <form id="login-form" class="auth-form" novalidate>
+        <label class="field-label" for="login-username">Username или email</label>
+        <input id="login-username" class="field-input" type="text" autocomplete="username" placeholder="alice" required>
+
+        <label class="field-label" for="login-password">Пароль</label>
+        <input id="login-password" class="field-input" type="password" autocomplete="current-password" placeholder="••••••••" required>
+
+        <button id="login-submit" class="btn-primary auth-submit" type="submit">
+          <span class="btn-label">Войти</span>
+        </button>
+      </form>
+
+      <form id="register-form" class="auth-form hidden" novalidate>
+        <div class="auth-grid">
+          <div>
+            <label class="field-label" for="register-username">Username</label>
+            <input id="register-username" class="field-input" type="text" autocomplete="username" placeholder="alice" maxlength="32" required>
+          </div>
+          <div>
+            <label class="field-label" for="register-display-name">Имя</label>
+            <input id="register-display-name" class="field-input" type="text" autocomplete="name" placeholder="Alice" maxlength="64" required>
+          </div>
+        </div>
+
+        <label class="field-label" for="register-email">Email <span class="field-optional">необязательно</span></label>
+        <input id="register-email" class="field-input" type="email" autocomplete="email" placeholder="alice@example.com">
+
+        <label class="field-label" for="register-password">Пароль</label>
+        <input id="register-password" class="field-input" type="password" autocomplete="new-password" placeholder="Минимум 8 символов" required>
+
+        <button id="register-submit" class="btn-primary auth-submit" type="submit">
+          <span class="btn-label">Создать аккаунт</span>
+        </button>
+      </form>
+
+      <p id="auth-error" class="auth-error hidden" role="alert"></p>
+      <p class="auth-hint">Username: латиница, цифры и «_», от 3 до 32 символов.</p>
+    </div>
+  </div>
+
+  <!-- ================= APP ================= -->
+  <div id="app-screen" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <header class="sidebar-top">
+        <div class="brand-small">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.4A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/>
+            </svg>
+          </span>
+          CipherTalk
+        </div>
+        <div class="sidebar-actions">
+          <span id="connection-status" class="connection-dot offline" title="Соединение"></span>
+          <button type="button" id="new-chat-btn" class="icon-btn" title="Новый чат" aria-label="Новый чат">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="sidebar-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/>
+        </svg>
+        <input id="chat-filter" type="search" placeholder="Поиск чатов" autocomplete="off">
+      </div>
+
+      <div id="chat-list" class="chat-list" aria-live="polite"></div>
+
+      <footer class="profile-bar">
+        <div id="profile-avatar" class="profile-avatar"></div>
+        <div class="profile-meta">
+          <div id="profile-name" class="profile-name"></div>
+          <div id="profile-username" class="profile-username"></div>
+        </div>
+        <button type="button" id="settings-btn" class="icon-btn" title="Настройки профиля" aria-label="Настройки профиля">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.5 15a1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.5 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 8.9 4.5 1.7 1.7 0 0 0 9.9 3V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
+          </svg>
+        </button>
+        <button type="button" id="logout-btn" class="icon-btn" title="Выйти" aria-label="Выйти">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <path d="m16 17 5-5-5-5M21 12H9"/>
+          </svg>
+        </button>
+      </footer>
+    </aside>
+
+    <main id="chat-panel" class="chat-panel">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-art" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.4A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/>
+            <path d="M8.5 10.5h7M8.5 14h4.5"/>
+          </svg>
+        </div>
+        <h2>Выберите чат</h2>
+        <p>Откройте существующий диалог или начните новый.</p>
+        <button type="button" id="empty-new-chat" class="btn-primary">Новый чат</button>
+      </div>
+
+      <section id="conversation" class="conversation hidden">
+        <header class="chat-header">
+          <button type="button" id="back-btn" class="icon-btn mobile-only" title="Назад" aria-label="Назад">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m15 18-6-6 6-6"/>
+            </svg>
+          </button>
+          <div id="chat-avatar" class="chat-avatar"></div>
+          <div class="chat-heading">
+            <h2 id="chat-title"></h2>
+            <p id="chat-subtitle"></p>
+          </div>
+          <div id="chat-meta" class="chat-meta"></div>
+        </header>
+
+        <div id="messages" class="messages">
+          <div id="history-loader" class="history-loader hidden">
+            <span class="spinner"></span> Загрузка истории
+          </div>
+          <div id="messages-inner" class="messages-inner"></div>
+        </div>
+
+        <div id="typing-indicator" class="typing-indicator hidden" aria-live="polite"></div>
+
+        <form id="composer" class="composer">
+          <div id="reply-banner" class="reply-banner hidden">
+            <div class="reply-banner-body">
+              <span class="reply-label">Ответ</span>
+              <div id="reply-text" class="reply-text"></div>
+            </div>
+            <button type="button" id="reply-cancel" class="icon-btn" aria-label="Отменить ответ">✕</button>
+          </div>
+          <div id="upload-panel" class="upload-panel hidden">
+            <div id="upload-preview" class="upload-preview"></div>
+            <div class="upload-info">
+              <div id="upload-name" class="upload-name"></div>
+              <div class="upload-bar"><span id="upload-bar-fill"></span></div>
+            </div>
+            <button type="button" id="upload-cancel" class="icon-btn" aria-label="Отменить загрузку">✕</button>
+          </div>
+          <div id="recording-bar" class="recording-bar hidden">
+            <span class="recording-dot"></span>
+            <span id="recording-time">0:00</span>
+            <span class="recording-hint">Идёт запись голосового</span>
+            <button type="button" id="recording-cancel" class="recording-action">Отмена</button>
+            <button type="button" id="recording-stop" class="recording-action send">Отправить</button>
+          </div>
+          <div class="composer-row">
+            <button type="button" id="attach-btn" class="icon-btn composer-icon" title="Прикрепить" aria-label="Прикрепить">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/>
+              </svg>
+            </button>
+            <textarea id="message-input" rows="1" maxlength="4096" placeholder="Написать сообщение…" autocomplete="off"></textarea>
+            <button type="button" id="voice-btn" class="icon-btn composer-icon" title="Голосовое сообщение" aria-label="Голосовое сообщение">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="2" width="6" height="12" rx="3"/>
+                <path d="M5 10a7 7 0 0 0 14 0M12 19v3M8 22h8"/>
+              </svg>
+            </button>
+            <button type="submit" id="send-btn" class="send-btn" title="Отправить" aria-label="Отправить">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+        <div id="attach-menu" class="attach-menu hidden">
+          <button type="button" data-attach="media">Фото или видео</button>
+          <button type="button" data-attach="file">Файл</button>
+          <button type="button" data-attach="audio">Аудиофайл</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <input id="media-input" type="file" accept="image/*,video/*" hidden>
+  <input id="file-input" type="file" hidden>
+  <input id="audio-input" type="file" accept="audio/*" hidden>
+  <input id="avatar-input" type="file" accept="image/*" hidden>
+
+  <!-- ================= PROFILE ================= -->
+  <div id="profile-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+    <div class="modal-card profile-card">
+      <header class="modal-header">
+        <h3 id="profile-title">Профиль</h3>
+        <button type="button" id="profile-close" class="icon-btn" aria-label="Закрыть">✕</button>
+      </header>
+
+      <div class="profile-edit-row">
+        <div id="profile-avatar-preview" class="profile-avatar-preview"></div>
+        <div class="profile-edit-actions">
+          <button type="button" id="avatar-choose" class="btn-secondary">Сменить фото</button>
+          <button type="button" id="avatar-remove" class="btn-ghost">Удалить</button>
+        </div>
+      </div>
+
+      <label class="field-label" for="profile-name-input">Имя</label>
+      <input id="profile-name-input" class="field-input" type="text" maxlength="64">
+      <label class="field-label" for="profile-bio-input">О себе</label>
+      <textarea id="profile-bio-input" class="field-input profile-bio" maxlength="280" rows="3"></textarea>
+      <div id="profile-username" class="profile-username-line"></div>
+
+      <div class="settings-divider"></div>
+      <label class="toggle-row" for="notifications-toggle">
+        <div>
+          <div class="toggle-title">Уведомления в браузере</div>
+          <div id="notifications-hint" class="toggle-hint">Показывать уведомления о новых сообщениях.</div>
+        </div>
+        <input id="notifications-toggle" type="checkbox">
+        <span class="toggle-switch" aria-hidden="true"></span>
+      </label>
+
+      <p id="profile-error" class="auth-error hidden" role="alert"></p>
+      <button type="button" id="profile-save" class="btn-primary profile-save">Сохранить</button>
+    </div>
+  </div>
+
+  <!-- ================= CALL ================= -->
+  <div id="call-overlay" class="call-overlay hidden" role="dialog" aria-modal="true" aria-label="Звонок">
+    <div class="call-card">
+      <div class="call-peer">
+        <div id="call-avatar" class="call-avatar"></div>
+        <div id="call-name" class="call-name"></div>
+        <div id="call-status" class="call-status">Звоним…</div>
+      </div>
+      <div id="call-videos" class="call-videos hidden">
+        <video id="call-remote" autoplay playsinline></video>
+        <video id="call-local" autoplay playsinline muted></video>
+      </div>
+      <div class="call-controls">
+        <button type="button" id="call-mute" class="call-btn" title="Микрофон">🎙</button>
+        <button type="button" id="call-camera" class="call-btn hidden" title="Камера">🎥</button>
+        <button type="button" id="call-accept" class="call-btn accept hidden" title="Принять">📞</button>
+        <button type="button" id="call-decline" class="call-btn end hidden" title="Отклонить">✕</button>
+        <button type="button" id="call-end" class="call-btn end hidden" title="Завершить">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= IMAGE VIEWER ================= -->
+  <div id="image-viewer" class="image-viewer hidden" role="dialog" aria-label="Просмотр изображения">
+    <button type="button" id="viewer-close" class="viewer-close" aria-label="Закрыть">✕</button>
+    <img id="viewer-img" alt="">
+  </div>
+
+  <!-- ================= NEW CHAT MODAL ================= -->
+  <div id="new-chat-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="new-chat-title">
+    <div class="modal-card">
+      <header class="modal-header">
+        <h3 id="new-chat-title">Новый чат</h3>
+        <button type="button" id="modal-close" class="icon-btn" aria-label="Закрыть">✕</button>
+      </header>
+
+      <div class="modal-tabs" id="modal-tabs">
+        <button type="button" id="modal-tab-dm" class="modal-tab active">Личный чат</button>
+        <button type="button" id="modal-tab-group" class="modal-tab">Группа</button>
+      </div>
+
+      <div id="group-fields" class="group-fields hidden">
+        <label class="field-label" for="group-title">Название группы</label>
+        <input id="group-title" class="field-input" type="text" maxlength="128" placeholder="Например, Rust Talk">
+        <div id="selected-members" class="selected-members"></div>
+      </div>
+
+      <label class="field-label" for="user-search">Найти пользователя</label>
+      <input id="user-search" class="field-input" type="search" placeholder="Начните вводить username" autocomplete="off">
+      <div id="user-results" class="user-results"></div>
+
+      <div id="group-actions" class="modal-actions hidden">
+        <button type="button" id="create-group-btn" class="btn-primary" disabled>Создать группу</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE attachments SET message_id = $2 WHERE id = $1 AND message_id IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "519661b52c66531cd4fa4d61ef08cfde535514f6ac532ea7038c5b6f0efed04b"
+}

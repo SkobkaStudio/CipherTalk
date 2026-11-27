@@ -1,0 +1,27 @@
+# Rust build artefacts
+/target/
+
+# Local configuration and secrets
+.env
+.env.local
+
+# Local development database used while preparing `.sqlx` metadata
+/.devpg/
+
+# Isolated Cargo home used in sandboxes with a read-only ~/.cargo
+/.cargo-home/
+
+# Logs / editor / OS noise
+*.log
+.DS_Store
+.idea/
+.vscode/
+# Local Redis binaries / data
+/.devredis/
+# Python UI-test tooling
+/.devtools/
+# Screenshots produced by tests
+/target/ui-*.png
+
+# Selenium Manager downloads driver here in restricted sandboxes
+/chromedriver/

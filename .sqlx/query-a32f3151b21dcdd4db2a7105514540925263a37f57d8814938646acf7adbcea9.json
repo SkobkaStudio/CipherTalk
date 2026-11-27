@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.user_id\n        FROM sessions s\n        JOIN users u ON u.id = s.user_id\n        WHERE s.id = $1\n          AND s.user_id = $2\n          AND s.revoked_at IS NULL\n          AND s.expires_at > now()\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a32f3151b21dcdd4db2a7105514540925263a37f57d8814938646acf7adbcea9"
+}
