@@ -59,6 +59,20 @@ migrations). Данные Postgres и Redis лежат в named volumes.
 Подробности, пути, systemd/nginx, обновление и установка CA на другие
 устройства — [docs/DEPLOY_ARMBIAN.md](docs/DEPLOY_ARMBIAN.md).
 
+## Обновление сервера одной командой
+
+На armbian:
+
+```bash
+/opt/ciphertalk/update.sh
+```
+
+Скрипт скачивает ветку `dev-rust-v` из GitHub, синхронизирует новые и
+изменённые файлы, собирает release-бинарник, перезапускает службу, сразу
+показывает `journalctl -f`, проверяет health и **останавливает службу, если она
+ушла в цикл перезапуска**, печатая последние ошибки в терминал. Подробнее:
+[docs/DEPLOY_ARMBIAN.md](docs/DEPLOY_ARMBIAN.md).
+
 ## Локальная разработка
 
 Нужны PostgreSQL 16+ и Redis 7+.
@@ -149,6 +163,8 @@ python3 tests/e2e.py
 - Голосовая запись через MediaRecorder (только HTTPS/localhost), волновая
   дорожка и управление воспроизведением.
 - Просмотр фото в полноэкранном viewer, скачивание файлов.
+- **Стикеры:** создание GIF-стикера из фото или видео до 5 секунд (ffmpeg),
+  отправка и отображение без пузыря.
 
 ![Медиа](docs/screenshot-media.png)
 
@@ -176,8 +192,8 @@ python3 tests/e2e.py
 - `/ws?token=<jwt>`, проверка JWT, сессии и Origin.
 - Подписка на чаты с проверкой членства на сервере.
 - События: `message.new`, `message.edited`, `message.deleted`, `typing`,
-  `read.updated`, `chat.removed`, `call.offer`, `call.answer`, `call.ice`,
-  `call.end`, `ready`, `subscribed`, `pong`, `error`.
+  `read.updated`, `chat.removed`, `user.updated`, `call.offer`, `call.answer`,
+  `call.ice`, `call.end`, `ready`, `subscribed`, `pong`, `error`.
 - Redis Pub/Sub (`ct:events`, `ct:control`) для нескольких инстансов, локальный
   fast-path и дедупликация по `origin`; eviction удалённых участников на всех
   инстансах.
@@ -218,6 +234,10 @@ python3 tests/e2e.py
 | POST | `/api/users/me/avatar` | Bearer | загрузка аватара (multipart) |
 | DELETE | `/api/users/me/avatar` | Bearer | удалить аватар |
 | GET | `/api/users/search?q=` | Bearer | поиск по username |
+| GET | `/api/push/public-key` | Bearer | VAPID public key |
+| POST | `/api/push/subscribe` | Bearer | сохранить push-подписку |
+| POST | `/api/push/unsubscribe` | Bearer | удалить push-подписку |
+| POST | `/api/push/test` | Bearer | тестовое фоновое уведомление |
 | GET | `/api/chats` | Bearer | список чатов |
 | POST | `/api/chats/private` | Bearer | личный чат `{user_id}` |
 | POST | `/api/chats/group` | Bearer | группа `{title, member_ids}` |
@@ -257,6 +277,7 @@ python3 tests/e2e.py
 {"type":"call.answer","call_id":"...","chat_id":42,"from_user_id":9,"sdp":"..."}
 {"type":"call.ice","call_id":"...","chat_id":42,"from_user_id":9,"candidate":{...}}
 {"type":"call.end","call_id":"...","chat_id":42,"from_user_id":9,"reason":"ended"}
+{"type":"user.updated","user":{"id":9,"display_name":"Bob","avatar_url":"/media/avatars/..."}}
 ```
 
 ## Конфигурация
@@ -273,6 +294,8 @@ python3 tests/e2e.py
 | `REFRESH_TOKEN_TTL_SECS` | `2592000` | refresh token |
 | `COOKIE_SECURE` | `false` | `true` только на HTTPS |
 | `MEDIA_TOKEN_TTL_SECS` | `86400` | TTL media-cookie |
+| `VAPID_PRIVATE_KEY` | — | base64 DER PKCS#8 ключ для Web Push |
+| `VAPID_SUBJECT` | `mailto:admin@localhost` | контакт VAPID |
 | `UPLOAD_DIR` | `uploads` | каталог файлов |
 | `MAX_UPLOAD_MB` | `50` | лимит вложения |
 | `MAX_AVATAR_MB` | `8` | лимит аватара |
@@ -317,11 +340,11 @@ docs/ARCHITECTURE.md подробное описание решений
 
 Это не полная копия Telegram: пока нет каналов, ботов, историй, секретных
 чатов, облачных файлов на 2 ГБ, поиска по сообщениям, пересылки, реакций,
-групповых звонков, TURN-сервера для сложного NAT, Web Push при закрытой
-вкладке, E2E-шифрования и удаления аккаунта. Звонки — только 1:1, файлы — до
-50 МБ. Уведомления работают при открытой вкладке. Tailwind подключён через CDN
-по требованию к простоте; для публичного production его лучше собрать в
-статический CSS.
+групповых звонков, TURN-сервера для сложного NAT, E2E-шифрования и удаления
+аккаунта. Звонки — только 1:1, файлы — до 50 МБ, стикеры — из фото/видео до
+5 секунд. Web Push на iOS требует установки PWA (ограничение Safari). Tailwind
+подключён через CDN по требованию к простоте; для публичного production его
+лучше собрать в статический CSS.
 
 ## Лицензия
 

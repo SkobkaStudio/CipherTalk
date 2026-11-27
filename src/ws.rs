@@ -153,6 +153,14 @@ impl WsManager {
             .map(|conn| conn.display_name.clone())
     }
 
+    pub fn update_display_name(&self, user_id: i64, display_name: &str) {
+        for mut conn in self.connections.iter_mut() {
+            if conn.user_id == user_id {
+                conn.display_name = display_name.to_owned();
+            }
+        }
+    }
+
     pub fn connection_count(&self) -> usize {
         self.connections.len()
     }

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT c.kind, c.title,\n                   u.display_name AS sender_name,\n                   u.avatar_url AS sender_avatar\n            FROM chats c\n            JOIN users u ON u.id = $2\n            WHERE c.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "sender_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_avatar",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "942301ca90652b5abc4c907b38d9eaf68d262c3afba75096e35919b99fcdf38f"
+}

@@ -51,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
     let ws_manager = Arc::new(ws::WsManager::new());
     let hub = ws::RealtimeHub::new(ws_manager.clone(), redis.clone());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let push = services::push::PushService::from_config(&cfg)?;
+    if let Some(push) = &push {
+        tracing::info!(public_key = %push.public_key(), "Web Push enabled");
+    }
 
     let state = AppState {
         cfg: cfg.clone(),
@@ -58,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         redis,
         ws: ws_manager,
         hub,
+        push: push.map(Arc::new),
         shutdown: shutdown_rx,
     };
 
@@ -107,6 +112,10 @@ fn build_router(state: AppState) -> anyhow::Result<Router> {
             get(controllers::users::me).patch(controllers::users::update_me),
         )
         .route("/users/search", get(controllers::users::search))
+        .route("/push/public-key", get(controllers::push::public_key))
+        .route("/push/subscribe", post(controllers::push::subscribe))
+        .route("/push/unsubscribe", post(controllers::push::unsubscribe))
+        .route("/push/test", post(controllers::push::test))
         .route(
             "/users/me/avatar",
             post(controllers::media::upload_avatar).delete(controllers::media::delete_avatar),

@@ -2211,3 +2211,102 @@ button {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Notification prompt / stickers
+   ========================================================================== */
+.notification-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 78px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(680px, calc(100vw - 24px));
+  padding: 12px 14px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(17, 30, 43, 0.97);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.notification-prompt-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: rgba(100, 181, 239, 0.14);
+  font-size: 18px;
+}
+
+.notification-prompt-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.notification-prompt-body strong {
+  display: block;
+  font-size: 13px;
+}
+
+#notification-prompt-text {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notification-prompt-enable,
+.notification-prompt-later {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.bubble.sticker-bubble {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bubble.sticker-bubble .msg-meta {
+  margin-top: 0;
+}
+
+.msg-sticker {
+  display: block;
+  width: 180px;
+  height: 180px;
+  max-width: 42vw;
+  max-height: 42vw;
+  object-fit: contain;
+  cursor: pointer;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.25));
+}
+
+.bubble.sticker-bubble .msg-actions {
+  opacity: 0.7;
+}
+
+@media (max-width: 600px) {
+  .notification-prompt {
+    bottom: 70px;
+    flex-wrap: wrap;
+  }
+
+  .notification-prompt-body {
+    flex-basis: calc(100% - 60px);
+  }
+
+  .msg-sticker {
+    width: 140px;
+    height: 140px;
+    max-width: 48vw;
+    max-height: 48vw;
+  }
+}

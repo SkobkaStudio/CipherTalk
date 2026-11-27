@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::models::message::MessageDto;
+use crate::models::{message::MessageDto, user::PublicUser};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -119,6 +119,10 @@ pub enum ServerEvent {
         chat_id: i64,
         from_user_id: i64,
         reason: Option<String>,
+    },
+    #[serde(rename = "user.updated")]
+    UserUpdated {
+        user: PublicUser,
     },
     Pong,
     Error {

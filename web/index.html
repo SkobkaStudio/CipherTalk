@@ -212,6 +212,7 @@
         </form>
         <div id="attach-menu" class="attach-menu hidden">
           <button type="button" data-attach="media">Фото или видео</button>
+          <button type="button" data-attach="sticker">Стикер из фото/видео</button>
           <button type="button" data-attach="file">Файл</button>
           <button type="button" data-attach="audio">Аудиофайл</button>
         </div>
@@ -219,7 +220,18 @@
     </main>
   </div>
 
+  <div id="notification-prompt" class="notification-prompt hidden" role="dialog" aria-labelledby="notification-prompt-title">
+    <div class="notification-prompt-icon" aria-hidden="true">🔔</div>
+    <div class="notification-prompt-body">
+      <strong id="notification-prompt-title">Включить уведомления?</strong>
+      <div id="notification-prompt-text">Новые сообщения будут приходить даже при закрытой вкладке.</div>
+    </div>
+    <button type="button" id="notification-enable" class="btn-primary notification-prompt-enable">Включить</button>
+    <button type="button" id="notification-later" class="btn-ghost notification-prompt-later">Позже</button>
+  </div>
+
   <input id="media-input" type="file" accept="image/*,video/*" hidden>
+  <input id="sticker-input" type="file" accept="image/*,video/*" hidden>
   <input id="file-input" type="file" hidden>
   <input id="audio-input" type="file" accept="audio/*" hidden>
   <input id="avatar-input" type="file" accept="image/*" hidden>

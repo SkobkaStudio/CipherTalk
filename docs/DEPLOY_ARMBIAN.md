@@ -69,7 +69,26 @@ curl -fsS https://192.168.1.34/health/ready
 curl -fsS --cacert /etc/ciphertalk-tls/ca.crt https://192.168.1.34/health/ready
 ```
 
-## Обновление кода
+## Обновление одной командой
+
+```bash
+/opt/ciphertalk/update.sh
+```
+
+Скрипт:
+
+1. скачивает ветку `dev-rust-v` из GitHub (в `/opt/ciphertalk` или временный clone);
+2. синхронизирует новые/изменённые `src web migrations .sqlx deploy`;
+3. собирает только изменившееся (`cargo build --release`, инкрементально, offline с fallback online);
+4. устанавливает бинарник и systemd-юнит, перезапускает службу;
+5. сразу запускает `journalctl -u ciphertalk -f`;
+6. проверяет `health/ready` и `NRestarts`; если служба ушла в restart-loop —
+   **останавливает её и печатает последние 80 строк журнала с ошибкой**.
+
+Скрипт нужно запускать от root; `.env`, `uploads` и `target` не затрагиваются.
+Если скрипт закрыть по Ctrl-C, служба останется запущенной.
+
+## Обновление кода вручную
 
 Локально в `/media/disk_d/CipherTalk`:
 
@@ -92,6 +111,32 @@ systemctl restart ciphertalk
 ```
 
 Сборка ARM64 release занимает около 7 минут (thin LTO).
+
+## Web Push и стикеры
+
+Web Push включается, если задан `VAPID_PRIVATE_KEY` (base64 DER PKCS#8
+P-256) и `VAPID_SUBJECT`. Публичный ключ сервер выводит сам и отдаёт через
+`/api/push/public-key`. Пример генерации:
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem
+openssl pkcs8 -topk8 -nocrypt -in vapid.pem -outform DER -out vapid.der
+base64 -w0 vapid.der
+# полученную строку положить в .env как VAPID_PRIVATE_KEY=
+# VAPID_SUBJECT=mailto:admin@example.com
+systemctl restart ciphertalk
+```
+
+Проверка фонового уведомления после входа в браузере:
+
+```bash
+curl -X POST https://192.168.1.34/api/push/test \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Стикеры конвертируются серверным `ffmpeg`/`ffprobe` в GIF (до 320 px,
+видео до 5 секунд). `update.sh` устанавливает ffmpeg автоматически, если его
+нет. В Docker-образе ffmpeg уже включён.
 
 ## Резервная копия
 

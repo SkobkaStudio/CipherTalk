@@ -162,6 +162,19 @@ pub async fn send(
         )
         .await;
 
+    if let Some(push) = state.push.clone() {
+        let state = state.clone();
+        let message = message.clone();
+        tokio::spawn(async move {
+            if let Err(err) = push
+                .notify_message(&state, chat_id, sender_id, &message)
+                .await
+            {
+                tracing::warn!(error = %err, "web push notification failed");
+            }
+        });
+    }
+
     Ok(message)
 }
 

@@ -31,9 +31,15 @@ pub async fn update_me(
     Extension(auth): Extension<AuthUser>,
     Json(req): Json<UpdateProfileRequest>,
 ) -> AppResult<Json<Me>> {
-    Ok(Json(
-        user_service::update_me(&state, auth.user_id, req).await?,
-    ))
+    let me = user_service::update_me(&state, auth.user_id, req).await?;
+    let publish_state = state.clone();
+    let publish_user = me.clone();
+    tokio::spawn(async move {
+        if let Err(err) = user_service::publish_updated(&publish_state, &publish_user).await {
+            tracing::warn!(error = %err, "failed to publish user.updated");
+        }
+    });
+    Ok(Json(me))
 }
 
 pub async fn search(

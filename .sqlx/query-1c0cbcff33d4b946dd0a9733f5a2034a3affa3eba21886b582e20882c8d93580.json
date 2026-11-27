@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "p256dh",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "auth",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1c0cbcff33d4b946dd0a9733f5a2034a3affa3eba21886b582e20882c8d93580"
+}

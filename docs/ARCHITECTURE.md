@@ -39,19 +39,22 @@ src/
 │   ├── chat.rs        Chat, ChatSummary, ChatKind, ChatRole
 │   ├── message.rs     Message, MessageDto, MessagePage
 │   ├── media.rs       AttachmentDto
-│   └── ws.rs          ClientEvent / ServerEvent, включая call.*
+│   ├── push.rs        push subscription DTO
+│   └── ws.rs          ClientEvent / ServerEvent, включая call.* / user.updated
 ├── controllers/
 │   ├── auth.rs        register / login / refresh / logout
 │   ├── users.rs       me / update / search
 │   ├── chats.rs       list / create private / create group / members
 │   ├── messages.rs    history / send / edit / delete / read
-│   ├── media.rs       upload / content / thumbnail / avatar
+│   ├── media.rs       upload / content / thumbnail / avatar / stickers
+│   ├── push.rs        VAPID key / subscribe / test
 │   └── health.rs      liveness / readiness
 ├── services/
 │   ├── auth.rs        Argon2, JWT, refresh rotation, sessions
 │   ├── users.rs
 │   ├── chats.rs
-│   ├── media.rs       валидация, хранение, выдача
+│   ├── media.rs       валидация, хранение, ffmpeg-стикеры
+│   ├── push.rs        RFC 8291 encryption + VAPID + curl delivery
 │   └── messages.rs    транзакции, членство, DTO
 ├── middleware/
 │   ├── auth.rs        Bearer JWT → Extension<AuthUser>, кэш сессии
@@ -75,7 +78,8 @@ SQL — только в сервисах, через `sqlx::query!` / `query_as!
 
 Миграции: [`0001_schema.sql`](../migrations/0001_schema.sql),
 [`0002_triggers.sql`](../migrations/0002_triggers.sql) и
-[`0003_media.sql`](../migrations/0003_media.sql).
+[`0003_media.sql`](../migrations/0003_media.sql) и
+[`0004_push_stickers.sql`](../migrations/0004_push_stickers.sql).
 
 | Таблица | Назначение | Ключевые решения |
 |---|---|---|
@@ -84,7 +88,8 @@ SQL — только в сервисах, через `sqlx::query!` / `query_as!
 | `chat_members` | участие | PK `(chat_id, user_id)`, роль, watermark прочтения `last_read_message_id` |
 | `messages` | сообщения | soft delete `deleted_at`, `reply_to_id`, id монотонно растут |
 | `sessions` | refresh-сессии | хранится только SHA-256 от refresh-токена; отзыв через `revoked_at` |
-| `attachments` | фото/видео/голос/файлы | `message_id` nullable до отправки, `storage_key`, `thumbnail_key`, метаданные |
+| `attachments` | фото/видео/голос/файлы/стикеры | `message_id` nullable до отправки, `storage_key`, `thumbnail_key`, метаданные |
+| `push_subscriptions` | Web Push подписки | endpoint unique, p256dh/auth, user_agent |
 
 Денормализации и инварианты:
 
@@ -133,6 +138,12 @@ POST /api/auth/logout   ──► revoked_at = now(), DEL redis-кэша, очи
   проверяется членство и `deleted_at IS NULL`. Для API-клиентов — Bearer.
 * Микрофон/камера разрешены `Permissions-Policy` только для self; звонки и
   запись — только HTTPS/localhost.
+* Web Push: VAPID ES256, RFC 8291 aes128gcm; приватный ключ только в env,
+  endpoint проверяется на HTTPS, payload шифруется ключом подписки. Service
+  worker не кэширует историю и показывает уведомление только когда нет
+  видимой вкладки.
+* Стикеры конвертируются на сервере ffmpeg в GIF (≤320 px, ≤5 секунд),
+  исходный файл удаляется; в БД хранится только GIF.
 
 Пароли: Argon2id (19 MiB, t=2, p=1, соль на пользователя), верификация
 constant-time средствами `argon2`.
@@ -230,7 +241,10 @@ REST. Outbox-таблица — следующий шаг для строгой 
 | GET | `/api/attachments/{id}/content` | media cookie/Bearer | файл с Range |
 | GET | `/api/attachments/{id}/thumbnail` | media cookie/Bearer | превью |
 | POST/DELETE | `/api/users/me/avatar` | Bearer | загрузка/удаление аватара |
-| GET | `/ws` | JWT query | WebSocket + call signaling |
+| GET | `/api/push/public-key` | Bearer | VAPID public key |
+| POST | `/api/push/subscribe` | Bearer | сохранить подписку |
+| POST | `/api/push/unsubscribe` | Bearer | удалить подписку |
+| GET | `/ws` | JWT query | WebSocket + call signaling + user.updated |
 
 История: `limit` (1..100, default 50) + `before_id` (cursor, рекомендуется) или
 `offset` (совместимость с ТЗ). Ответ `{items, has_more, next_before_id}`.
@@ -292,8 +306,8 @@ Redis не хранит сообщения и не является источн
 * Медиа хранится на локальном диске узла; для нескольких узлов нужен S3/MinIO
   или общий NFS. Звонки 1:1 работают через STUN; для сложного NAT — TURN.
 * В MVP нет: каналов, ботов, историй, секретных чатов, облачных файлов 2 ГБ,
-  групповых звонков, Web Push при закрытой вкладке, реакций, поиска по
-  сообщениям, E2E-шифрования. Схема оставляет место для reactions/search.
+  групповых звонков, реакций, поиска по сообщениям, E2E-шифрования. Схема
+  оставляет место для reactions/search. Web Push на iOS требует PWA.
 
 ## 12. Проверки
 

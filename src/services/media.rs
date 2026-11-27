@@ -1,9 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use rand::{rngs::OsRng, RngCore};
 use sqlx::PgPool;
-use tokio::io::AsyncReadExt;
+use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 use crate::{
     models::media::AttachmentDto,
@@ -15,6 +18,9 @@ pub const KIND_PHOTO: &str = "photo";
 pub const KIND_VIDEO: &str = "video";
 pub const KIND_VOICE: &str = "voice";
 pub const KIND_FILE: &str = "file";
+pub const KIND_STICKER: &str = "sticker";
+const STICKER_MAX_SECONDS: f64 = 5.2;
+const STICKER_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct NewUpload {
@@ -82,7 +88,7 @@ pub fn resolve_kind(requested: Option<&str>, mime: &str) -> AppResult<String> {
 
     if !matches!(
         kind.as_str(),
-        KIND_PHOTO | KIND_VIDEO | KIND_VOICE | KIND_FILE
+        KIND_PHOTO | KIND_VIDEO | KIND_VOICE | KIND_FILE | KIND_STICKER
     ) {
         return Err(AppError::Validation("Неизвестный тип вложения".into()));
     }
@@ -99,6 +105,16 @@ pub fn validate_kind_mime(kind: &str, mime: &str, file_name: &str) -> AppResult<
         KIND_VOICE => matches!(
             mime,
             "audio/webm" | "audio/ogg" | "audio/mpeg" | "audio/mp4" | "audio/wav" | "audio/x-wav"
+        ),
+        KIND_STICKER => matches!(
+            mime,
+            "image/jpeg"
+                | "image/png"
+                | "image/webp"
+                | "image/gif"
+                | "video/mp4"
+                | "video/webm"
+                | "video/quicktime"
         ),
         KIND_FILE => !file_name.trim().is_empty(),
         _ => false,
@@ -132,6 +148,10 @@ pub async fn store_attachment(
     if upload.size_bytes <= 0 || upload.size_bytes as u64 > state.cfg.max_upload_bytes {
         let _ = tokio::fs::remove_file(&upload.temp_path).await;
         return Err(AppError::Validation("Файл слишком большой".into()));
+    }
+
+    if kind == KIND_STICKER {
+        return store_sticker(state, uploader_id, chat_id, upload, &mime).await;
     }
 
     let extension = extension_for(&mime, &upload.file_name);
@@ -261,6 +281,164 @@ pub async fn store_attachment(
         content_url: format!("/api/attachments/{id}/content"),
         thumbnail_url: thumbnail_key.map(|_| format!("/api/attachments/{id}/thumbnail")),
     })
+}
+
+async fn store_sticker(
+    state: &AppState,
+    uploader_id: i64,
+    chat_id: i64,
+    upload: NewUpload,
+    source_mime: &str,
+) -> AppResult<AttachmentDto> {
+    let key = format!("{}.gif", random_key());
+    let final_path = state.cfg.upload_dir.join(&key);
+
+    let converted = convert_sticker(&upload.temp_path, &final_path, source_mime).await;
+    let _ = tokio::fs::remove_file(&upload.temp_path).await;
+    if let Some(thumb) = &upload.thumbnail_temp {
+        let _ = tokio::fs::remove_file(thumb).await;
+    }
+    let (width, height, duration_ms, size_bytes) = match converted {
+        Ok(value) => value,
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&final_path).await;
+            return Err(err);
+        }
+    };
+
+    let insert = sqlx::query!(
+        r#"
+        INSERT INTO attachments
+            (uploader_id, chat_id, kind, file_name, mime_type, size_bytes,
+             width, height, duration_ms, storage_key, thumbnail_key)
+        VALUES ($1, $2, $3, 'sticker.gif', 'image/gif', $4, $5, $6, $7, $8, NULL)
+        RETURNING id
+        "#,
+        uploader_id,
+        chat_id,
+        KIND_STICKER,
+        size_bytes,
+        width,
+        height,
+        duration_ms,
+        key
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    let id = match insert {
+        Ok(row) => row.id,
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&final_path).await;
+            return Err(err.into());
+        }
+    };
+
+    Ok(AttachmentDto {
+        id,
+        kind: KIND_STICKER.into(),
+        file_name: "sticker.gif".into(),
+        mime_type: "image/gif".into(),
+        size_bytes,
+        width,
+        height,
+        duration_ms,
+        content_url: format!("/api/attachments/{id}/content"),
+        thumbnail_url: None,
+    })
+}
+
+async fn convert_sticker(
+    source: &Path,
+    output: &Path,
+    source_mime: &str,
+) -> AppResult<(Option<i32>, Option<i32>, Option<i32>, i64)> {
+    let probe = timeout(
+        Duration::from_secs(15),
+        Command::new("ffprobe")
+            .arg("-v")
+            .arg("error")
+            .arg("-show_entries")
+            .arg("format=duration:stream=width,height")
+            .arg("-of")
+            .arg("json")
+            .arg(source)
+            .output(),
+    )
+    .await
+    .map_err(|_| AppError::Validation("ffprobe не ответил".into()))?
+    .map_err(|_| AppError::Validation("ffprobe не установлен на сервере".into()))?;
+    if !probe.status.success() {
+        return Err(AppError::Validation(
+            "Не удалось прочитать фото или видео для стикера".into(),
+        ));
+    }
+    let probe: serde_json::Value = serde_json::from_slice(&probe.stdout)
+        .map_err(|_| AppError::Validation("Некорректные метаданные стикера".into()))?;
+    let duration = probe["format"]["duration"]
+        .as_str()
+        .and_then(|value| value.parse::<f64>().ok())
+        .or_else(|| probe["format"]["duration"].as_f64());
+    let width = probe["streams"]
+        .as_array()
+        .and_then(|streams| streams.first())
+        .and_then(|stream| stream["width"].as_i64())
+        .and_then(|value| i32::try_from(value).ok());
+    let height = probe["streams"]
+        .as_array()
+        .and_then(|streams| streams.first())
+        .and_then(|stream| stream["height"].as_i64())
+        .and_then(|value| i32::try_from(value).ok());
+
+    let is_video = source_mime.starts_with("video/");
+    if is_video && duration.is_some_and(|value| value > STICKER_MAX_SECONDS) {
+        return Err(AppError::Validation(
+            "Видео для стикера должно быть не длиннее 5 секунд".into(),
+        ));
+    }
+
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-y")
+        .arg("-v")
+        .arg("error")
+        .arg("-i")
+        .arg(source)
+        .arg("-vf")
+        .arg("scale=320:320:force_original_aspect_ratio=decrease:flags=lanczos")
+        .arg("-an");
+    if is_video {
+        command.arg("-t").arg("5").arg("-r").arg("12");
+    } else {
+        command.arg("-frames:v").arg("1");
+    }
+    command.arg("-loop").arg("0").arg(output);
+
+    let result = timeout(Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| AppError::Validation("ffmpeg не успел создать стикер".into()))?
+        .map_err(|_| AppError::Validation("ffmpeg не установлен на сервере".into()))?;
+    if !result.status.success() {
+        let details = String::from_utf8_lossy(&result.stderr);
+        tracing::warn!(error = %details, "ffmpeg sticker conversion failed");
+        return Err(AppError::Validation(
+            "Не удалось превратить файл в GIF-стикер".into(),
+        ));
+    }
+
+    let metadata = tokio::fs::metadata(output)
+        .await
+        .map_err(|err| AppError::Internal(anyhow!("cannot stat sticker: {err}")))?;
+    if metadata.len() == 0 || metadata.len() > STICKER_MAX_BYTES {
+        return Err(AppError::Validation(
+            "Стикер получился слишком большим".into(),
+        ));
+    }
+    let duration_ms = duration
+        .map(|value| (value * 1000.0).round().clamp(0.0, 5000.0) as i32)
+        .filter(|_| is_video);
+
+    Ok((width, height, duration_ms, metadata.len() as i64))
 }
 
 pub async fn store_avatar(

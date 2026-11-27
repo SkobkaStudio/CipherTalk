@@ -45,6 +45,8 @@ argon2 = { version = "0.5.3", features = ["std"] }
 rand = "0.8.5"
 sha2 = "0.10"
 hex = "0.4"
+ring = "0.17"
+hkdf = "0.12"
 base64 = "0.22"
 
 # --- Time / ids / collections --------------------------------------------

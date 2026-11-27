@@ -81,7 +81,15 @@ pub async fn upload_avatar(
         return Err(err);
     }
 
-    Ok(Json(users::get_me(&state, auth.user_id).await?))
+    let me = users::get_me(&state, auth.user_id).await?;
+    let publish_state = state.clone();
+    let publish_user = me.clone();
+    tokio::spawn(async move {
+        if let Err(err) = users::publish_updated(&publish_state, &publish_user).await {
+            tracing::warn!(error = %err, "failed to publish user.updated");
+        }
+    });
+    Ok(Json(me))
 }
 
 pub async fn delete_avatar(
@@ -89,7 +97,15 @@ pub async fn delete_avatar(
     Extension(auth): Extension<AuthUser>,
 ) -> AppResult<Json<Me>> {
     media::remove_avatar(&state, auth.user_id).await?;
-    Ok(Json(users::get_me(&state, auth.user_id).await?))
+    let me = users::get_me(&state, auth.user_id).await?;
+    let publish_state = state.clone();
+    let publish_user = me.clone();
+    tokio::spawn(async move {
+        if let Err(err) = users::publish_updated(&publish_state, &publish_user).await {
+            tracing::warn!(error = %err, "failed to publish user.updated");
+        }
+    });
+    Ok(Json(me))
 }
 
 pub async fn content(

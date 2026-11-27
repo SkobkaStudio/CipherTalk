@@ -43,6 +43,10 @@ const state = {
   chatFilter: '',
 
   notificationsEnabled: false,
+  pushServerEnabled: false,
+  pushPublicKey: null,
+  pushSubscribed: false,
+  pushEndpoint: null,
   upload: null,
   recording: null,
   profileAvatarBlob: null,
@@ -101,8 +105,9 @@ function avatarFor(entity, size) {
     const img = el('img', 'avatar-img');
     img.src = entity.avatar_url;
     img.alt = '';
-    img.loading = 'lazy';
+    img.loading = 'eager';
     img.decoding = 'async';
+    img.fetchPriority = 'high';
     img.addEventListener('error', () => img.remove());
     node.append(img);
   }
@@ -195,6 +200,8 @@ function attachmentLabel(kind) {
       return '🎬 Видео';
     case 'voice':
       return '🎤 Голосовое сообщение';
+    case 'sticker':
+      return '😀 Стикер';
     case 'file':
       return '📎 Файл';
     default:
@@ -318,10 +325,14 @@ function handleSessionExpired() {
 }
 
 function clearLocalSession() {
+  if (state.pushSubscribed || state.pushEndpoint) disablePush();
   cancelUpload();
   if (state.recording) stopRecording(false);
   closeCall(false);
   closeWs();
+  state.pushSubscribed = false;
+  state.pushEndpoint = null;
+  $('notification-prompt').classList.add('hidden');
   try {
     localStorage.removeItem('ct_has_session');
   } catch {
@@ -457,6 +468,7 @@ async function submitRegister(event) {
 
 async function logout() {
   const token = state.accessToken;
+  await disablePush();
   closeWs();
   clearLocalSession();
   showAuth();
@@ -488,6 +500,12 @@ async function enterApp() {
   renderProfile();
   await loadChats();
   connectWs();
+  initPush();
+
+  const requestedChat = Number(new URLSearchParams(location.search).get('chat'));
+  if (Number.isFinite(requestedChat) && requestedChat > 0) {
+    state.chatsById.has(requestedChat) && openChat(requestedChat);
+  }
 }
 
 function renderProfile() {
@@ -495,6 +513,45 @@ function renderProfile() {
   $('profile-avatar').replaceChildren(avatarFor(state.me, 'sm'));
   $('profile-name').textContent = state.me.display_name || state.me.username;
   $('profile-username').textContent = `@${state.me.username}`;
+}
+
+function handleUserUpdated(user) {
+  if (!user?.id) return;
+  const isMe = user.id === state.me?.id;
+  if (isMe) {
+    state.me = { ...(state.me || {}), ...user };
+    renderProfile();
+    if (!$('profile-modal').classList.contains('hidden')) {
+      $('profile-avatar-preview').replaceChildren(avatarFor(state.me, null));
+    }
+  }
+
+  for (const chat of state.chats) {
+    if (chat.peer?.id === user.id) {
+      chat.peer = { ...chat.peer, ...user };
+    }
+  }
+  if (state.activeChat?.peer?.id === user.id) {
+    state.activeChat.peer = { ...state.activeChat.peer, ...user };
+    renderChatHeader();
+  }
+
+  for (const [chatId, messages] of state.messages) {
+    let changed = false;
+    for (const message of messages) {
+      if (message.sender?.id === user.id) {
+        message.sender = { ...message.sender, ...user };
+        changed = true;
+      }
+      if (message.reply_to?.sender_name === user.display_name) {
+        message.reply_to.sender_name = user.display_name;
+      }
+    }
+    if (changed && chatId === state.activeChatId) {
+      renderMessages({ keepScroll: true });
+    }
+  }
+  renderChatList();
 }
 
 /* --------------------------------------------------------------------------
@@ -876,10 +933,14 @@ function buildMessageNode(message) {
   const row = el('div', `msg-row ${own ? 'own' : 'other'}`);
   row.dataset.id = String(message.id);
 
+  const isSticker = message.attachment?.kind === 'sticker';
   const isPhotoOrVideo =
     message.attachment &&
     (message.attachment.kind === 'photo' || message.attachment.kind === 'video');
-  const bubble = el('div', isPhotoOrVideo ? 'bubble media-bubble' : 'bubble');
+  const bubble = el(
+    'div',
+    isSticker ? 'bubble sticker-bubble' : isPhotoOrVideo ? 'bubble media-bubble' : 'bubble',
+  );
 
   if (message.reply_to) {
     const reply = el('div', 'msg-reply');
@@ -987,6 +1048,17 @@ function buildAttachmentNode(attachment) {
     }
     case 'voice':
       return buildVoiceNode(attachment);
+    case 'sticker': {
+      const img = el('img', 'msg-sticker');
+      img.src = attachment.content_url;
+      img.alt = 'Стикер';
+      img.loading = 'lazy';
+      img.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openImageViewer(attachment.content_url);
+      });
+      return img;
+    }
     case 'file':
     default: {
       const link = el('a', 'file-card');
@@ -1601,6 +1673,9 @@ function handleWsEvent(event) {
       removeChatLocally(event.chat_id);
       toast('Вы больше не участник этого чата');
       break;
+    case 'user.updated':
+      handleUserUpdated(event.user);
+      break;
     case 'call.offer':
       handleCallOffer(event);
       break;
@@ -2190,6 +2265,28 @@ function audioDuration(file) {
   });
 }
 
+function videoDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const done = (value) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), 4000);
+    video.onloadedmetadata = () => {
+      clearTimeout(timer);
+      done(Number.isFinite(video.duration) ? video.duration : null);
+    };
+    video.onerror = () => {
+      clearTimeout(timer);
+      done(null);
+    };
+    video.src = url;
+  });
+}
+
 async function prepareAvatar(file) {
   const bitmap = await createImageBitmap(file);
   const side = Math.min(bitmap.width, bitmap.height);
@@ -2218,6 +2315,8 @@ function showUploadPanel(kind, name, previewUrl) {
     preview.append(el('span', '', '🎬'));
   } else if (kind === 'voice') {
     preview.append(el('span', '', '🎤'));
+  } else if (kind === 'sticker') {
+    preview.append(el('span', '', '😀'));
   } else {
     preview.append(el('span', '', '📎'));
   }
@@ -2333,6 +2432,24 @@ async function handlePickedFile(file, mode = 'media', forcedDurationMs = null) {
       }
       kind = 'voice';
       if (durationMs == null) durationMs = await audioDuration(file);
+    } else if (mode === 'sticker') {
+      if (!mime.startsWith('image/') && !mime.startsWith('video/')) {
+        toast('Для стикера выберите фото или видео');
+        return;
+      }
+      kind = 'sticker';
+      if (mime.startsWith('video/')) {
+        const seconds = await videoDuration(file);
+        if (seconds == null) {
+          toast('Не удалось прочитать длительность видео');
+          return;
+        }
+        if (seconds > 5.1) {
+          toast('Видео для стикера должно быть не длиннее 5 секунд');
+          return;
+        }
+        durationMs = Math.round(seconds * 1000);
+      }
     } else {
       kind = 'file';
     }
@@ -2362,14 +2479,15 @@ async function handlePickedFile(file, mode = 'media', forcedDurationMs = null) {
   try {
     const attachment = await uploadAttachmentXhr(chatId, form, setUploadProgress);
     const stillActive = state.activeChatId === chatId;
-    const caption = stillActive ? $('message-input').value.trim() : '';
-    if (stillActive) {
+    const replyId = stillActive ? state.replyTo?.id ?? null : null;
+    const caption = stillActive && kind !== 'sticker' ? $('message-input').value.trim() : '';
+    if (stillActive && kind !== 'sticker') {
       $('message-input').value = '';
       autoResizeInput();
       updateSendState();
-      hideReply();
     }
-    await sendAttachmentMessage(chatId, attachment, caption);
+    if (stillActive) hideReply();
+    await sendAttachmentMessage(chatId, attachment, caption, replyId);
   } catch (error) {
     if (!uploadState.cancelled) toast(error.message || 'Ошибка загрузки');
   } finally {
@@ -2377,10 +2495,14 @@ async function handlePickedFile(file, mode = 'media', forcedDurationMs = null) {
   }
 }
 
-async function sendAttachmentMessage(chatId, attachment, caption) {
+async function sendAttachmentMessage(chatId, attachment, caption, replyToId = null) {
   const message = await api(`/chats/${chatId}/messages`, {
     method: 'POST',
-    body: { content: caption || '', attachment_id: attachment.id },
+    body: {
+      content: caption || '',
+      attachment_id: attachment.id,
+      reply_to_id: replyToId,
+    },
   });
   addMessage(chatId, message);
   if (state.activeChatId === chatId) {
@@ -2596,6 +2718,155 @@ async function formRequest(path, formData, method = 'POST') {
   return payload;
 }
 
+function base64UrlToUint8Array(value) {
+  const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const raw = atob(padded);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+async function registerPush() {
+  if (!state.pushServerEnabled || !state.pushPublicKey) return false;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(state.pushPublicKey),
+      });
+    }
+    const json = subscription.toJSON();
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      throw new Error('Браузер не вернул ключи push-подписки');
+    }
+    await api('/push/subscribe', {
+      method: 'POST',
+      body: {
+        endpoint: json.endpoint,
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+      },
+    });
+    state.pushSubscribed = true;
+    state.pushEndpoint = json.endpoint;
+    updateNotificationUi();
+    return true;
+  } catch (error) {
+    console.warn('push registration failed', error);
+    state.pushSubscribed = false;
+    updateNotificationUi();
+    return false;
+  }
+}
+
+async function disablePush() {
+  const endpoint = state.pushEndpoint;
+  if (endpoint && state.accessToken) {
+    try {
+      await api('/push/unsubscribe', {
+        method: 'POST',
+        body: { endpoint },
+      });
+    } catch {
+      /* best effort */
+    }
+  }
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration('/');
+    const subscription = await registration?.pushManager.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+  } catch {
+    /* ignore */
+  }
+  state.pushSubscribed = false;
+  state.pushEndpoint = null;
+}
+
+function showNotificationPromptIfNeeded() {
+  if (!state.me) return;
+  const prompt = $('notification-prompt');
+  const text = $('notification-prompt-text');
+  const button = $('notification-enable');
+  const supported = 'Notification' in window && window.isSecureContext;
+  if (!supported) {
+    prompt.classList.add('hidden');
+    return;
+  }
+  if (state.notificationsEnabled && Notification.permission === 'granted') {
+    prompt.classList.add('hidden');
+    return;
+  }
+
+  prompt.classList.remove('hidden');
+  if (Notification.permission === 'denied') {
+    text.textContent = 'Уведомления заблокированы в настройках сайта. Разрешите их в настройках браузера.';
+    button.textContent = 'Как включить';
+  } else if (state.pushServerEnabled) {
+    text.textContent = 'Новые сообщения будут приходить даже при закрытой вкладке.';
+    button.textContent = 'Включить';
+  } else {
+    text.textContent = 'Показывать уведомления о новых сообщениях, пока вкладка открыта.';
+    button.textContent = 'Включить';
+  }
+}
+
+async function enableNotifications() {
+  if (!('Notification' in window) || !window.isSecureContext) {
+    toast('Уведомления доступны только по HTTPS');
+    return false;
+  }
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    permission = await Notification.requestPermission();
+  }
+  if (permission !== 'granted') {
+    state.notificationsEnabled = false;
+    persistNotificationPreference(false);
+    updateNotificationUi();
+    showNotificationPromptIfNeeded();
+    toast(
+      permission === 'denied'
+        ? 'Разрешите уведомления в настройках браузера'
+        : 'Разрешение на уведомления не выдано',
+    );
+    return false;
+  }
+  state.notificationsEnabled = true;
+  persistNotificationPreference(true);
+  $('notification-prompt').classList.add('hidden');
+  updateNotificationUi();
+  await registerPush();
+  toast('Уведомления включены');
+  return true;
+}
+
+async function initPush() {
+  try {
+    const info = await api('/push/public-key');
+    state.pushServerEnabled = Boolean(info?.enabled);
+    state.pushPublicKey = info?.public_key || null;
+  } catch {
+    state.pushServerEnabled = false;
+    state.pushPublicKey = null;
+  }
+  showNotificationPromptIfNeeded();
+  if (
+    'Notification' in window &&
+    state.notificationsEnabled &&
+    Notification.permission === 'granted' &&
+    state.pushServerEnabled
+  ) {
+    await registerPush();
+  }
+  updateNotificationUi();
+}
+
 function updateNotificationUi() {
   const toggle = $('notifications-toggle');
   const hint = $('notifications-hint');
@@ -2610,8 +2881,12 @@ function updateNotificationUi() {
   }
   if (Notification.permission === 'denied') {
     hint.textContent = 'Уведомления запрещены в настройках сайта.';
+  } else if (state.notificationsEnabled && state.pushSubscribed) {
+    hint.textContent = 'Включены, фоновые уведомления работают.';
+  } else if (state.notificationsEnabled && state.pushServerEnabled) {
+    hint.textContent = 'Включены в браузере; фоновые уведомления подключаются.';
   } else if (state.notificationsEnabled) {
-    hint.textContent = 'Уведомления включены.';
+    hint.textContent = 'Включены, пока вкладка открыта.';
   } else {
     hint.textContent = 'Показывать уведомления о новых сообщениях.';
   }
@@ -2627,26 +2902,14 @@ function persistNotificationPreference(enabled) {
 
 async function toggleNotifications(enabled) {
   if (enabled) {
-    if (!('Notification' in window) || !window.isSecureContext) {
-      updateNotificationUi();
-      toast('Уведомления доступны только по HTTPS');
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      state.notificationsEnabled = false;
-      persistNotificationPreference(false);
-      updateNotificationUi();
-      return;
-    }
-    state.notificationsEnabled = true;
-    persistNotificationPreference(true);
-    updateNotificationUi();
-    toast('Уведомления включены');
+    const ok = await enableNotifications();
+    if (!ok) $('notifications-toggle').checked = false;
   } else {
     state.notificationsEnabled = false;
     persistNotificationPreference(false);
+    await disablePush();
     updateNotificationUi();
+    $('notification-prompt').classList.add('hidden');
   }
 }
 
@@ -2665,6 +2928,7 @@ function notifyMessage(message) {
   if (message.sender?.id === state.me?.id) return;
   if (!state.notificationsEnabled || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
+  if (state.pushSubscribed && document.visibilityState !== 'visible') return;
   if (document.visibilityState === 'visible' && state.activeChatId === message.chat_id) return;
   const chat = state.chatsById.get(message.chat_id);
   if (!chat) return;
@@ -2688,6 +2952,15 @@ function notifyMessage(message) {
     };
   } catch {
     /* platform may block */
+  }
+}
+
+function handleServiceWorkerMessage(event) {
+  const data = event.data || {};
+  if (data.type === 'open-chat' && data.chatId) {
+    openChat(Number(data.chatId));
+  } else if (data.type === 'push-resubscribe' && state.notificationsEnabled) {
+    registerPush();
   }
 }
 
@@ -3143,6 +3416,19 @@ function bindEvents() {
   $('notifications-toggle').addEventListener('change', (event) => {
     toggleNotifications(event.target.checked);
   });
+  $('notification-enable').addEventListener('click', async () => {
+    if (Notification.permission === 'denied') {
+      toast('Разрешите уведомления в настройках сайта (иконка замка в адресной строке)');
+      return;
+    }
+    await enableNotifications();
+  });
+  $('notification-later').addEventListener('click', () => {
+    $('notification-prompt').classList.add('hidden');
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+  }
 
   $('attach-btn').addEventListener('click', (event) => {
     event.stopPropagation();
@@ -3153,6 +3439,7 @@ function bindEvents() {
     if (!action) return;
     $('attach-menu').classList.add('hidden');
     if (action === 'media') $('media-input').click();
+    else if (action === 'sticker') $('sticker-input').click();
     else if (action === 'file') $('file-input').click();
     else if (action === 'audio') $('audio-input').click();
   });
@@ -3160,6 +3447,11 @@ function bindEvents() {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (file) await handlePickedFile(file, 'media');
+  });
+  $('sticker-input').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) await handlePickedFile(file, 'sticker');
   });
   $('file-input').addEventListener('change', async (event) => {
     const file = event.target.files?.[0];

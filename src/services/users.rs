@@ -1,7 +1,10 @@
 use sqlx::PgPool;
 
 use crate::{
-    models::user::{Me, PublicUser, UpdateProfileRequest},
+    models::{
+        user::{Me, PublicUser, UpdateProfileRequest},
+        ws::ServerEvent,
+    },
     state::AppState,
     utils::{
         error::{AppError, AppResult},
@@ -60,6 +63,36 @@ pub async fn update_me(state: &AppState, user_id: i64, req: UpdateProfileRequest
     .await?;
 
     user.ok_or_else(|| AppError::NotFound("Пользователь не найден".into()))
+}
+
+pub async fn publish_updated(state: &AppState, user: &Me) -> AppResult<()> {
+    let public = PublicUser {
+        id: user.id,
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        bio: user.bio.clone(),
+        avatar_url: user.avatar_url.clone(),
+        last_seen_at: user.last_seen_at,
+    };
+    state.ws.update_display_name(user.id, &user.display_name);
+    let chat_ids = sqlx::query_scalar!(
+        "SELECT chat_id FROM chat_members WHERE user_id = $1",
+        user.id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    for chat_id in chat_ids {
+        state
+            .hub
+            .publish(
+                chat_id,
+                ServerEvent::UserUpdated {
+                    user: public.clone(),
+                },
+            )
+            .await;
+    }
+    Ok(())
 }
 
 pub async fn search_users(

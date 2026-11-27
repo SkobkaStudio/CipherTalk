@@ -34,6 +34,10 @@ pub struct Config {
     pub max_avatar_bytes: u64,
     pub rate_limit_auth_per_minute: u32,
     pub rate_limit_api_per_minute: u32,
+
+    /// base64(DER PKCS#8) VAPID private key; Web Push is disabled when absent.
+    pub vapid_private_key: Option<String>,
+    pub vapid_subject: String,
 }
 
 impl Config {
@@ -135,6 +139,16 @@ impl Config {
             bail!("MEDIA_TOKEN_TTL_SECS must be between 300 and 2592000");
         }
 
+        let vapid_subject =
+            env::var("VAPID_SUBJECT").unwrap_or_else(|_| "mailto:admin@localhost".to_owned());
+        if !(vapid_subject.starts_with("mailto:") || vapid_subject.starts_with("https://")) {
+            bail!("VAPID_SUBJECT must start with mailto: or https://");
+        }
+        let vapid_private_key = env::var("VAPID_PRIVATE_KEY")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
         Ok(Self {
             database_url,
             database_max_connections: database_max_connections as u32,
@@ -158,6 +172,8 @@ impl Config {
             max_avatar_bytes: max_avatar_mb * 1024 * 1024,
             rate_limit_auth_per_minute: auth_rate as u32,
             rate_limit_api_per_minute: api_rate as u32,
+            vapid_private_key,
+            vapid_subject,
         })
     }
 }
